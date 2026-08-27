@@ -18,5 +18,9 @@ export async function GET() {
       openai: !!process.env.OPENAI_API_KEY,
     },
     moneyprinter: { configured: !!process.env.MONEYPRINTER_PATH },
+    videoGen: {
+      fal: !!process.env.FAL_KEY,
+      google: !!(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY),
+    },
   });
 }
