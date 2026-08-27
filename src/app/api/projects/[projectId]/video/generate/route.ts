@@ -30,6 +30,20 @@ export async function POST(
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // runGenerate ultimately shells out to a local MoneyPrinterTurbo checkout via
+  // MONEYPRINTER_PATH — this cannot exist on Vercel's serverless filesystem.
+  // Fail fast here instead of creating a job that's guaranteed to error a few
+  // seconds later once runGenerate actually reaches generateProductVideo().
+  if (!process.env.MONEYPRINTER_PATH) {
+    return NextResponse.json(
+      {
+        error:
+          "Product video generation is not configured on this deployment (MONEYPRINTER_PATH is unset). This feature requires a companion worker with a local MoneyPrinterTurbo checkout.",
+      },
+      { status: 503 }
+    );
+  }
+
   const jobId = await createRenderJob(projectId, "generate", parsed.data);
   waitUntil(runGenerate(jobId, projectId, parsed.data));
   return NextResponse.json({ jobId, status: "running" }, { status: 202 });
