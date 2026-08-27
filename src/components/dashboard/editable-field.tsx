@@ -8,7 +8,6 @@ interface EditableFieldProps {
   value: string | null | undefined;
   field: string;
   endpoint: string;
-  label?: string;
   multiline?: boolean;
   className?: string;
 }
@@ -17,7 +16,6 @@ export function EditableField({
   value,
   field,
   endpoint,
-  label,
   multiline = false,
   className,
 }: EditableFieldProps) {

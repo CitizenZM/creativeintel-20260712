@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/dashboard/status-badge";
 import {
   Loader2,
   Image as ImageIcon,

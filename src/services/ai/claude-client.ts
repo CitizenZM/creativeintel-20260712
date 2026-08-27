@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { z, ZodSchema } from "zod";
+import { ZodSchema } from "zod";
 
 // Route priority: OpenAI (subscription plan) → OpenRouter (free fallback)
 // OPENAI_API_KEY set → use directly, full GPT-4o + GPT Image 2 access
@@ -122,7 +122,7 @@ export async function analyzeWithClaude<T>(options: {
           messages,
           response_format: { type: "json_object" },
         });
-      } catch (err) {
+      } catch {
         // Some OpenRouter models reject response_format — retry without it.
         return await client.chat.completions.create({
           model: modelToUse,

@@ -1,12 +1,12 @@
 import { prisma } from "@/lib/db";
 import { ActionButton } from "@/components/dashboard/action-buttons";
 import {
-  Film, Zap, Heart, MousePointerClick, Megaphone, TrendingDown,
-  Lightbulb, AlertCircle, Clock, Target, MapPin, Users, Eye,
-  CheckCircle2, XCircle, Camera, Sparkles, Globe, BarChart3,
+  Film, Zap, MousePointerClick, Megaphone, TrendingDown,
+  Lightbulb, AlertCircle, Clock, MapPin, Users, Eye,
+  CheckCircle2, XCircle, Camera, Globe, BarChart3,
   TrendingUp, Layers,
 } from "lucide-react";
-import { StatusBadge, ScoreBar, StatusLevel } from "@/components/dashboard/status-badge";
+import { StatusBadge, StatusLevel } from "@/components/dashboard/status-badge";
 import {
   EnvironmentsSection,
   ActorSettingsSection,

@@ -265,11 +265,10 @@ function VideoCard({ job, onDelete, onRetry }: {
 // ─── Shot Prompt Card ─────────────────────────────────────────────────────────
 
 function ShotPromptCard({
-  shot, index, projectId, scriptId, onGenerate, generating,
+  shot, index, scriptId, onGenerate, generating,
 }: {
   shot: VeoPromptShot;
   index: number;
-  projectId: string;
   scriptId: string;
   onGenerate: (prompt: string, testMode: boolean, shotIndex: number, scriptId: string) => void;
   generating: boolean;
@@ -759,7 +758,6 @@ export default function VideoStudioPage() {
                       key={shot.shot_id}
                       shot={shot}
                       index={i}
-                      projectId={projectId}
                       scriptId={selectedScript}
                       generating={generatingShot === `shot-${i}`}
                       onGenerate={(prompt, _test, shotIdx, sid) => submitGeneration(prompt, shotIdx, sid)}

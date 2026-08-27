@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  CheckCircle2, AlertCircle, Loader2, Package, MapPin,
+  CheckCircle2, AlertCircle, Loader2, MapPin,
   Users, Target, Clock, ChevronDown, ChevronUp,
   Zap, Play, Check, Film, Sparkles,
 } from "lucide-react";

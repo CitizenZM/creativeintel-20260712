@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { NARRATIVE_TYPE_LABELS, DATA_SOURCE_LABELS } from "@/lib/constants";
+import { NARRATIVE_TYPE_LABELS } from "@/lib/constants";
 import { OverviewCharts } from "@/components/dashboard/overview-charts";
 import { HeroMetric } from "@/components/dashboard/hero-metric";
 import { StatusBadge, ScoreBar } from "@/components/dashboard/status-badge";

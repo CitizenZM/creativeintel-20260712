@@ -34,7 +34,6 @@ export function ProjectForm() {
   const [campaignGoal, setCampaignGoal] = useState("");
   const [briefingText, setBriefingText] = useState("");
   const [briefingFile, setBriefingFile] = useState<File | null>(null);
-  const [_productImages, _setProductImages] = useState<File[]>([]);
   const [competitors, setCompetitors] = useState<CompetitorField[]>([
     { name: "", url: "" },
   ]);

@@ -210,9 +210,6 @@ export function ProductIntelligence({ projectId }: { projectId: string }) {
   const realProductImages = allImages.filter(i => i.source === "brand-website" || i.type === "website");
   const environmentImages = allImages.filter(i => i.type === "ai-environment" || i.type === "environment");
   const hasRealProductImages = realProductImages.length > 0;
-  // Keep websiteImages alias for summary display
-  const websiteImages = realProductImages;
-  const aiProductImages: ProductImage[] = []; // Never show AI product images — they are always wrong for specific products
 
   const tabs = [
     { id: "product" as const, label: "Product", icon: Package },
