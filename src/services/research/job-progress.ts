@@ -156,11 +156,31 @@ export async function failJob(jobId: string, error: string) {
   });
 }
 
+// A research POST route runs with maxDuration=60. If the waitUntil()
+// background function is evicted mid-run (timeout, deploy, crash), the
+// ResearchJob row sticks at status "running" forever — and because this
+// function is what /api/projects/[id]/research checks before starting new
+// work, an orphaned row silently blocks all future research on that project
+// (the client's own stuck-status recovery in research/page.tsx calls this
+// same route again, which just replies "already running" and does nothing).
+// Self-heal here: treat a job unstarted for 10+ minutes as orphaned.
+const STALE_MS = 10 * 60 * 1000;
+
 export async function getActiveJobForProject(projectId: string) {
-  return prisma.researchJob.findFirst({
+  const job = await prisma.researchJob.findFirst({
     where: { projectId, status: { in: ["pending", "running"] } },
     orderBy: { createdAt: "desc" },
   });
+
+  if (job && job.startedAt && Date.now() - job.startedAt.getTime() > STALE_MS) {
+    await prisma.researchJob.update({
+      where: { id: job.id },
+      data: { status: "error", error: "Job timed out or the server process was interrupted before it could finish." },
+    });
+    return null;
+  }
+
+  return job;
 }
 
 export async function getJob(jobId: string) {
