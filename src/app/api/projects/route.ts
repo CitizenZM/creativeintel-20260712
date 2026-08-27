@@ -23,10 +23,14 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  try {
-    const body = await request.json().catch(() => ({}));
-    const data = createProjectSchema.parse(body);
+  const body = await request.json().catch(() => ({}));
+  const parsed = createProjectSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid input", details: parsed.error.format() }, { status: 400 });
+  }
+  const data = parsed.data;
 
+  try {
     const workspace = await getActiveWorkspace();
     const brandProfile = await upsertBrandProfile({
       workspaceId: workspace.id,
@@ -103,9 +107,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json(project, { status: 201 });
   } catch (err) {
-    if (err instanceof Error && err.name === "ZodError") {
-      return NextResponse.json({ error: "Invalid input", details: err }, { status: 400 });
-    }
     console.error("Failed to create project:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
