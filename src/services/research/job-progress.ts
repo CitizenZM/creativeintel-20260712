@@ -119,27 +119,6 @@ export async function completeStep(jobId: string, name: string) {
   });
 }
 
-export async function failStep(jobId: string, name: string, error: string) {
-  await flush(jobId);
-  const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
-  if (!row) return;
-  const steps = (row.steps as unknown as JobStep[] | null) ?? [];
-  const next = steps.map((s) =>
-    s.name === name
-      ? {
-          ...s,
-          status: "error" as const,
-          message: error,
-          completedAt: new Date().toISOString(),
-        }
-      : s
-  );
-  await prisma.researchJob.update({
-    where: { id: jobId },
-    data: { steps: next as never, error },
-  });
-}
-
 export async function completeJob(jobId: string) {
   await flush(jobId);
   await prisma.researchJob.update({
