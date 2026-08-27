@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db";
 import { withIdempotency, purgeExpiredIdempotencyKeys } from "@/lib/idempotency";
+import { purgeExpired as purgeExpiredCrawlCache } from "@/services/cache";
 import {
   createJob,
   getActiveJobForProject,
@@ -22,10 +23,11 @@ export async function POST(
   });
   if (idem.replay && idem.response) return idem.response;
 
-  // No cron sweeps idempotencyKey rows anywhere — piggyback a best-effort purge
-  // here since this is the only route that writes to the table. Fire-and-forget:
-  // failure here must never block starting research.
+  // Neither idempotencyKey nor crawlCache rows are swept by any cron —
+  // piggyback best-effort purges here since research is what populates both
+  // tables. Fire-and-forget: failure here must never block starting research.
   waitUntil(purgeExpiredIdempotencyKeys().catch(() => {}));
+  waitUntil(purgeExpiredCrawlCache().catch(() => {}));
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
