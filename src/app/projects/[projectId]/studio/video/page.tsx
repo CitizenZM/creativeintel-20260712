@@ -412,7 +412,11 @@ export default function VideoStudioPage() {
     if (Array.isArray(data)) setJobs(data);
   }, [projectId]);
 
-  useEffect(() => { loadJobs(); }, [loadJobs]);
+  useEffect(() => {
+    (async () => {
+      await loadJobs();
+    })();
+  }, [loadJobs]);
 
   // ── Poll active jobs — ONLY when jobs are actively rendering ──
   // Uses 15s interval (not 4s) to reduce unnecessary DB + fal.ai calls.

@@ -102,8 +102,9 @@ export function VideoLibraryPanel({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   useEffect(() => {
-    loadRefs();
-    loadJobs();
+    (async () => {
+      await Promise.all([loadRefs(), loadJobs()]);
+    })();
   }, [loadRefs, loadJobs]);
 
   // Poll while any job is active.

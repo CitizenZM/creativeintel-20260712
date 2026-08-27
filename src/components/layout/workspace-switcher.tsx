@@ -34,7 +34,9 @@ export function WorkspaceSwitcher() {
   }
 
   useEffect(() => {
-    load();
+    (async () => {
+      await load();
+    })();
   }, []);
 
   // Close on outside click.

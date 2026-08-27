@@ -107,27 +107,26 @@ export default function ResearchPage() {
   }
 
   useEffect(() => {
-    checkStatus().then(() => {
-      fetch(`/api/projects/${projectId}`)
+    (async () => {
+      await checkStatus();
+      const d = await fetch(`/api/projects/${projectId}`)
         .then((r) => r.json().catch(() => null))
-        .then((d) => {
-          if (!d) return;
-          if (d.status === "DRAFT") startResearch();
-          else if (d.status === "ANALYZED" || d.status === "COMPLETE") {
-            setStatus("complete");
-            setProgress(100);
-          } else if (d.status === "RESEARCHING") {
-            // Stuck in researching — data may be partially complete
-            if (d._count?.contentAssets > 0 || d.brandHealthScore) {
-              setStatus("complete");
-              setProgress(100);
-            } else {
-              startResearch();
-            }
-          }
-        })
-        .catch(() => {});
-    });
+        .catch(() => null);
+      if (!d) return;
+      if (d.status === "DRAFT") startResearch();
+      else if (d.status === "ANALYZED" || d.status === "COMPLETE") {
+        setStatus("complete");
+        setProgress(100);
+      } else if (d.status === "RESEARCHING") {
+        // Stuck in researching — data may be partially complete
+        if (d._count?.contentAssets > 0 || d.brandHealthScore) {
+          setStatus("complete");
+          setProgress(100);
+        } else {
+          startResearch();
+        }
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

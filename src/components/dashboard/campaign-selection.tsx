@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   CheckCircle2, AlertCircle, Loader2, Package, MapPin,
   Users, Target, Clock, ChevronDown, ChevronUp,
@@ -259,25 +259,35 @@ export function CampaignSelection({
   const [platform, setPlatform] = useState("tiktok");
   const [selectedSPs, setSelectedSPs] = useState<string[]>([]);
 
+  // Tracks whether the deep-analysis timeline has already been seeded, so it
+  // only applies once (and never clobbers a timeline loaded from saved data).
+  const deepTimelineSeeded = useRef(false);
+
   useEffect(() => {
-    fetch(`/api/projects/${projectId}/campaign-selection`)
-      .then(r => r.json())
-      .then((data: CampaignSelectionData) => {
+    (async () => {
+      const data: CampaignSelectionData | null = await fetch(
+        `/api/projects/${projectId}/campaign-selection`
+      )
+        .then((r) => r.json())
+        .catch(() => null);
+
+      if (data) {
         setSel(data);
         if (data.platform) setPlatform(data.platform);
         if (data.totalDurationSec) setTotalDuration(data.totalDurationSec);
         if (data.selectedSellingPoints) setSelectedSPs(data.selectedSellingPoints.map(s => s.point));
         if (data.videoTimeline) setCustomTimeline(data.videoTimeline);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      }
+      setLoading(false);
 
-    // Seed timeline from deep analysis if no custom one set
-    if (deepTimeline?.segments?.length) {
-      setCustomTimeline(deepTimeline.segments);
-      setTotalDuration(deepTimeline.recommendedDurationSec || 30);
-      if (deepTimeline.platform) setPlatform(deepTimeline.platform);
-    }
+      // Seed timeline from deep analysis if no custom one was saved.
+      if (!deepTimelineSeeded.current && !data?.videoTimeline && deepTimeline?.segments?.length) {
+        deepTimelineSeeded.current = true;
+        setCustomTimeline(deepTimeline.segments);
+        setTotalDuration(deepTimeline.recommendedDurationSec || 30);
+        if (deepTimeline.platform) setPlatform(deepTimeline.platform);
+      }
+    })();
   }, [projectId, deepTimeline]);
 
   const save = useCallback(async (updates: Partial<CampaignSelectionData>) => {
