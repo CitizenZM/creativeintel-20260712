@@ -15,6 +15,7 @@ import {
   ArrowRight,
   Lightbulb,
   Package,
+  Palette,
 } from "lucide-react";
 import { ProductIntelligence } from "@/components/dashboard/product-intelligence";
 import { ProductDefinition } from "@/components/dashboard/product-definition";
@@ -111,6 +112,39 @@ export default async function OverviewPage({
           <span className="text-xs text-muted-foreground">AI-generated verification — environments, actors, display rules</span>
         </div>
         <ProductIntelligence projectId={projectId} />
+      </section>
+
+      {/* Brand Kit — approved logo, colours, CTAs, claims and SKU truth */}
+      <section className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Palette className="h-4 w-4" />
+          <h2 className="text-sm font-semibold">Brand Kit</h2>
+          <span className="text-xs text-muted-foreground">
+            Logo, packshots, colours, approved CTAs, claims and SKU truth — injected into every script and studio prompt
+          </span>
+        </div>
+
+        <div
+          className={`rounded-xl border px-4 py-2.5 flex items-center gap-3 ${
+            brandKit.ready.creative ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"
+          }`}
+        >
+          {brandKit.ready.creative ? (
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+          ) : (
+            <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+          )}
+          <p className={`text-xs font-semibold ${brandKit.ready.creative ? "text-emerald-800" : "text-amber-800"}`}>
+            Brand kit {brandKit.score}% complete
+          </p>
+          <p className="text-[11px] text-muted-foreground truncate">
+            {brandKit.missing.length > 0
+              ? `Still missing: ${brandKit.missing.join(" · ")}`
+              : "Creative and studio generation are unblocked"}
+          </p>
+        </div>
+
+        <BrandKitPanel projectId={projectId} />
       </section>
 
       {/* Campaign Selection — user confirms context before script generation */}

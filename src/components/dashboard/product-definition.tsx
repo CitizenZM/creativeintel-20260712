@@ -24,6 +24,33 @@ interface ProductDefinitionData {
   userProductImages: ProductImage[] | null;
 }
 
+interface AdapterAttempt {
+  adapter: string;
+  ok: boolean;
+  error?: string;
+}
+
+interface ScrapeResult {
+  ok: boolean;
+  adapter: string | null;
+  error: string | null;
+  attempts: AdapterAttempt[];
+  imageCount: number;
+  title: string | null;
+  hasDescription: boolean;
+  featureCount: number;
+}
+
+interface ScrapePreview {
+  productUrl: string;
+  title: string;
+  description: string;
+  features: string[];
+  images: ProductImage[];
+  price: string | null;
+  brand: string | null;
+}
+
 export function ProductDefinition({ projectId }: { projectId: string }) {
   const [data, setData] = useState<ProductDefinitionData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,6 +60,10 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
   const [nameDraft, setNameDraft] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [attempts, setAttempts] = useState<AdapterAttempt[]>([]);
+  const [preview, setPreview] = useState<ScrapePreview | null>(null);
+  const [previewAdapter, setPreviewAdapter] = useState<string | null>(null);
+  const [committing, setCommitting] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -48,27 +79,60 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
       .finally(() => setLoading(false));
   }, [projectId]);
 
+  /** Step 1 — scrape without writing so the user can confirm what was found. */
   async function scrapeUrl(url: string) {
     if (!url) return;
     setScraping(true);
     setError(null);
+    setAttempts([]);
+    setPreview(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/product`, {
-        method: "POST",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productUrl: url }),
+        body: JSON.stringify({ mode: "preview", productUrl: url }),
       });
-      const result = await res.json();
-      if (result.error) throw new Error(result.error);
-      // Reload
-      const updated = await fetch(`/api/projects/${projectId}/product`).then(r => r.json());
-      setData(updated);
-      setNameDraft(updated.productName || "");
+      const result = await res.json().catch(() => ({}));
+      const scrapeResult: ScrapeResult | undefined = result.scrapeResult;
+      if (scrapeResult?.attempts) setAttempts(scrapeResult.attempts);
+
+      if (!res.ok || !result.preview) {
+        throw new Error(result.error || "Failed to read this product page");
+      }
+
+      setPreview(result.preview as ScrapePreview);
+      setPreviewAdapter(scrapeResult?.adapter ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to scrape product page");
     } finally {
       setScraping(false);
+    }
+  }
+
+  /** Step 2 — write the confirmed scrape as the canonical product definition. */
+  async function commitPreview() {
+    if (!preview) return;
+    setCommitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/product`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "commit", productUrl: preview.productUrl }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(result.error || "Failed to save product definition");
+
+      const updated = await fetch(`/api/projects/${projectId}/product`).then(r => r.json());
+      setData(updated);
+      setNameDraft(updated.productName || "");
+      setPreview(null);
       setEditingUrl(false);
+      setAttempts([]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save product definition");
+    } finally {
+      setCommitting(false);
     }
   }
 
@@ -82,28 +146,42 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
     setEditingName(false);
   }
 
+  /** Uploads go to the Brand Kit asset store (kind PACKSHOT), not base64 into Postgres. */
   async function handleFileUpload(files: FileList) {
     setUploadingImages(true);
+    setError(null);
     try {
-      // Convert images to data URIs (stored directly — no separate upload endpoint needed)
       const newImages: ProductImage[] = [];
       for (const file of Array.from(files).slice(0, 6)) {
-        const dataUri = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("kind", "PACKSHOT");
+        fd.append("caption", file.name);
+
+        const res = await fetch(`/api/projects/${projectId}/brand-kit/assets`, {
+          method: "POST",
+          body: fd,
         });
-        newImages.push({ url: dataUri, caption: file.name, alt: file.name });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(payload.error || `Upload failed for ${file.name}`);
+
+        newImages.push({ url: payload.asset.url, caption: file.name, alt: file.name });
       }
+
       const existing = data?.userProductImages || [];
       const merged = [...existing, ...newImages].slice(0, 8);
-      await fetch(`/api/projects/${projectId}/product`, {
+      const patch = await fetch(`/api/projects/${projectId}/product`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userProductImages: merged }),
       });
+      if (!patch.ok) {
+        const payload = await patch.json().catch(() => ({}));
+        throw new Error(payload.error || "Failed to attach uploaded images");
+      }
       setData(prev => prev ? { ...prev, userProductImages: merged } : prev);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploadingImages(false);
     }
@@ -111,11 +189,16 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
 
   async function removeUserImage(index: number) {
     const updated = (data?.userProductImages || []).filter((_, i) => i !== index);
-    await fetch(`/api/projects/${projectId}/product`, {
+    const res = await fetch(`/api/projects/${projectId}/product`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userProductImages: updated }),
     });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      setError(payload.error || "Failed to remove image");
+      return;
+    }
     setData(prev => prev ? { ...prev, userProductImages: updated } : prev);
   }
 
@@ -156,10 +239,77 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
       </div>
 
       {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 flex items-center gap-2">
-          <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-          {error}
-          <button onClick={() => setError(null)} className="ml-auto"><X className="h-3 w-3" /></button>
+        <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 space-y-1">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="flex-1">{error}</span>
+            <button onClick={() => setError(null)}><X className="h-3 w-3" /></button>
+          </div>
+          {attempts.length > 0 && (
+            <ul className="pl-5 text-[10px] text-red-600/80">
+              {attempts.map((a, i) => (
+                <li key={`${a.adapter}-${i}`}>
+                  {a.adapter}: {a.ok ? "ok" : a.error || "failed"}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Confirm card — what the scraper found, before anything is written */}
+      {preview && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+          <div className="flex items-start gap-2">
+            <CheckCircle2 className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-blue-900">
+                We found: {preview.title || "Untitled"} · {preview.images.length} images ·{" "}
+                {preview.description ? "description" : "no description"}
+              </p>
+              <p className="text-[11px] text-blue-800/80 mt-0.5">
+                Read with the <strong>{previewAdapter || "generic"}</strong> adapter
+                {preview.brand ? ` · brand: ${preview.brand}` : ""}
+                {preview.price ? ` · price: ${preview.price}` : ""}
+                {preview.features.length ? ` · ${preview.features.length} features` : ""}
+              </p>
+            </div>
+          </div>
+
+          {preview.images.length > 0 && (
+            <div className="grid grid-cols-6 gap-1.5">
+              {preview.images.slice(0, 6).map((img, i) => (
+                <div key={i} className="aspect-square rounded-md overflow-hidden border border-blue-200 bg-white">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.url}
+                    alt={img.alt || "Preview"}
+                    className="w-full h-full object-contain"
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = "0.3"; }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {preview.description && (
+            <p className="text-[11px] text-blue-900/80 line-clamp-3">{preview.description}</p>
+          )}
+
+          <div className="flex gap-2">
+            <Button size="sm" onClick={commitPreview} disabled={committing} className="h-7 text-xs gap-1.5">
+              {committing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+              Confirm & use this product
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => { setPreview(null); setEditingUrl(true); }}
+              className="h-7 text-xs"
+            >
+              Edit URL
+            </Button>
+          </div>
         </div>
       )}
 
@@ -194,7 +344,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
                 className="h-7 text-xs gap-1.5"
               >
                 {scraping ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                {scraping ? "Fetching product data…" : "Fetch Product Data"}
+                {scraping ? "Reading product page…" : "Fetch & preview"}
               </Button>
               {editingUrl && (
                 <Button size="sm" variant="outline" onClick={() => setEditingUrl(false)} className="h-7 text-xs">
@@ -203,7 +353,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
               )}
             </div>
             <p className="text-[10px] text-muted-foreground">
-              Paste the specific product page URL. The AI will extract the exact product name, images, and description from this page.
+              Paste the specific product page URL. Nothing is saved until you confirm what was found.
             </p>
           </div>
         ) : (

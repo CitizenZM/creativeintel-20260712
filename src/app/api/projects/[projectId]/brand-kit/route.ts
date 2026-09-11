@@ -39,8 +39,12 @@ export async function PUT(
 
   const parsed = brandKitUpdateSchema.safeParse(body);
   if (!parsed.success) {
+    const first = parsed.error.issues[0];
     return NextResponse.json(
-      { error: "Invalid brand kit data", issues: parsed.error.issues },
+      {
+        error: first ? `${first.path.join(".") || "field"}: ${first.message}` : "Invalid brand kit data",
+        issues: parsed.error.issues,
+      },
       { status: 400 }
     );
   }

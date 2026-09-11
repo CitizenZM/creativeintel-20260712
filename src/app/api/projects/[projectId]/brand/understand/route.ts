@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import * as cheerio from "cheerio";
+import { ensureBrandKit, refreshCompleteness } from "@/services/brand-kit";
 
 export const maxDuration = 60;
 
@@ -231,6 +232,32 @@ async function proxyImageToDataUri(url: string): Promise<string | null> {
   }
 }
 
+/**
+ * Seed the Brand Kit's approved CTA pool from AI-scraped website CTA language,
+ * but only when the user has not curated any CTAs yet. The Brand Kit panel
+ * remains the only place CTAs are edited.
+ */
+async function seedBrandKitCtaOptions(projectId: string, ctaLanguage: unknown): Promise<void> {
+  const candidates = Array.isArray(ctaLanguage)
+    ? ctaLanguage
+        .map((c) => (typeof c === "string" ? c : (c as { text?: string })?.text))
+        .filter((t): t is string => typeof t === "string" && t.trim().length > 0 && t.trim().length <= 120)
+        .map((t) => t.trim())
+    : [];
+  if (candidates.length === 0) return;
+
+  const kit = await ensureBrandKit(projectId);
+  const existing = Array.isArray(kit.ctaOptions) ? kit.ctaOptions : [];
+  if (existing.length > 0) return;
+
+  const unique = [...new Set(candidates)].slice(0, 6);
+  await prisma.brandKit.update({
+    where: { projectId },
+    data: { ctaOptions: unique.map((text, i) => ({ text, priority: i + 1 })) },
+  });
+  await refreshCompleteness(projectId);
+}
+
 export async function POST(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
@@ -245,6 +272,8 @@ export async function POST(
   if (!brand || !project) {
     return NextResponse.json({ error: "Brand not found" }, { status: 404 });
   }
+
+  await seedBrandKitCtaOptions(projectId, brand.ctaLanguage);
 
   const productDesc = brand.productDescription || `${brand.name} home appliance product`;
   const brandUrl = brand.url || project.brandUrl || "";

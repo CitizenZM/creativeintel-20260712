@@ -34,7 +34,7 @@ export function ProjectForm() {
   const [campaignGoal, setCampaignGoal] = useState("");
   const [briefingText, setBriefingText] = useState("");
   const [briefingFile, setBriefingFile] = useState<File | null>(null);
-  const [_productImages, _setProductImages] = useState<File[]>([]);
+  const [scrapeWarning, setScrapeWarning] = useState<{ projectId: string; message: string } | null>(null);
   const [competitors, setCompetitors] = useState<CompetitorField[]>([
     { name: "", url: "" },
   ]);
@@ -61,6 +61,7 @@ export function ProjectForm() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setScrapeWarning(null);
 
     const validCompetitors = competitors.filter((c) => c.name.trim());
     if (validCompetitors.length === 0) {
@@ -104,6 +105,24 @@ export function ProjectForm() {
           method: "POST",
           body: formData,
         }).catch(() => {}); // non-blocking
+      }
+
+      // The project exists either way — but don't redirect blindly past a failed scrape.
+      const scrapeResult = project.scrapeResult as
+        | { ok: boolean; error: string | null; attempts?: { adapter: string; ok: boolean; error?: string }[] }
+        | null;
+
+      if (scrapeResult && !scrapeResult.ok) {
+        const detail = (scrapeResult.attempts || [])
+          .filter((a) => !a.ok)
+          .map((a) => `${a.adapter}: ${a.error}`)
+          .join(" · ");
+        setScrapeWarning({
+          projectId: project.id,
+          message: scrapeResult.error || detail || "Could not read that product page.",
+        });
+        setLoading(false);
+        return;
       }
 
       router.push(`/projects/${project.id}/research`);
@@ -196,6 +215,11 @@ export function ProjectForm() {
               className="h-10 rounded-md bg-white"
             />
           </div>
+
+          <p className="text-[10px] text-muted-foreground border-t border-amber-200/70 pt-2">
+            <strong>Logo and product packshots are uploaded on the next screen</strong> — the Brand Kit panel on
+            the project overview. Nothing to upload here.
+          </p>
         </div>
       </div>
 
@@ -316,6 +340,37 @@ export function ProjectForm() {
       {error && (
         <div className="rounded-md border border-[var(--status-urgent)] bg-[var(--status-urgent-bg)] px-3 py-2 text-xs text-[var(--status-urgent-fg)]">
           {error}
+        </div>
+      )}
+
+      {scrapeWarning && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+            <p>
+              <strong>Project created, but the product page could not be read.</strong>
+              <br />
+              {scrapeWarning.message}
+              <br />
+              You can fix the URL or upload packshots from the project overview.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => router.push(`/projects/${scrapeWarning.projectId}/overview`)}
+              className="rounded-md bg-foreground px-2.5 py-1 text-[11px] font-medium text-background"
+            >
+              Fix on project overview
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push(`/projects/${scrapeWarning.projectId}/research`)}
+              className="rounded-md border border-amber-300 px-2.5 py-1 text-[11px] font-medium"
+            >
+              Continue anyway
+            </button>
+          </div>
         </div>
       )}
 

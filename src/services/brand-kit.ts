@@ -61,7 +61,8 @@ export async function ensureBrandKit(projectId: string) {
   });
   if (existing) return existing;
 
-  await prisma.brandKit.create({ data: { projectId } });
+  // Tolerate a concurrent create — the unique projectId makes the second one fail.
+  await prisma.brandKit.create({ data: { projectId } }).catch(() => null);
   return prisma.brandKit.findUniqueOrThrow({
     where: { projectId },
     include: { assets: { orderBy: { createdAt: "asc" } } },
