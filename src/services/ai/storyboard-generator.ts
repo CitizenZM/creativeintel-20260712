@@ -125,9 +125,10 @@ export async function buildStoryboardCreateData(
     brandTruth: extras.brandTruth,
   });
 
-  // Each rich frame (imagePrompt + videoPrompt + 9 short fields) costs ~750
-  // tokens; a 45-frame board needs headroom well past the old 8k cap.
-  const maxTokens = Math.min(32000, 2500 + frameCount * 780);
+  // Each rich frame (imagePrompt + videoPrompt + 9 short fields) costs ~780
+  // tokens: 15s → ~8.7k, 30s → ~14.2k. The ceiling is the 16k output limit of
+  // the default gpt-4o route; longer boards are padded by repairFrames.
+  const maxTokens = Math.min(16000, 2500 + frameCount * 780);
 
   const result = await analyzeWithClaude({
     systemPrompt: prompt.system,

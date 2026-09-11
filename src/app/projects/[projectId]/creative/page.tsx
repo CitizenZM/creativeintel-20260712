@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { NARRATIVE_TYPE_LABELS } from "@/lib/constants";
@@ -12,18 +12,19 @@ import {
   Grid3X3,
   Check,
   Sparkles,
-  ChevronDown,
-  ChevronUp,
   ArrowRight,
   Palette,
   Zap,
-  CheckSquare,
-  Square,
   Download,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScoreBar, StatusBadge } from "@/components/dashboard/status-badge";
 import { StoryboardFrameCard, type StoryboardFrameData } from "@/components/creative/storyboard-frame-card";
+import { TemplatePicker, videoTypeBadgeClass, videoTypeLabel } from "@/components/creative/template-picker";
+import { ScriptCard, type ScriptData } from "@/components/creative/script-card";
+import { StoryboardTimeline } from "@/components/creative/storyboard-timeline";
+import { defaultTemplateBatch, getScriptTemplate } from "@/services/ai/prompts/script-templates";
 
 interface Angle {
   id: number;
@@ -31,27 +32,14 @@ interface Angle {
   description: string;
   targetEmotion: string;
   narrativeType: string;
+  videoType?: string;
+  templateIds?: string[];
   predictedScore: number;
   rationale: string;
   targetAudience: string;
   platform: string;
 }
 
-interface Script {
-  id: string;
-  title: string;
-  angle: string;
-  format: string;
-  duration: string;
-  hookVariants: string[];
-  body: string;
-  ctaVariants: string[];
-  narrativeType: string;
-  targetEmotion: string;
-  predictedScore: number;
-}
-
-// StoryboardFrame is now StoryboardFrameData from the component
 type StoryboardFrame = StoryboardFrameData;
 
 interface Storyboard {
@@ -60,6 +48,7 @@ interface Storyboard {
   style: string;
   totalDuration: string;
   scriptId: string | null;
+  frameSeconds?: number;
   frames: StoryboardFrame[];
 }
 
@@ -67,11 +56,16 @@ interface TestVariant {
   hookVariant: string;
   narrativeType: string;
   ctaVariant: string;
-  format: string;
+  templateId?: string;
+  templateName?: string;
+  videoType?: string;
+  format?: string;
   predictedScore: number;
   rationale: string;
   scriptOutline: string;
 }
+
+const STUDIO_CTA = "Send to Studio";
 
 export default function CreativePage() {
   const params = useParams();
@@ -79,11 +73,15 @@ export default function CreativePage() {
   const projectId = params.projectId as string;
 
   const [angles, setAngles] = useState<Angle[]>([]);
-  const [scripts, setScripts] = useState<Script[]>([]);
+  const [scripts, setScripts] = useState<ScriptData[]>([]);
   const [selectedScriptIds, setSelectedScriptIds] = useState<Set<string>>(new Set());
   const [storyboards, setStoryboards] = useState<Storyboard[]>([]);
   const [testMatrix, setTestMatrix] = useState<TestVariant[]>([]);
   const [expandedScript, setExpandedScript] = useState<string | null>(null);
+
+  const [platformId, setPlatformId] = useState<string | null>(null);
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
+  const [scriptCount, setScriptCount] = useState(10);
 
   const [loadingAngles, setLoadingAngles] = useState(false);
   const [loadingScripts, setLoadingScripts] = useState(false);
@@ -92,25 +90,30 @@ export default function CreativePage() {
   const [sendingMatrixRow, setSendingMatrixRow] = useState<number | null>(null);
   const [loadingAll, setLoadingAll] = useState(false);
   const [allProgress, setAllProgress] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (loaded) return;
     async function loadSaved() {
       try {
-        const [scriptsRes, storyboardsRes, matrixRes] = await Promise.all([
+        const [scriptsRes, storyboardsRes, matrixRes, campaignRes] = await Promise.all([
           fetch(`/api/projects/${projectId}/creative/scripts`),
           fetch(`/api/projects/${projectId}/creative/storyboards`),
           fetch(`/api/projects/${projectId}/creative/test-matrix`),
+          fetch(`/api/projects/${projectId}/campaign-selection`),
         ]);
         const savedScripts = await scriptsRes.json().catch(() => []);
         const savedStoryboards = await storyboardsRes.json().catch(() => []);
         const savedMatrix = await matrixRes.json().catch(() => ({ variants: [] }));
+        const campaign = await campaignRes.json().catch(() => ({}));
+
+        if (campaign?.platform) setPlatformId(campaign.platform);
 
         if (Array.isArray(savedScripts) && savedScripts.length > 0) {
           setScripts(savedScripts);
-          // auto-select all saved scripts
-          setSelectedScriptIds(new Set(savedScripts.map((s: Script) => s.id)));
+          setSelectedScriptIds(new Set(savedScripts.map((s: ScriptData) => s.id)));
           setExpandedScript(savedScripts[0].id);
         }
         if (Array.isArray(savedStoryboards) && savedStoryboards.length > 0) {
@@ -119,8 +122,8 @@ export default function CreativePage() {
         if (savedMatrix?.variants?.length > 0) {
           setTestMatrix(savedMatrix.variants);
         }
-      } catch {
-        /* ignore */
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load saved creative");
       }
       setLoaded(true);
     }
@@ -134,39 +137,66 @@ export default function CreativePage() {
     { num: 4, name: "Test Matrix", icon: Grid3X3, done: testMatrix.length > 0, active: loadingMatrix },
   ];
 
+  const effectiveTemplates =
+    selectedTemplateIds.length > 0
+      ? selectedTemplateIds
+      : defaultTemplateBatch(platformId, scriptCount).map((t) => t.id);
+
+  const noteFailures = useCallback(
+    (label: string, failures: unknown) => {
+      if (!Array.isArray(failures) || failures.length === 0) return;
+      setWarnings((prev) => [
+        ...prev,
+        ...failures.map((f) => {
+          const row = f as { templateId?: string; scriptTitle?: string; error?: string };
+          return `${label}: ${row.templateId ?? row.scriptTitle ?? "item"} — ${row.error ?? "failed"}`;
+        }),
+      ]);
+    },
+    []
+  );
+
   async function generateAngles(): Promise<Angle[]> {
     setLoadingAngles(true);
+    setError(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/creative/angles`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      const result = data.angles || [];
+      if (!res.ok) throw new Error(data.error || `Angle generation failed (${res.status})`);
+      const result: Angle[] = data.angles || [];
       setAngles(result);
       return result;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Angle generation failed");
+      return [];
     } finally {
       setLoadingAngles(false);
     }
   }
 
-  async function generateTop3Scripts(fromAngles?: Angle[]): Promise<Script[]> {
-    const sourceAngles = fromAngles || angles;
-    if (sourceAngles.length === 0) return [];
-
-    // Take top 3 by predictedScore
-    const top3 = [...sourceAngles]
-      .sort((a, b) => b.predictedScore - a.predictedScore)
-      .slice(0, 3);
-
+  async function generateScripts(fromAngles?: Angle[]): Promise<ScriptData[]> {
     setLoadingScripts(true);
+    setError(null);
     try {
+      const sourceAngles = (fromAngles || angles)
+        .slice()
+        .sort((a, b) => b.predictedScore - a.predictedScore);
+
       const res = await fetch(`/api/projects/${projectId}/creative/scripts-batch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ angles: top3 }),
+        body: JSON.stringify({
+          templateIds: selectedTemplateIds.length > 0 ? selectedTemplateIds : undefined,
+          count: scriptCount,
+          angles: sourceAngles.length ? sourceAngles : undefined,
+        }),
       });
       const data = await res.json().catch(() => ({}));
-      const newScripts: Script[] = data.scripts || [];
-      setScripts((prev) => [...prev, ...newScripts]);
-      // Auto-select all new scripts
+      if (!res.ok) throw new Error(data.error || `Script generation failed (${res.status})`);
+
+      noteFailures("Script", data.failures);
+      const newScripts: ScriptData[] = data.scripts || [];
+      setScripts((prev) => [...newScripts, ...prev]);
       setSelectedScriptIds((prev) => {
         const next = new Set(prev);
         newScripts.forEach((s) => next.add(s.id));
@@ -174,24 +204,34 @@ export default function CreativePage() {
       });
       if (newScripts.length > 0) setExpandedScript(newScripts[0].id);
       return newScripts;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Script generation failed");
+      return [];
     } finally {
       setLoadingScripts(false);
     }
   }
 
-  async function generateStoryboardsForSelected(): Promise<Storyboard[]> {
-    if (selectedScriptIds.size === 0) return [];
+  async function generateStoryboards(scriptIds: string[]): Promise<Storyboard[]> {
+    if (scriptIds.length === 0) return [];
     setLoadingStoryboards(true);
+    setError(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/creative/storyboards-batch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scriptIds: Array.from(selectedScriptIds) }),
+        body: JSON.stringify({ scriptIds }),
       });
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Storyboard generation failed (${res.status})`);
+
+      noteFailures("Storyboard", data.failures);
       const newBoards: Storyboard[] = data.storyboards || [];
-      setStoryboards((prev) => [...prev, ...newBoards]);
+      setStoryboards((prev) => [...newBoards, ...prev]);
       return newBoards;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Storyboard generation failed");
+      return [];
     } finally {
       setLoadingStoryboards(false);
     }
@@ -199,20 +239,22 @@ export default function CreativePage() {
 
   async function generateTestMatrix() {
     setLoadingMatrix(true);
+    setError(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/creative/test-matrix`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Test matrix failed (${res.status})`);
       setTestMatrix(data.variants || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Test matrix failed");
     } finally {
       setLoadingMatrix(false);
     }
   }
 
-  // Promote a single test-matrix variant into a full script. The scripts
-  // endpoint takes a free-form `angle` string, so we synthesize one from the
-  // variant's hook, outline, narrative and CTA.
   async function sendVariantToScript(v: TestVariant, index: number) {
     setSendingMatrixRow(index);
+    setError(null);
     try {
       const narrativeLabel = NARRATIVE_TYPE_LABELS[v.narrativeType] || v.narrativeType;
       const angle = [
@@ -220,7 +262,6 @@ export default function CreativePage() {
         v.scriptOutline ? `Outline: ${v.scriptOutline}` : "",
         `Narrative: ${narrativeLabel}`,
         `CTA: ${v.ctaVariant}`,
-        `Format: ${v.format}`,
       ]
         .filter(Boolean)
         .join(". ");
@@ -228,18 +269,22 @@ export default function CreativePage() {
       const res = await fetch(`/api/projects/${projectId}/creative/scripts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ angle }),
+        body: JSON.stringify({
+          angle,
+          templateId: v.templateId || v.format,
+          videoType: v.videoType,
+        }),
       });
       const script = await res.json().catch(() => null);
-      if (!res.ok || !script?.id) return;
+      if (!res.ok || !script?.id) {
+        throw new Error(script?.error || `Could not promote variant (${res.status})`);
+      }
 
       setScripts((prev) => [script, ...prev]);
-      setSelectedScriptIds((prev) => {
-        const next = new Set(prev);
-        next.add(script.id);
-        return next;
-      });
+      setSelectedScriptIds((prev) => new Set(prev).add(script.id));
       setExpandedScript(script.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not promote variant");
     } finally {
       setSendingMatrixRow(null);
     }
@@ -247,31 +292,34 @@ export default function CreativePage() {
 
   async function generateAll() {
     setLoadingAll(true);
+    setError(null);
+    setWarnings([]);
     try {
       setAllProgress("Generating 10 ad angles...");
       const newAngles = await generateAngles();
-      if (newAngles.length === 0) return;
+      if (newAngles.length === 0) {
+        setError((prev) => prev ?? "No angles were generated — stopping the pipeline.");
+        return;
+      }
 
-      setAllProgress("Writing 3 scripts in parallel...");
-      const newScripts = await generateTop3Scripts(newAngles);
-      if (newScripts.length === 0) return;
+      setAllProgress(`Writing ${effectiveTemplates.length} scripts across templates...`);
+      const newScripts = await generateScripts(newAngles);
+      if (newScripts.length === 0) {
+        setError((prev) => prev ?? "No scripts were generated — stopping the pipeline.");
+        return;
+      }
 
-      setAllProgress("Creating storyboards for all scripts...");
-      // auto-select and generate storyboards for all 3
+      setAllProgress("Creating 2-second storyboards...");
       setSelectedScriptIds(new Set(newScripts.map((s) => s.id)));
-      const res = await fetch(`/api/projects/${projectId}/creative/storyboards-batch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scriptIds: newScripts.map((s) => s.id) }),
-      });
-      const data = await res.json().catch(() => ({}));
-      const newBoards: Storyboard[] = data.storyboards || [];
-      setStoryboards((prev) => [...prev, ...newBoards]);
+      const boards = await generateStoryboards(newScripts.map((s) => s.id));
+      if (boards.length === 0) {
+        setError((prev) => prev ?? "No storyboards were generated.");
+      }
 
       setAllProgress("Building test matrix...");
       await generateTestMatrix();
 
-      setAllProgress("Done!");
+      setAllProgress("Done");
     } finally {
       setLoadingAll(false);
       setAllProgress("");
@@ -292,7 +340,8 @@ export default function CreativePage() {
     router.push(`/projects/${projectId}/studio?scripts=${selectedIds}`);
   }
 
-  const nothingGenerated = angles.length === 0 && scripts.length === 0 && storyboards.length === 0 && testMatrix.length === 0;
+  const nothingGenerated =
+    angles.length === 0 && scripts.length === 0 && storyboards.length === 0 && testMatrix.length === 0;
 
   return (
     <div className="space-y-6">
@@ -300,7 +349,7 @@ export default function CreativePage() {
         <div>
           <h2 className="text-base font-semibold tracking-tight">Creative Generator</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Top 3 angles → 3 scripts → multi-select storyboards → Studio
+            Angles → templated scripts → 2-second storyboards → Studio
           </p>
         </div>
         {nothingGenerated && (
@@ -340,9 +389,20 @@ export default function CreativePage() {
                         : "border-border text-muted-foreground"
                   )}
                 >
-                  {stage.done ? <Check className="h-3.5 w-3.5" /> : stage.active ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : stage.num}
+                  {stage.done ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : stage.active ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    stage.num
+                  )}
                 </div>
-                <span className={cn("text-sm font-medium", stage.done || stage.active ? "text-foreground" : "text-muted-foreground")}>
+                <span
+                  className={cn(
+                    "text-sm font-medium",
+                    stage.done || stage.active ? "text-foreground" : "text-muted-foreground"
+                  )}
+                >
                   {stage.name}
                 </span>
               </div>
@@ -351,6 +411,46 @@ export default function CreativePage() {
           ))}
         </div>
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-[var(--status-urgent)] bg-[var(--status-urgent-bg)] px-4 py-3 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-[var(--status-urgent-fg)]" />
+            <p className="text-sm text-[var(--status-urgent-fg)]">{error}</p>
+          </div>
+          <button
+            onClick={() => setError(null)}
+            className="text-xs font-medium text-[var(--status-urgent-fg)] hover:underline shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {warnings.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-amber-800">
+                {warnings.length} item{warnings.length !== 1 ? "s" : ""} failed in the last run
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                {warnings.slice(0, 8).map((w, i) => (
+                  <li key={i} className="text-xs text-amber-800">
+                    {w}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <button
+              onClick={() => setWarnings([])}
+              className="text-xs font-medium text-amber-800 hover:underline shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {loadingAll && allProgress && (
         <div className="rounded-lg border border-[var(--status-ai)] bg-[var(--status-ai-bg)] p-4 text-center">
@@ -366,8 +466,18 @@ export default function CreativePage() {
             <Wand2 className="h-4 w-4" /> 1. Ad Angles
           </h3>
           {!loadingAll && (
-            <Button onClick={() => generateAngles()} disabled={loadingAngles} size="sm" variant="outline" className="h-8 rounded-md text-xs">
-              {loadingAngles ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Sparkles className="mr-1.5 h-3 w-3" />}
+            <Button
+              onClick={() => generateAngles()}
+              disabled={loadingAngles}
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-md text-xs"
+            >
+              {loadingAngles ? (
+                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1.5 h-3 w-3" />
+              )}
               {angles.length > 0 ? "Regenerate" : "Generate 10 angles"}
             </Button>
           )}
@@ -376,7 +486,7 @@ export default function CreativePage() {
         {angles.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {angles.map((angle, i) => {
-              const isTop3 = i < 3; // first 3 (assumes sorted by score)
+              const isTop3 = i < 3;
               return (
                 <div
                   key={angle.id}
@@ -394,7 +504,21 @@ export default function CreativePage() {
                   </div>
                   <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{angle.description}</p>
                   <div className="flex flex-wrap gap-1">
-                    <StatusBadge level="neutral">{NARRATIVE_TYPE_LABELS[angle.narrativeType] || angle.narrativeType}</StatusBadge>
+                    {angle.videoType && (
+                      <span
+                        className={cn(
+                          "text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                          videoTypeBadgeClass(angle.videoType)
+                        )}
+                      >
+                        {videoTypeLabel(angle.videoType)}
+                      </span>
+                    )}
+                    {(angle.templateIds ?? []).map((id) => (
+                      <StatusBadge key={id} level="neutral">
+                        {getScriptTemplate(id)?.name ?? id}
+                      </StatusBadge>
+                    ))}
                     <StatusBadge level="neutral">{angle.platform}</StatusBadge>
                   </div>
                 </div>
@@ -402,138 +526,103 @@ export default function CreativePage() {
             })}
           </div>
         )}
-
-        {angles.length > 0 && !loadingAll && (
-          <Button onClick={() => generateTop3Scripts()} disabled={loadingScripts} variant="outline" className="h-9 rounded-md">
-            {loadingScripts ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <FileText className="mr-2 h-3.5 w-3.5" />}
-            Generate 3 scripts from top angles
-          </Button>
-        )}
       </section>
 
-      {/* STEP 2: Scripts — Multi-select */}
-      {scripts.length > 0 && (
-        <section className="space-y-3 pt-4 border-t border-border">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <h3 className="text-sm font-semibold tracking-tight flex items-center gap-2">
-              <FileText className="h-4 w-4" /> 2. Scripts ({scripts.length}) — Select one or more
-            </h3>
-            <div className="flex gap-2 items-center">
-              <span className="text-xs text-muted-foreground">
-                {selectedScriptIds.size} selected
-              </span>
-              <button
-                onClick={() => setSelectedScriptIds(new Set(scripts.map(s => s.id)))}
-                className="text-xs font-medium text-muted-foreground hover:text-foreground"
-              >
-                Select all
-              </button>
-              <span className="text-xs text-muted-foreground">·</span>
-              <button
-                onClick={() => setSelectedScriptIds(new Set())}
-                className="text-xs font-medium text-muted-foreground hover:text-foreground"
-              >
-                Clear
-              </button>
+      {/* STEP 2: Templates → Scripts */}
+      <section className="space-y-3 pt-4 border-t border-border">
+        <h3 className="text-sm font-semibold tracking-tight flex items-center gap-2">
+          <FileText className="h-4 w-4" /> 2. Scripts
+        </h3>
+
+        <TemplatePicker
+          platformId={platformId}
+          selected={selectedTemplateIds}
+          onChange={setSelectedTemplateIds}
+          count={scriptCount}
+          onCountChange={setScriptCount}
+          disabled={loadingScripts || loadingAll}
+        />
+
+        {!loadingAll && (
+          <Button
+            onClick={() => generateScripts()}
+            disabled={loadingScripts}
+            variant="outline"
+            className="h-9 rounded-md"
+          >
+            {loadingScripts ? (
+              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileText className="mr-2 h-3.5 w-3.5" />
+            )}
+            Write {effectiveTemplates.length} script{effectiveTemplates.length !== 1 ? "s" : ""}
+          </Button>
+        )}
+
+        {scripts.length > 0 && (
+          <>
+            <div className="flex items-start justify-between gap-3 flex-wrap pt-2">
+              <p className="text-xs text-muted-foreground">
+                {scripts.length} script{scripts.length !== 1 ? "s" : ""} · select one or more to board
+              </p>
+              <div className="flex gap-2 items-center">
+                <span className="text-xs text-muted-foreground">{selectedScriptIds.size} selected</span>
+                <button
+                  onClick={() => setSelectedScriptIds(new Set(scripts.map((s) => s.id)))}
+                  className="text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  Select all
+                </button>
+                <span className="text-xs text-muted-foreground">·</span>
+                <button
+                  onClick={() => setSelectedScriptIds(new Set())}
+                  className="text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div className="space-y-2">
-            {scripts.map((script) => {
-              const isExpanded = expandedScript === script.id;
-              const isSelected = selectedScriptIds.has(script.id);
-              return (
-                <div key={script.id} className={cn(
-                  "rounded-lg border bg-card transition-all",
-                  isSelected ? "border-foreground" : "border-border"
-                )}>
-                  <div className="w-full p-4 flex items-center justify-between gap-3">
-                    <button
-                      onClick={() => toggleScript(script.id)}
-                      className="shrink-0"
-                    >
-                      {isSelected ? (
-                        <CheckSquare className="h-5 w-5 text-foreground" />
-                      ) : (
-                        <Square className="h-5 w-5 text-muted-foreground" />
-                      )}
-                    </button>
-                    <button
-                      onClick={() => setExpandedScript(isExpanded ? null : script.id)}
-                      className="flex-1 text-left flex items-center justify-between gap-3"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold">{script.title}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          <span className="font-medium text-foreground">{script.angle.slice(0, 50)}</span>
-                          <span className="mx-1">·</span>
-                          {script.format} · {script.duration} · {script.targetEmotion}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <div className="text-right">
-                          <span className="text-lg font-semibold num">{script.predictedScore}</span>
-                          <p className="text-[10px] text-muted-foreground">predicted</p>
-                        </div>
-                        {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                      </div>
-                    </button>
-                  </div>
+            <div className="space-y-2">
+              {scripts.map((script) => (
+                <ScriptCard
+                  key={script.id}
+                  script={script}
+                  selected={selectedScriptIds.has(script.id)}
+                  expanded={expandedScript === script.id}
+                  onToggleSelect={() => toggleScript(script.id)}
+                  onToggleExpand={() =>
+                    setExpandedScript(expandedScript === script.id ? null : script.id)
+                  }
+                />
+              ))}
+            </div>
 
-                  {isExpanded && (
-                    <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground mb-2">Hook variants</p>
-                          <ol className="space-y-1.5">
-                            {script.hookVariants.map((h, i) => (
-                              <li key={i} className="text-sm flex gap-2">
-                                <span className="text-muted-foreground shrink-0 num w-4">{i + 1}.</span>
-                                <span>{h}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                        <div>
-                          <p className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground mb-2">CTA variants</p>
-                          <ol className="space-y-1.5">
-                            {script.ctaVariants.map((c, i) => (
-                              <li key={i} className="text-sm flex gap-2">
-                                <span className="text-muted-foreground shrink-0 num w-4">{i + 1}.</span>
-                                <span>{c}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground mb-2">Script body</p>
-                        <div className="rounded-md bg-muted p-4 text-sm whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
-                          {script.body}
-                        </div>
-                      </div>
-                    </div>
+            {selectedScriptIds.size > 0 && !loadingAll && (
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  onClick={() => generateStoryboards(Array.from(selectedScriptIds))}
+                  disabled={loadingStoryboards}
+                  variant="outline"
+                  className="h-9 rounded-md"
+                >
+                  {loadingStoryboards ? (
+                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Layout className="mr-2 h-3.5 w-3.5" />
                   )}
-                </div>
-              );
-            })}
-          </div>
-
-          {selectedScriptIds.size > 0 && !loadingAll && (
-            <div className="flex gap-2 flex-wrap">
-              <Button onClick={generateStoryboardsForSelected} disabled={loadingStoryboards} variant="outline" className="h-9 rounded-md">
-                {loadingStoryboards ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Layout className="mr-2 h-3.5 w-3.5" />}
-                Generate storyboards ({selectedScriptIds.size})
-              </Button>
-              <Button onClick={goToStudio} variant="outline" className="h-9 rounded-md">
-                <Palette className="mr-2 h-3.5 w-3.5" />
-                Send to Studio ({selectedScriptIds.size})
-                <ArrowRight className="ml-2 h-3.5 w-3.5" />
-              </Button>
-            </div>
-          )}
-        </section>
-      )}
+                  Generate storyboards ({selectedScriptIds.size})
+                </Button>
+                <Button onClick={goToStudio} variant="outline" className="h-9 rounded-md">
+                  <Palette className="mr-2 h-3.5 w-3.5" />
+                  {STUDIO_CTA} ({selectedScriptIds.size})
+                  <ArrowRight className="ml-2 h-3.5 w-3.5" />
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
       {/* STEP 3: Storyboards */}
       {storyboards.length > 0 && (
@@ -544,41 +633,62 @@ export default function CreativePage() {
                 <Layout className="h-4 w-4" /> 3. Storyboards ({storyboards.length})
               </h3>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                Frames auto-generate when you enter this page. Approve each frame or add feedback before proceeding.
+                One frame per 2 seconds, tagged HOOK / BODY / CTA. Approve each frame or add feedback
+                before proceeding.
               </p>
             </div>
-            <div className="flex gap-2 flex-wrap">
-              <Button
-                onClick={goToStudio}
-                variant="outline"
-                size="sm"
-                className="h-8 rounded-md text-xs"
-                disabled={selectedScriptIds.size === 0}
-              >
-                <Palette className="mr-1.5 h-3 w-3" />
-                Open in Studio
-              </Button>
-            </div>
+            <Button
+              onClick={goToStudio}
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-md text-xs"
+              disabled={selectedScriptIds.size === 0}
+            >
+              <Palette className="mr-1.5 h-3 w-3" />
+              {STUDIO_CTA}
+            </Button>
           </div>
 
           {storyboards.map((storyboard) => {
             const linkedScript = scripts.find((s) => s.id === storyboard.scriptId);
-            const approvedCount = storyboard.frames.filter(f => f.approved === true).length;
-            const pendingCount = storyboard.frames.filter(f => f.approved === null || f.approved === undefined).length;
-            const revisedCount = storyboard.frames.filter(f => f.approved === false).length;
+            const template = getScriptTemplate(linkedScript?.template);
+            const approvedCount = storyboard.frames.filter((f) => f.approved === true).length;
+            const pendingCount = storyboard.frames.filter(
+              (f) => f.approved === null || f.approved === undefined
+            ).length;
+            const revisedCount = storyboard.frames.filter((f) => f.approved === false).length;
 
             return (
               <div key={storyboard.id} className="space-y-4 rounded-xl border border-border bg-card/50 p-4">
-                {/* Storyboard header */}
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold">{storyboard.title}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {linkedScript && <><span className="font-medium">{linkedScript.title}</span> · </>}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-sm font-semibold">{storyboard.title}</p>
+                      {linkedScript?.videoType && (
+                        <span
+                          className={cn(
+                            "text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                            videoTypeBadgeClass(linkedScript.videoType)
+                          )}
+                        >
+                          {videoTypeLabel(linkedScript.videoType)}
+                        </span>
+                      )}
+                      {template && (
+                        <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border border-border bg-muted text-muted-foreground">
+                          {template.name}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {linkedScript && (
+                        <>
+                          <span className="font-medium">{linkedScript.title}</span> ·{" "}
+                        </>
+                      )}
                       {storyboard.style} · {storyboard.totalDuration} · {storyboard.frames.length} frames
                     </p>
                   </div>
-                  {/* Approval progress */}
                   <div className="flex items-center gap-2 text-[10px] shrink-0">
                     {approvedCount > 0 && (
                       <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">
@@ -598,7 +708,11 @@ export default function CreativePage() {
                   </div>
                 </div>
 
-                {/* Frame grid — 3 columns, compact metric-board style */}
+                <StoryboardTimeline
+                  frames={storyboard.frames}
+                  frameSeconds={storyboard.frameSeconds ?? 2}
+                />
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                   {storyboard.frames.map((frame, idx) => (
                     <StoryboardFrameCard
@@ -609,30 +723,35 @@ export default function CreativePage() {
                       autoLoad={true}
                       isLast={idx === storyboard.frames.length - 1}
                       onUpdate={(frameNumber, updates) => {
-                        setStoryboards(prev => prev.map(sb => {
-                          if (sb.id !== storyboard.id) return sb;
-                          return {
-                            ...sb,
-                            frames: sb.frames.map(f =>
-                              f.frameNumber === frameNumber ? { ...f, ...updates } : f
-                            ),
-                          };
-                        }));
+                        setStoryboards((prev) =>
+                          prev.map((sb) => {
+                            if (sb.id !== storyboard.id) return sb;
+                            return {
+                              ...sb,
+                              frames: sb.frames.map((f) =>
+                                f.frameNumber === frameNumber ? { ...f, ...updates } : f
+                              ),
+                            };
+                          })
+                        );
                       }}
                     />
                   ))}
                 </div>
 
-                {/* Completion gate */}
                 {approvedCount === storyboard.frames.length && storyboard.frames.length > 0 && (
                   <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 px-4 py-3 flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-emerald-800">All frames approved ✓</p>
-                      <p className="text-xs text-emerald-700">Ready to send to Studio for video generation</p>
+                      <p className="text-xs text-emerald-700">Ready for video generation</p>
                     </div>
-                    <Button onClick={goToStudio} size="sm" className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 gap-1.5">
+                    <Button
+                      onClick={goToStudio}
+                      size="sm"
+                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 gap-1.5"
+                    >
                       <Palette className="h-3 w-3" />
-                      Open in Studio
+                      {STUDIO_CTA}
                     </Button>
                   </div>
                 )}
@@ -649,8 +768,18 @@ export default function CreativePage() {
             <Grid3X3 className="h-4 w-4" /> 4. Test Matrix
           </h3>
           {!loadingAll && (
-            <Button onClick={generateTestMatrix} disabled={loadingMatrix} size="sm" variant="outline" className="h-8 rounded-md text-xs">
-              {loadingMatrix ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Grid3X3 className="mr-1.5 h-3 w-3" />}
+            <Button
+              onClick={generateTestMatrix}
+              disabled={loadingMatrix}
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-md text-xs"
+            >
+              {loadingMatrix ? (
+                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+              ) : (
+                <Grid3X3 className="mr-1.5 h-3 w-3" />
+              )}
               {testMatrix.length > 0 ? "Regenerate" : "Generate matrix"}
             </Button>
           )}
@@ -664,46 +793,62 @@ export default function CreativePage() {
                   <tr className="text-xs uppercase tracking-wider text-muted-foreground">
                     <th className="text-left font-medium px-4 py-2.5 w-10">#</th>
                     <th className="text-left font-medium px-3 py-2.5">Hook</th>
-                    <th className="text-left font-medium px-3 py-2.5 hidden md:table-cell">Narrative</th>
+                    <th className="text-left font-medium px-3 py-2.5 hidden sm:table-cell">Template</th>
+                    <th className="text-left font-medium px-3 py-2.5 hidden md:table-cell">Type</th>
                     <th className="text-left font-medium px-3 py-2.5 hidden lg:table-cell">CTA</th>
-                    <th className="text-left font-medium px-3 py-2.5 hidden sm:table-cell">Format</th>
                     <th className="text-left font-medium px-3 py-2.5 w-28">Score</th>
                     <th className="text-right font-medium px-3 py-2.5 w-32">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {testMatrix
+                  {[...testMatrix]
                     .sort((a, b) => b.predictedScore - a.predictedScore)
-                    .map((v, i) => (
-                      <tr key={i} className="hover:bg-muted/40">
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground num">{i + 1}</td>
-                        <td className="px-3 py-2.5 text-xs max-w-xs"><p className="line-clamp-1">{v.hookVariant}</p></td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground hidden md:table-cell">
-                          {NARRATIVE_TYPE_LABELS[v.narrativeType] || v.narrativeType}
-                        </td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground hidden lg:table-cell">
-                          <p className="line-clamp-1 max-w-xs">{v.ctaVariant}</p>
-                        </td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground hidden sm:table-cell">{v.format}</td>
-                        <td className="px-3 py-2.5"><ScoreBar score={v.predictedScore} /></td>
-                        <td className="px-3 py-2.5 text-right">
-                          <Button
-                            onClick={() => sendVariantToScript(v, i)}
-                            disabled={sendingMatrixRow !== null}
-                            size="sm"
-                            variant="outline"
-                            className="h-7 rounded-md text-xs whitespace-nowrap"
-                          >
-                            {sendingMatrixRow === i ? (
-                              <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                            ) : (
-                              <FileText className="mr-1.5 h-3 w-3" />
-                            )}
-                            To script
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                    .map((v, i) => {
+                      const template = getScriptTemplate(v.templateId || v.format);
+                      return (
+                        <tr key={i} className="hover:bg-muted/40">
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground num">{i + 1}</td>
+                          <td className="px-3 py-2.5 text-xs max-w-xs">
+                            <p className="line-clamp-1">{v.hookVariant}</p>
+                          </td>
+                          <td className="px-3 py-2.5 text-xs text-muted-foreground hidden sm:table-cell">
+                            {template?.name ?? v.templateName ?? v.templateId ?? v.format ?? "—"}
+                          </td>
+                          <td className="px-3 py-2.5 hidden md:table-cell">
+                            <span
+                              className={cn(
+                                "text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                                videoTypeBadgeClass(v.videoType ?? template?.videoType)
+                              )}
+                            >
+                              {videoTypeLabel(v.videoType ?? template?.videoType)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-xs text-muted-foreground hidden lg:table-cell">
+                            <p className="line-clamp-1 max-w-xs">{v.ctaVariant}</p>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <ScoreBar score={v.predictedScore} />
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <Button
+                              onClick={() => sendVariantToScript(v, i)}
+                              disabled={sendingMatrixRow !== null}
+                              size="sm"
+                              variant="outline"
+                              className="h-7 rounded-md text-xs whitespace-nowrap"
+                            >
+                              {sendingMatrixRow === i ? (
+                                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                              ) : (
+                                <FileText className="mr-1.5 h-3 w-3" />
+                              )}
+                              To script
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
@@ -715,11 +860,10 @@ export default function CreativePage() {
       {scripts.length > 0 && (
         <div className="rounded-lg border border-border bg-muted/30 p-5 flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
           <div className="flex-1">
-            <p className="text-sm font-semibold">
-              Ready to build the video?
-            </p>
+            <p className="text-sm font-semibold">Ready to build the video?</p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Send {selectedScriptIds.size} selected script{selectedScriptIds.size !== 1 ? "s" : ""} to Studio for a detailed video brief and keyframe reel.
+              Send {selectedScriptIds.size} selected script{selectedScriptIds.size !== 1 ? "s" : ""} to
+              Studio for a detailed video brief and keyframe reel.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -736,7 +880,7 @@ export default function CreativePage() {
               className="h-10 rounded-md bg-foreground text-background hover:bg-foreground/90 font-medium"
             >
               <Palette className="mr-2 h-4 w-4" />
-              Open Studio
+              {STUDIO_CTA}
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </div>
