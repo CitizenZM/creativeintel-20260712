@@ -1,21 +1,46 @@
 import OpenAI from "openai";
 import { ZodSchema } from "zod";
 
-// Route priority: OpenAI → OpenRouter. OpenAI is preferred while its key works;
-// the first 401 from OpenAI permanently (per process) reroutes to OpenRouter so a
-// rotated/revoked key degrades to the fallback instead of failing every call.
+// Route priority: OpenAI → Gemini → OpenRouter. Each provider is tried in order
+// while its key is present and not disabled; the first 401/403 from a provider
+// permanently disables it for this process (module-level, not persisted) so a
+// rotated/revoked key degrades to the next provider instead of failing every
+// call. Set AI_PROVIDER=openai|gemini|openrouter to force a single provider
+// (no fallthrough to the others).
+
+type ProviderName = "openai" | "gemini" | "openrouter";
+
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
+const GEMINI_DEFAULT_MODEL = "gemini-3.8-flash";
+const GEMINI_MAX_TOKENS = 8192;
+const GEMINI_IMAGE_FETCH_TIMEOUT_MS = 10_000;
+const GEMINI_IMAGE_MAX_BYTES = 6 * 1024 * 1024;
+
+const _disabledProviders = new Set<ProviderName>();
+
 let _openai: OpenAI | null = null;
+let _gemini: OpenAI | null = null;
 let _openrouter: OpenAI | null = null;
-let _openaiDisabled = false;
+
+function geminiApiKey(): string | undefined {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+}
 
 function openaiClient(): OpenAI | null {
-  if (_openaiDisabled || !process.env.OPENAI_API_KEY) return null;
+  if (_disabledProviders.has("openai") || !process.env.OPENAI_API_KEY) return null;
   if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   return _openai;
 }
 
+function geminiClient(): OpenAI | null {
+  const apiKey = geminiApiKey();
+  if (_disabledProviders.has("gemini") || !apiKey) return null;
+  if (!_gemini) _gemini = new OpenAI({ apiKey, baseURL: GEMINI_BASE_URL });
+  return _gemini;
+}
+
 function openrouterClient(): OpenAI | null {
-  if (!process.env.OPENROUTER_API_KEY) return null;
+  if (_disabledProviders.has("openrouter") || !process.env.OPENROUTER_API_KEY) return null;
   if (!_openrouter) {
     _openrouter = new OpenAI({
       apiKey: process.env.OPENROUTER_API_KEY,
@@ -29,17 +54,30 @@ function openrouterClient(): OpenAI | null {
   return _openrouter;
 }
 
-interface Route {
-  client: OpenAI;
-  isOpenRouter: boolean;
+function clientFor(provider: ProviderName): OpenAI | null {
+  if (provider === "openai") return openaiClient();
+  if (provider === "gemini") return geminiClient();
+  return openrouterClient();
 }
 
-function resolveRoute(): Route {
-  const oa = openaiClient();
-  if (oa) return { client: oa, isOpenRouter: false };
-  const or = openrouterClient();
-  if (or) return { client: or, isOpenRouter: true };
-  throw new Error("No AI key configured — set OPENAI_API_KEY or OPENROUTER_API_KEY");
+function forcedProvider(): ProviderName | null {
+  const v = process.env.AI_PROVIDER;
+  return v === "openai" || v === "gemini" || v === "openrouter" ? v : null;
+}
+
+/** Ordered list of providers to try. AI_PROVIDER, if set, forces a single entry. */
+function providerOrder(): ProviderName[] {
+  const forced = forcedProvider();
+  if (forced) return [forced];
+  return ["openai", "gemini", "openrouter"];
+}
+
+/** Best-guess active provider for label/vision-model resolution. Never throws. */
+function activeProvider(): ProviderName {
+  for (const provider of providerOrder()) {
+    if (clientFor(provider)) return provider;
+  }
+  return providerOrder()[0] ?? "openai";
 }
 
 function isAuthError(err: unknown): boolean {
@@ -53,19 +91,23 @@ function toOpenRouterModel(model: string): string {
   return `openai/${model}`;
 }
 
-function getModel(): string {
-  if (!_openaiDisabled && process.env.OPENAI_API_KEY) return process.env.AI_MODEL || "gpt-4o";
-  if (process.env.OPENROUTER_API_KEY) {
-    if (process.env.AI_FALLBACK_MODEL) return process.env.AI_FALLBACK_MODEL;
-    if (process.env.AI_MODEL) return toOpenRouterModel(process.env.AI_MODEL);
-    return "meta-llama/llama-3.3-70b-instruct:free";
-  }
-  return process.env.AI_MODEL || "gpt-4o";
+function adaptModelForProvider(model: string, provider: ProviderName): string {
+  return provider === "openrouter" ? toOpenRouterModel(model) : model;
+}
+
+function modelFor(provider: ProviderName): string {
+  if (provider === "openai") return process.env.AI_MODEL || "gpt-4o";
+  if (provider === "gemini") return process.env.AI_GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
+  // openrouter
+  if (process.env.AI_FALLBACK_MODEL) return process.env.AI_FALLBACK_MODEL;
+  if (process.env.AI_MODEL) return toOpenRouterModel(process.env.AI_MODEL);
+  return "meta-llama/llama-3.3-70b-instruct:free";
 }
 
 /** The model id this deployment actually calls for text analysis — safe to render in the UI. */
 export function getConfiguredModelLabel(): string {
-  return getModel();
+  const provider = activeProvider();
+  return `${modelFor(provider)} (${provider})`;
 }
 
 /**
@@ -73,8 +115,12 @@ export function getConfiguredModelLabel(): string {
  * OpenRouter free tier) cannot see images, so vision routes separately.
  */
 export function getVisionModel(): string {
+  const provider = activeProvider();
+  if (provider === "gemini") {
+    return process.env.AI_GEMINI_VISION_MODEL || process.env.AI_GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
+  }
   if (process.env.AI_VISION_MODEL) return process.env.AI_VISION_MODEL;
-  if ((_openaiDisabled || !process.env.OPENAI_API_KEY) && process.env.OPENROUTER_API_KEY) return "openai/gpt-4o";
+  if (provider === "openrouter") return "openai/gpt-4o";
   return "gpt-4o";
 }
 
@@ -92,6 +138,74 @@ function toUserContent(prompt: UserPrompt): OpenAI.Chat.ChatCompletionUserMessag
       ? ({ type: "text", text: part.text } as const)
       : ({ type: "image_url", image_url: { url: part.url } } as const)
   );
+}
+
+/**
+ * Fetches a remote image and returns it as a `data:` URL, for providers (Gemini)
+ * whose vision endpoint rejects remote https image URLs. Bounded by a timeout and
+ * a size cap; returns null on any failure so the caller can drop the image and
+ * keep the rest of the prompt intact rather than failing the whole call.
+ */
+async function fetchAsDataUrl(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GEMINI_IMAGE_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null;
+    const contentLengthHeader = res.headers.get("content-length");
+    if (contentLengthHeader && Number(contentLengthHeader) > GEMINI_IMAGE_MAX_BYTES) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0 || buf.length > GEMINI_IMAGE_MAX_BYTES) return null;
+    const contentType = res.headers.get("content-type")?.split(";")[0]?.trim() || "image/jpeg";
+    return `data:${contentType};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Gemini's OpenAI-compatible vision endpoint only accepts `data:` image URLs, not
+ * remote https URLs. Converts every http(s) image_url part to a data URL; on
+ * fetch failure the image part is dropped (text is preserved). data: URLs and
+ * other content parts pass through untouched.
+ */
+async function toGeminiContent(
+  content: OpenAI.Chat.ChatCompletionUserMessageParam["content"]
+): Promise<OpenAI.Chat.ChatCompletionUserMessageParam["content"]> {
+  if (typeof content === "string") return content;
+
+  const parts: OpenAI.Chat.ChatCompletionContentPart[] = [];
+  for (const part of content) {
+    if (part.type === "image_url" && /^https?:\/\//i.test(part.image_url.url)) {
+      const dataUrl = await fetchAsDataUrl(part.image_url.url);
+      if (dataUrl) {
+        parts.push({ type: "image_url", image_url: { url: dataUrl } });
+      } else {
+        console.warn(`[ai] gemini: dropping image part, could not fetch ${part.image_url.url}`);
+      }
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts;
+}
+
+async function prepareMessagesForRoute(
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  provider: ProviderName
+): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
+  if (provider !== "gemini") return messages;
+  const prepared: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+  for (const msg of messages) {
+    if (msg.role === "user" && Array.isArray(msg.content)) {
+      prepared.push({ ...msg, content: await toGeminiContent(msg.content) });
+    } else {
+      prepared.push(msg);
+    }
+  }
+  return prepared;
 }
 
 /** Thrown when the AI response could not be parsed into the expected schema, even after retry. */
@@ -125,6 +239,70 @@ function parseErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "parse error";
 }
 
+async function createOnRoute(
+  client: OpenAI,
+  provider: ProviderName,
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  modelToUse: string,
+  maxTokens: number
+) {
+  const effectiveMaxTokens = provider === "gemini" ? Math.min(maxTokens, GEMINI_MAX_TOKENS) : maxTokens;
+  const preparedMessages = await prepareMessagesForRoute(messages, provider);
+  try {
+    return await client.chat.completions.create({
+      model: modelToUse,
+      max_tokens: effectiveMaxTokens,
+      messages: preparedMessages,
+      response_format: { type: "json_object" },
+    });
+  } catch (err) {
+    if (isAuthError(err)) throw err;
+    // Some models/providers reject response_format — retry without it.
+    return await client.chat.completions.create({
+      model: modelToUse,
+      max_tokens: effectiveMaxTokens,
+      messages: preparedMessages,
+    });
+  }
+}
+
+/**
+ * Tries each provider in providerOrder() until one succeeds. A 401/403 disables
+ * that provider for the rest of the process and falls through to the next one;
+ * any other error is thrown immediately (it won't be fixed by switching keys).
+ */
+async function callModel(
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  maxTokens: number,
+  modelOverride?: string
+) {
+  const order = providerOrder();
+  let lastErr: unknown;
+  let tried = false;
+
+  for (const provider of order) {
+    const client = clientFor(provider);
+    if (!client) continue;
+    tried = true;
+    const modelToUse = modelOverride ? adaptModelForProvider(modelOverride, provider) : modelFor(provider);
+    try {
+      return await createOnRoute(client, provider, messages, modelToUse, maxTokens);
+    } catch (err) {
+      if (!isAuthError(err)) throw err;
+      console.warn(`[ai] ${provider} rejected the API key — disabling it for this process`);
+      _disabledProviders.add(provider);
+      lastErr = err;
+    }
+  }
+
+  if (!tried) {
+    throw new Error(
+      "No AI key configured — set OPENAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, or OPENROUTER_API_KEY"
+    );
+  }
+  throw lastErr;
+}
+
 export async function analyzeWithClaude<T>(options: {
   systemPrompt: string;
   userPrompt: UserPrompt;
@@ -146,45 +324,10 @@ export async function analyzeWithClaude<T>(options: {
     }
   }
 
-  let route = resolveRoute();
-  let model = modelOverride || getModel();
-
   // OpenAI requires "json" in the messages when using json_object format
   const systemWithJson = systemPrompt.toLowerCase().includes("json")
     ? systemPrompt
     : systemPrompt + "\n\nRespond with valid JSON only.";
-
-  async function createOnRoute(messages: OpenAI.Chat.ChatCompletionMessageParam[], modelToUse: string) {
-    try {
-      return await route.client.chat.completions.create({
-        model: modelToUse,
-        max_tokens: maxTokens,
-        messages,
-        response_format: { type: "json_object" },
-      });
-    } catch (err) {
-      if (isAuthError(err)) throw err;
-      // Some OpenRouter models reject response_format — retry without it.
-      return await route.client.chat.completions.create({
-        model: modelToUse,
-        max_tokens: maxTokens,
-        messages,
-      });
-    }
-  }
-
-  async function callModel(messages: OpenAI.Chat.ChatCompletionMessageParam[], modelToUse: string) {
-    try {
-      return await createOnRoute(messages, modelToUse);
-    } catch (err) {
-      if (!isAuthError(err) || route.isOpenRouter || !openrouterClient()) throw err;
-      console.warn("[ai] OpenAI rejected the API key — rerouting this process to OpenRouter");
-      _openaiDisabled = true;
-      route = resolveRoute();
-      model = modelOverride ? toOpenRouterModel(modelOverride) : getModel();
-      return await createOnRoute(messages, model);
-    }
-  }
 
   const userContent = toUserContent(userPrompt);
 
@@ -193,7 +336,8 @@ export async function analyzeWithClaude<T>(options: {
       { role: "system", content: systemWithJson },
       { role: "user", content: userContent },
     ],
-    model
+    maxTokens,
+    modelOverride
   );
 
   const text = response.choices[0]?.message?.content || "";
@@ -222,7 +366,8 @@ export async function analyzeWithClaude<T>(options: {
           )}\n\nRespond again with ONLY valid JSON, no markdown fences, no explanation.`,
         },
       ],
-      model
+      maxTokens,
+      modelOverride
     );
 
     const retryText = retryResponse.choices[0]?.message?.content || "";
