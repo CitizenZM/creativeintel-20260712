@@ -43,3 +43,10 @@ LibTV balance: 61 → ~9 credits. Both play in the dashboard (Deliver / Studio) 
 Additional defects found and fixed during the render loop: CLI pretty-JSON parsing; `--left "FF K1"` was never a node name; brand-truth URLs (1 MB data URLs) blew argv (E2BIG); worker assembled with zero clips and reported success; runs could not resume; canvas node-name collisions across runs; keyframe prompts carried offer/URL/CTA copy → text baked into the image (v1 hook frame); Meta Ad Library rendered in Chinese for this egress → 0 results (now 27 ads).
 
 Quality verdict: v2 is clean end-to-end; v1's hook clip carries the baked-in text block (mitigated by a bottom crop in re-assembly) and both need the caption/CTA typography pass (in progress, local re-cut, no credits).
+
+## Round-1 close-out (after local re-cuts, no credits)
+
+- Assembly typography pass: brand serif captions on sand pills inside safe zones, disclaimer line, designed CTA card (real packshot + button), logo end card; per-clip `cropBottomPct` removed v1's baked-in text block and the phone bar.
+- v1 hook caption rewritten to approved language ("Before & after: visibly smoother"); new scripts are guarded by the claims audit.
+- Deliverables: `~/Projects/libtv-ad-studio/brands/citybeauty/deliverables/` — `citybeauty-invisicrepe-v1-before-after-10s.mp4`, `citybeauty-invisicrepe-v2-problem-agitate-solve-10s.mp4` (+ 720p previews, contact sheets).
+- Verdict: **PASS** — two different finished versions produced through the dashboard.
