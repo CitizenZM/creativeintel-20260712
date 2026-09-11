@@ -50,10 +50,26 @@
 **Kling O3 frames2video** (40) for orbit/camera-move shots. Seedance 2.5 costs 6× for no visible
 gain at these shot lengths.
 
-### Price probe (zero cost)
-Create the video node **without** `--run`, open the canvas in ego-browser, click the node, and read
-the estimate next to the generate button (`9:16 · 720P · 4s · 1个 · 156 / 184`). Update the node's
-`-s model=…` via CLI, reload, read again. Loop over models this way before committing.
+### Price probe — NOT zero cost via the CLI (measured 2026-09-11)
+Creating nodes with `libtv node create … -s modeType=image2image` (no `--run`) through the CLI
+and then reading the estimate in the UI **charged the account anyway**: 11 probe nodes = 72
+credits, exactly the sum of their displayed prices (balance 133 → 61). Treat every CLI node
+creation with a reference edge as a paid generation. Only probe prices in the web UI by changing
+the model dropdown on an existing un-run node, or use the measured table below.
+
+### Measured prices, 9:16, count=1, image2image with 1 reference (2026-09-11)
+| Model | Settings | Credits |
+|---|---|---|
+| **Seedream 4.0** | quality=2K | **1** |
+| Z-image Turbo | quality=1K | 1 |
+| Seedream 4.5 | quality=2K | 2 |
+| Seedream 5.0 Lite | quality=2K | 4 |
+| Qwen image 3.0 | resolution=1K quality=std | 5 |
+| Lib Image 2.5 Fast / Pro | resolution=1K quality=low | 6 |
+| General image V2 | quality=1K | 8 |
+| Seedream 5.0 Pro | quality=1K | 9 (2K = 14) |
+| Hailuo 2.3 Fast video | 768P, 6 s, singleImage2video | **12** (1080P = 24) |
+| Wan 3.0 video | 720P, 2 s, frames2video (no singleImage2video) | 20 |
 
 ## Canvas-only features worth using
 - **运镜 presets** (23): 固定镜头 跟随拍摄 盘旋抬升/下降 镜头上/下/左/右摇 上升/下降/左移/右移
