@@ -365,7 +365,8 @@ async function executeJob(job, { cli, runDir, runId }) {
   const { nodeId } = await cli.nodeCreate({
     nodeName: job.nodeName,
     type: job.kind === 'video' ? 'video' : 'image',
-    leftRefs: job.leftRefs || [],
+    // Edges reference the upstream node name; an old "FF " (first-frame) prefix is not a node.
+    leftRefs: (job.leftRefs || []).map((r) => String(r).replace(/^FF\s+/, '')),
     prompt: job.prompt,
     modelName: job.modelName,
     settings: nodeSettings(job),
@@ -457,6 +458,12 @@ async function processRun(payload) {
     const MAX_PROMPT_CHARS = 6000;
 
     for (const job of payload.jobs) {
+      // Resumed run: nodes that already rendered stay on the canvas and are not paid for twice.
+      if (job.status === 'completed' || job.status === 'skipped') {
+        log(`node ${job.nodeName}: already ${job.status}, keeping`);
+        manifest.nodes.push({ nodeName: job.nodeName, kind: job.kind, shotIndex: job.shotIndex, segment: job.settings?.segment ?? null, frameNumber: job.settings?.frameNumber ?? null, localPath: job.localPath ?? null, resultUrl: job.resultUrl ?? null, skipped: job.status === 'skipped', resumed: true });
+        continue;
+      }
       await api.jobStarted(job.id);
       try {
         // A clip is image-to-video off its keyframe; without the keyframe it

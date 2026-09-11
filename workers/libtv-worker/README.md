@@ -150,7 +150,7 @@ PROD-1      libtv upload "PROD-1" --file refs/PROD-1.png
 K<n>        libtv node create "K<n>" -t image --left "PROD-1" --prompt "…" \
               -s "model=Seedream 5.0 Pro" -s modeType=image2image \
               -s ratio=9:16 -s quality=2K -s count=1 --run
-V<n>        libtv node create "V<n>" -t video --left "FF K<n>" --prompt "…" \
+V<n>        libtv node create "V<n>" -t video --left "K<n>" --prompt "…" \
               -s "model=Hailuo 2.3 Fast" -s modeType=singleImage2video \
               -s duration=6 -s resolution=1080P --run
             libtv download -n "V<n>" -o clips/ --without-ai-watermark --vip

@@ -5,7 +5,7 @@
  *   PROD-n / LOGO   uploaded packshots and logo — the only source of truth
  *                   for packaging
  *   K<start>        keyframe, image2image off PROD-1, one per clip group
- *   V<start>        clip, singleImage2video off "FF K<start>", one per clip group
+ *   V<start>        clip, singleImage2video off "K<start>", one per clip group
  *
  * In `economy` mode a clip group is up to `floor(clipDurationSec / frameSeconds)`
  * consecutive non-CTA frames, so one 6 s clip supplies three 2 s windows — the
@@ -378,7 +378,7 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
       shotIndex: index,
       kind: "video",
       nodeName: `V${n}`,
-      leftRefs: [`FF K${n}`],
+      leftRefs: [`K${n}`],
       prompt:
         groupFramesList.length > 1 ? groupVideoPrompt(groupFramesList) : videoPromptFor(frame, brandTruth),
       modelName: videoModel,

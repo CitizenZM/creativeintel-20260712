@@ -69,7 +69,7 @@ libtv project create "<canvas>" && libtv project use <uuid>
 libtv upload "ref name" --file path.png
 libtv node create "K1" -t image  --left "ref name" --prompt "..." \
   -s "model=Seedream 5.0 Pro" -s modeType=image2image -s ratio=9:16 -s quality=2K -s count=1 --run
-libtv node create "V1" -t video  --left "FF K1" --prompt "..." \
+libtv node create "V1" -t video  --left "K1" --prompt "..." \
   -s "model=Hailuo 2.3 Fast" -s modeType=singleImage2video -s duration=6 --run
 libtv download -n "V1" -o clips/ --without-ai-watermark --vip
 

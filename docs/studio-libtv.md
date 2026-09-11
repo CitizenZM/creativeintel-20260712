@@ -54,7 +54,7 @@ mode**, then **Compile run**. The run lands in `awaiting_approval` with:
 
 - one `upload` node per packshot (`PROD-1…4`) and one for the logo (`LOGO`)
 - one `K<start>` keyframe per clip group, `image2image` off `PROD-1`
-- one `V<start>` clip per clip group, `singleImage2video` off `FF K<start>`
+- one `V<start>` clip per clip group, `singleImage2video` off `K<start>`
 - CTA frames flagged `compositeLocally` — no LibTV node, no credits
 
 Compilation refuses with 409 if the brand kit has no packshot. That is
