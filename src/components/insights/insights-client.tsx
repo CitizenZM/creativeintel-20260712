@@ -200,9 +200,12 @@ export function EnvironmentsSection({
     <div className="space-y-2">
       {envs.map((env, i) => (
         <div key={i} className="rounded-xl border border-border bg-card overflow-hidden">
-          <button
-            className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/40 transition-colors"
+          <div
+            role="button"
+            tabIndex={0}
+            className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/40 transition-colors cursor-pointer"
             onClick={() => setExpanded(expanded === i ? null : i)}
+            onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(expanded === i ? null : i); } }}
           >
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
@@ -214,12 +217,12 @@ export function EnvironmentsSection({
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <button onClick={e => { e.stopPropagation(); removeEnv(i); }} className="p-1 rounded hover:bg-red-50 hover:text-red-500 transition-colors">
+              <button type="button" aria-label="Remove environment" onClick={e => { e.stopPropagation(); removeEnv(i); }} className="p-1 rounded hover:bg-red-50 hover:text-red-500 transition-colors">
                 <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
               {expanded === i ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
             </div>
-          </button>
+          </div>
 
           {expanded === i && (
             <div className="border-t border-border px-4 pb-4 pt-3 space-y-3 bg-muted/20">
@@ -296,9 +299,12 @@ export function ActorSettingsSection({
     <div className="space-y-2">
       {actors.map((actor, i) => (
         <div key={i} className="rounded-xl border border-border bg-card overflow-hidden">
-          <button
-            className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/40 transition-colors"
+          <div
+            role="button"
+            tabIndex={0}
+            className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/40 transition-colors cursor-pointer"
             onClick={() => setExpanded(expanded === i ? null : i)}
+            onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(expanded === i ? null : i); } }}
           >
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
@@ -310,12 +316,12 @@ export function ActorSettingsSection({
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <button onClick={e => { e.stopPropagation(); save(actors.filter((_, idx) => idx !== i)); }} className="p-1 rounded hover:bg-red-50 hover:text-red-500 transition-colors">
+              <button type="button" aria-label="Remove actor" onClick={e => { e.stopPropagation(); save(actors.filter((_, idx) => idx !== i)); }} className="p-1 rounded hover:bg-red-50 hover:text-red-500 transition-colors">
                 <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
               {expanded === i ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
             </div>
-          </button>
+          </div>
 
           {expanded === i && (
             <div className="border-t border-border px-4 pb-4 pt-3 space-y-3 bg-muted/20">
