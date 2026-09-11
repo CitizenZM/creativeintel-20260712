@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Palette } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { VideoLibraryPanel } from "@/components/video/video-library-panel";
 import { StoryboardTimeline } from "@/components/studio/storyboard-timeline";
 import { LibtvRunPanel } from "@/components/studio/libtv-run-panel";
@@ -39,9 +40,14 @@ function toStoryboardView(row: StoryboardRow): StoryboardView {
 
 export default function StudioPage() {
   const params = useParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
-  const storyboardParam = searchParams.get("storyboard");
+  // Captured once at mount — used only to preselect a board on first load.
+  // Selecting a board afterwards updates the URL itself via router.replace,
+  // and must not re-trigger the initial-load effect below.
+  const [initialStoryboardId] = useState(() => searchParams.get("storyboardId"));
 
   const [storyboards, setStoryboards] = useState<StoryboardView[]>([]);
   const [storyboardId, setStoryboardId] = useState<string | null>(null);
@@ -74,7 +80,9 @@ export default function StudioPage() {
 
         const boards = (Array.isArray(sbData) ? sbData : []).map(toStoryboardView);
         setStoryboards(boards);
-        setStoryboardId((current) => current ?? storyboardParam ?? boards[0]?.id ?? null);
+        // boards are returned newest-first (orderBy createdAt desc), so
+        // boards[0] is the default "newest storyboard" fallback.
+        setStoryboardId((current) => current ?? initialStoryboardId ?? boards[0]?.id ?? null);
 
         const loadedRuns = (runData.runs ?? []) as LibtvRunView[];
         setRuns(loadedRuns);
@@ -93,7 +101,7 @@ export default function StudioPage() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, storyboardParam]);
+  }, [projectId, initialStoryboardId]);
 
   const storyboard = useMemo(
     () => storyboards.find((s) => s.id === storyboardId) ?? null,
@@ -116,6 +124,15 @@ export default function StudioPage() {
     return storyboards.find((s) => s.id === activeRun.storyboardId) ?? storyboard;
   }, [activeRun, storyboards, storyboard]);
 
+  const selectStoryboard = useCallback(
+    (id: string) => {
+      setStoryboardId(id);
+      setSelectedFrame(null);
+      router.replace(`${pathname}?storyboardId=${id}`, { scroll: false });
+    },
+    [pathname, router]
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -134,25 +151,36 @@ export default function StudioPage() {
           </p>
         </div>
         {storyboards.length > 0 && (
-          <label className="block">
+          <div className="block">
             <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
               Storyboard
             </span>
-            <select
-              value={storyboardId ?? ""}
-              onChange={(e) => {
-                setStoryboardId(e.target.value);
-                setSelectedFrame(null);
-              }}
-              className="h-9 min-w-64 rounded-md border border-border bg-background px-2 text-xs"
-            >
+            <div role="radiogroup" aria-label="Storyboard" className="flex flex-wrap gap-1.5">
               {storyboards.map((s) => (
-                <option key={s.id} value={s.id}>
+                <label
+                  key={s.id}
+                  data-storyboard-id={s.id}
+                  className={cn(
+                    "flex h-9 cursor-pointer items-center rounded-md border px-2.5 text-xs font-medium transition-colors",
+                    storyboardId === s.id
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="storyboard"
+                    value={s.id}
+                    checked={storyboardId === s.id}
+                    onChange={() => selectStoryboard(s.id)}
+                    aria-label={s.title}
+                    className="sr-only"
+                  />
                   {s.title} ({(s.frames as StoryboardFrameView[]).length} frames)
-                </option>
+                </label>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
         )}
       </div>
 
