@@ -36,16 +36,53 @@ function looksLikeAuthFailure(text) {
   return /用户未授权/.test(text) || /\[10001\]/.test(text);
 }
 
-function parseJsonLines(text) {
+// The CLI pretty-prints its JSON across many lines and may interleave progress
+// chatter, so scan for balanced top-level {…} / […] blocks instead of parsing
+// line by line.
+export function parseJsonLines(text) {
   const out = [];
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) continue;
+  const trimmedAll = text.trim();
+  if (trimmedAll.startsWith('{') || trimmedAll.startsWith('[')) {
     try {
-      out.push(JSON.parse(trimmed));
+      return [JSON.parse(trimmedAll)];
     } catch {
-      // Progress chatter interleaved with JSON — ignore the unparseable line.
+      // fall through to block scanning
     }
+  }
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch !== '{' && ch !== '[') {
+      i++;
+      continue;
+    }
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let j = i;
+    for (; j < text.length; j++) {
+      const c = text[j];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === '\\') esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === '{' || c === '[') depth++;
+      else if (c === '}' || c === ']') {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    if (depth !== 0) break;
+    const block = text.slice(i, j + 1);
+    try {
+      out.push(JSON.parse(block));
+    } catch {
+      // not JSON after all — skip this opener
+    }
+    i = j + 1;
   }
   return out;
 }
