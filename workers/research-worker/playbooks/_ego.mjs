@@ -6,7 +6,12 @@
 //
 // Convention: a playbook script prints exactly one line
 //   __RESULT__<json>
-// which this helper parses. Everything else on stdout is treated as logging.
+// which this helper parses. Everything else is treated as logging.
+//
+// ego-browser relays the inner script's console.log to ITS OWN stderr, not
+// stdout, so the marker has to be looked for on both streams — scanning stdout
+// alone rejected every successful run with "produced no __RESULT__ line", with
+// the result payload sitting in the error message's own stderr excerpt.
 
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -72,14 +77,19 @@ ${body}
     });
     child.on('close', async (code) => {
       clearTimeout(timer);
-      const line = stdout
-        .split('\n')
-        .reverse()
-        .find((l) => l.startsWith(RESULT_MARKER));
+      // stdout first, then stderr — ego-browser forwards the script's
+      // console.log on stderr, so the marker legitimately lands on either.
+      const findMarker = (stream) =>
+        stream
+          .split('\n')
+          .map((l) => l.trim())
+          .reverse()
+          .find((l) => l.startsWith(RESULT_MARKER));
+      const line = findMarker(stdout) ?? findMarker(stderr);
       if (!line) {
         reject(
           new Error(
-            `ego-browser produced no ${RESULT_MARKER} line (exit ${code}). stderr: ${stderr.slice(0, 800)}`
+            `ego-browser produced no ${RESULT_MARKER} line (exit ${code}). stdout: ${stdout.slice(0, 400)} stderr: ${stderr.slice(0, 800)}`
           )
         );
         return;
