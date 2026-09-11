@@ -618,6 +618,7 @@ class Compositor:
     def _block(self, layer, lines, fontset, y_bottom, fill, tracking=0.0, pill=None,
                text_shadow=True):
         """Centred lines whose block bottom sits at `y_bottom`. Returns the top."""
+        self._last_layer = layer
         lines = [l for l in lines if l]
         if not lines:
             return int(y_bottom)
