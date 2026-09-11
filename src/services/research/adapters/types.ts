@@ -13,6 +13,8 @@ export interface SourceReport {
   status: SourceStatus;
   count: number;
   note?: string;
+  /** WorkerTask id, when this adapter enqueued (or reused) one. */
+  taskId?: string | null;
 }
 
 export interface AdapterContext {

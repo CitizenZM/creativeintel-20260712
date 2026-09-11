@@ -24,7 +24,7 @@ import {
   requeueStaleTasks,
 } from "@/services/worker-tasks";
 import { parseAdCandidates, type AdCandidate } from "@/services/research/ad-candidate";
-import { rankAndSaveCandidates } from "@/services/research/persist";
+import { rerankOwner, saveUnrankedCandidates } from "@/services/research/persist";
 import { TOP_N_PER_COMPETITOR } from "@/services/research/ranking";
 
 export const maxDuration = 60;
@@ -48,30 +48,52 @@ type Body =
   | { action: "fail"; id: string; error: string }
   | { action: "heartbeat"; id: string };
 
-/** Rank + upsert the worker's candidates into the task's project. */
+/**
+ * Upsert the worker's candidates into the task's project, then re-rank that
+ * owner across everything stored for it.
+ *
+ * The candidates come from a public ad library, so the playbooks stamp
+ * `isPaidAd: true`, `adEvidence: "ad_library"` and an `adSource` of
+ * meta_ad_library | tiktok_ad_library | google_ats; `parseAdCandidates` defaults
+ * to the same values when a field is missing. Ownership comes from the task
+ * payload's `competitorId` (null = the brand partition).
+ *
+ * Ranking goes through `rerankOwner` rather than `rankAndSaveCandidates`: the
+ * latter clears the owner's `rankInOwner` before writing, which would have let
+ * one worker task evict the research run's Top-N and replace it with only the
+ * rows that single task returned.
+ */
 async function persistWorkerCandidates(
   projectId: string,
   competitorId: string | null,
   candidates: AdCandidate[]
 ) {
-  if (candidates.length === 0) return { saved: 0, failed: 0 };
+  if (candidates.length === 0) return { saved: 0, failed: 0, ranked: 0 };
   const competitors = await prisma.competitor.findMany({
     where: { projectId },
     select: { id: true },
   });
   const knownOwnerIds = new Set(competitors.map((c) => c.id));
+  const ownerId =
+    competitorId && knownOwnerIds.has(competitorId) ? competitorId : null;
   const owned = candidates.map((c) => ({
     ...c,
-    competitorId:
-      competitorId && knownOwnerIds.has(competitorId) ? competitorId : c.competitorId ?? null,
+    competitorId: ownerId ?? (c.competitorId && knownOwnerIds.has(c.competitorId) ? c.competitorId : null),
+    isPaidAd: true,
+    adEvidence: "ad_library" as const,
   }));
-  const { saved, failed } = await rankAndSaveCandidates({
-    projectId,
-    candidates: owned,
-    knownOwnerIds,
-    topN: TOP_N_PER_COMPETITOR,
-  });
-  return { saved, failed };
+
+  const { saved, failed } = await saveUnrankedCandidates(projectId, owned);
+
+  // Every owner the batch actually touched (normally just one).
+  const owners = new Set(owned.map((c) => c.competitorId ?? null));
+  let ranked = 0;
+  for (const owner of owners) {
+    const r = await rerankOwner(projectId, owner, TOP_N_PER_COMPETITOR);
+    ranked += r.ranked;
+  }
+
+  return { saved, failed, ranked };
 }
 
 export async function POST(request: Request) {
@@ -105,7 +127,7 @@ export async function POST(request: Request) {
         const candidates = parseAdCandidates(body.result?.candidates);
         const payload = (task.payload ?? {}) as { competitorId?: string | null };
 
-        let persisted = { saved: 0, failed: 0 };
+        let persisted = { saved: 0, failed: 0, ranked: 0 };
         if (task.projectId) {
           persisted = await persistWorkerCandidates(
             task.projectId,
@@ -123,6 +145,7 @@ export async function POST(request: Request) {
           task: updated,
           accepted: candidates.length,
           saved: persisted.saved,
+          ranked: persisted.ranked,
         });
       }
 

@@ -66,6 +66,7 @@ export async function runBrowserAdapter(
           status: "ran",
           count: candidates.length,
           note: `reused worker result from ${recent.completedAt?.toISOString().slice(0, 10)}`,
+          taskId: recent.id,
         },
       };
     }
@@ -86,6 +87,7 @@ export async function runBrowserAdapter(
         note: deduped
           ? `already queued for "${ctx.ownerName}" (task ${taskId})`
           : `queued for local worker: "${ctx.ownerName}" (task ${taskId})`,
+        taskId,
       },
     };
   } catch (err) {
@@ -104,3 +106,10 @@ export async function runBrowserAdapter(
 export const browserMetaAdapter = (ctx: AdapterContext) => runBrowserAdapter("meta", ctx);
 export const browserTikTokAdapter = (ctx: AdapterContext) => runBrowserAdapter("tiktok", ctx);
 export const browserGoogleAdapter = (ctx: AdapterContext) => runBrowserAdapter("google", ctx);
+
+/** `browser_*` adapter id → the ad library its playbook drives. */
+export const BROWSER_SOURCE_BY_ADAPTER: Record<string, BrowserSource> = {
+  browser_meta: "meta",
+  browser_tiktok: "tiktok",
+  browser_google: "google",
+};

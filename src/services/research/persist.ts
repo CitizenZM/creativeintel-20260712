@@ -12,9 +12,11 @@ import {
   BRAND_OWNER_KEY,
   UNOWNED_KEY,
   rankByOwner,
+  scoreCandidate,
+  TOP_N_PER_COMPETITOR,
   type RankedCandidate,
 } from "./ranking";
-import type { AdCandidate } from "./ad-candidate";
+import type { AdCandidate, AdAspect, AdSource } from "./ad-candidate";
 
 export interface SaveResult {
   saved: number;
@@ -126,6 +128,123 @@ export async function saveUnrankedCandidates(
       isBrandOwned: c.competitorId == null,
     }))
   );
+}
+
+// ─── Re-rank one owner from what is already stored ───────────────────────────
+
+const SCORED_COLUMNS = {
+  id: true,
+  adSource: true,
+  adEvidence: true,
+  adConfidence: true,
+  viewCount: true,
+  likeCount: true,
+  commentCount: true,
+  metricsSource: true,
+  adSpendEstimate: true,
+  durationSec: true,
+  aspectRatio: true,
+  firstSeenAt: true,
+  lastSeenAt: true,
+  publishedAt: true,
+  rankInOwner: true,
+} as const;
+
+type ScoredRow = {
+  id: string;
+  adSource: string | null;
+  adConfidence: number | null;
+  viewCount: number | null;
+  likeCount: number | null;
+  commentCount: number | null;
+  metricsSource: string;
+  adSpendEstimate: unknown;
+  durationSec: number | null;
+  aspectRatio: string | null;
+  firstSeenAt: Date | null;
+  lastSeenAt: Date | null;
+  publishedAt: Date | null;
+  rankInOwner: number | null;
+};
+
+const ASPECTS = new Set(["9:16", "1:1", "16:9", "4:5"]);
+
+/**
+ * Enough of `toContentAssetData`'s inverse to re-score a stored row with the
+ * same `scoreCandidate` the research run used — so a worker result is ranked on
+ * identical terms to the rows already in the table rather than by a second,
+ * divergent scoring rule.
+ */
+function scoreStoredRow(row: ScoredRow): number {
+  const spend = (row.adSpendEstimate ?? {}) as Record<string, unknown>;
+  const impressionsLower =
+    typeof spend.impressionsLower === "number" ? spend.impressionsLower : undefined;
+  const aspect =
+    row.aspectRatio && ASPECTS.has(row.aspectRatio)
+      ? (row.aspectRatio as AdAspect)
+      : undefined;
+
+  const shim = {
+    source: (row.adSource ?? "youtube") as AdSource,
+    adConfidence: row.adConfidence ?? undefined,
+    durationSec: row.durationSec ?? undefined,
+    aspect,
+    metricsEstimated: row.metricsSource === "AI_INFERRED",
+    metrics: {
+      views: row.viewCount ?? undefined,
+      likes: row.likeCount ?? undefined,
+      comments: row.commentCount ?? undefined,
+      impressionsLower,
+    },
+    firstSeen: row.firstSeenAt?.toISOString(),
+    lastSeen: row.lastSeenAt?.toISOString(),
+    publishedAt: row.publishedAt?.toISOString(),
+  } as unknown as AdCandidate;
+
+  return scoreCandidate(shim).score;
+}
+
+/**
+ * Recompute `rankInOwner` for one owner across everything currently stored for
+ * it. Used after a worker result lands: the new ad-library rows have to compete
+ * with the rows the research run already saved, instead of the owner's Top-N
+ * being cleared and replaced by whatever the single task returned.
+ */
+export async function rerankOwner(
+  projectId: string,
+  competitorId: string | null,
+  topN: number = TOP_N_PER_COMPETITOR
+): Promise<{ ranked: number }> {
+  const rows = (await prisma.contentAsset.findMany({
+    where: { projectId, competitorId },
+    select: SCORED_COLUMNS,
+  })) as unknown as ScoredRow[];
+  if (rows.length === 0) return { ranked: 0 };
+
+  const ordered = rows
+    .map((row) => ({ row, score: scoreStoredRow(row) }))
+    .sort((a, b) => b.score - a.score);
+
+  const nextRank = new Map<string, number | null>();
+  ordered.forEach(({ row }, i) => {
+    nextRank.set(row.id, i < topN ? i + 1 : null);
+  });
+
+  const changed = rows.filter((r) => (nextRank.get(r.id) ?? null) !== r.rankInOwner);
+  await pMap(
+    changed,
+    async (r) => {
+      await prisma.contentAsset
+        .update({
+          where: { id: r.id },
+          data: { rankInOwner: nextRank.get(r.id) ?? null },
+        })
+        .catch(() => undefined);
+    },
+    { concurrency: 5 }
+  );
+
+  return { ranked: Math.min(rows.length, topN) };
 }
 
 /** Rank the candidates per owner and persist each owner's Top-N. */

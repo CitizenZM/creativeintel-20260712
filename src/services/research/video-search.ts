@@ -67,16 +67,31 @@ export interface DispatchResult {
   reports: SourceReport[];
 }
 
-/** Adapter ids this campaign dispatches, split into API-now vs worker-later. */
+/**
+ * Adapter ids this campaign dispatches, split into API-now vs worker-later.
+ *
+ * When the project has no saved CampaignSelection yet, `adaptersFor` falls back
+ * to DEFAULT_ADAPTERS, which carries NO `browser_*` entries. Research can start
+ * before the campaign step is saved (the runner resolves the selection inside
+ * the background job), so that fallback silently skipped every ad-library
+ * worker enqueue: no WorkerTask rows, no `pending_worker` source, and nothing
+ * for the local worker to claim — while the Content page still advertised the
+ * worker sources from the campaign config saved moments later.
+ *
+ * The browser sources are owner-scoped (brand + each competitor), not
+ * platform-scoped, and enqueue is hash-deduped, so an unknown campaign gets the
+ * full browser set rather than none. A campaign that deliberately lists no
+ * browser adapters (e.g. `amazon`) still gets none.
+ */
 export function dispatchPlan(campaign: CampaignPlatform | null): {
   api: AdapterId[];
   browser: AdapterId[];
 } {
   const all = adaptersFor(campaign);
-  return {
-    api: all.filter((a) => !BROWSER_ADAPTERS.has(a)),
-    browser: all.filter((a) => BROWSER_ADAPTERS.has(a)),
-  };
+  const api = all.filter((a) => !BROWSER_ADAPTERS.has(a));
+  const browser = all.filter((a) => BROWSER_ADAPTERS.has(a));
+  if (!campaign) return { api, browser: [...BROWSER_ADAPTERS] };
+  return { api, browser };
 }
 
 /** Run every adapter for one owner (brand or a single competitor). */
