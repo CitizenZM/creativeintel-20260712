@@ -3,6 +3,7 @@ import Link from "next/link";
 import { NARRATIVE_TYPE_LABELS, CONTENT_TYPE_LABELS } from "@/lib/constants";
 import { getCampaignPlatform } from "@/lib/campaign-platform";
 import { ContentPlatformControls } from "@/components/content/content-platform-controls";
+import { OpenOnPlatform } from "@/components/content/open-on-platform";
 import { ScoreBar } from "@/components/dashboard/status-badge";
 import { LoadMoreButton } from "@/components/dashboard/action-buttons";
 import { Eye, ThumbsUp, ExternalLink, ChevronRight, Clock, Crop } from "lucide-react";
@@ -421,15 +422,10 @@ export default async function ContentPage({
                         </div>
 
                         {asset.url && (
-                          <a
-                            href={asset.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <OpenOnPlatform
+                            url={asset.url}
                             className="absolute bottom-2 right-2 p-1 rounded bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Open on platform"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
+                          />
                         )}
                         <div
                           className={`absolute inset-x-0 bottom-0 h-0.5 ${TYPE_ACCENT[asset.type] ?? "bg-gray-400"}`}
