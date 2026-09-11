@@ -472,7 +472,10 @@ export function auditScriptClaims(script: ScriptV2, opts: ScriptClaimsAuditInput
     for (const hit of findAbsoluteMatches(field.text)) {
       violations.push({ path: field.path, text: hit, reason: `absolute/curative claim: "${hit}"` });
     }
-    if (sourceText) {
+    // The rendered body repeats every field above plus structural timing
+    // ("[BODY beat 1 …] 3–4.2s"), so numbers are only audited on the spoken /
+    // on-screen fields where they would actually be a claim.
+    if (sourceText && field.path !== "body (rendered)") {
       for (const nc of extractNumericClaims(field.text)) {
         if (!numberOccursIn(nc.value, sourceText)) {
           violations.push({
