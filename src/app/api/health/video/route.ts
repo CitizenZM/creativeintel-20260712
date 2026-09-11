@@ -17,6 +17,5 @@ export async function GET() {
       groq: !!process.env.GROQ_API_KEY,
       openai: !!process.env.OPENAI_API_KEY,
     },
-    moneyprinter: { configured: !!process.env.MONEYPRINTER_PATH },
   });
 }

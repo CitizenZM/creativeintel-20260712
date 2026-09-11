@@ -42,10 +42,6 @@ export async function checkBinaries() {
     ytdlp: { available: !!ytdlpPath, path: ytdlpPath, version: ytdlpVer },
     ffmpeg: { available: !!ffmpegPath, path: ffmpegPath, version: ffmpegVer },
     python: { available: !!pythonPath, path: pythonPath, version: pythonVer },
-    moneyprinter: {
-      available: !!process.env.MONEYPRINTER_PATH,
-      path: process.env.MONEYPRINTER_PATH,
-    },
   };
 }
 

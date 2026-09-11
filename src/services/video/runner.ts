@@ -7,7 +7,6 @@ import { cloudDownload } from "./cloud-downloader";
 import { transcribeAudio } from "./transcribe";
 import { selectHighlights } from "./highlight";
 import { shortsifyClip } from "./shortsify";
-import { generateProductVideo } from "./moneyprinter";
 import { checkBinaries } from "./binaries";
 import {
   isCloudinaryConfigured,
@@ -280,43 +279,6 @@ export async function runShortsify(
   }
 }
 
-export async function runGenerate(
-  jobId: string,
-  projectId: string,
-  input: { scriptId?: string; script?: string; aspectRatio?: "9:16" | "16:9" | "1:1" }
-) {
-  const update = makeUpdater(jobId);
-  try {
-    let scriptText = input.script;
-    if (!scriptText && input.scriptId) {
-      const s = await prisma.script.findUnique({ where: { id: input.scriptId } });
-      if (!s) throw new Error("Script not found");
-      const hook = ((s.hookVariants as string[]) || [])[0] || "";
-      const cta = ((s.ctaVariants as string[]) || [])[0] || "";
-      scriptText = [hook, s.body, cta].filter(Boolean).join("\n\n");
-    }
-    if (!scriptText) throw new Error("script or scriptId required");
-
-    await update({ status: "running", progress: 10, step: "Rendering" });
-    const outDir = await ensureWorkDir(jobId);
-    const result = await generateProductVideo({
-      script: scriptText,
-      outputDir: outDir,
-      aspectRatio: input.aspectRatio ?? "9:16",
-    });
-
-    await update({
-      status: "complete",
-      progress: 100,
-      step: "Done",
-      output: { mp4: result.outputPath },
-      outputPath: result.outputPath,
-    });
-  } catch (err) {
-    await update({ status: "error", error: err instanceof Error ? err.message : "Generation failed" });
-  }
-}
-
 function parseDate(yyyymmdd: string): Date | null {
   if (!/^\d{8}$/.test(yyyymmdd)) return null;
   return new Date(`${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`);
@@ -324,7 +286,7 @@ function parseDate(yyyymmdd: string): Date | null {
 
 export async function createRenderJob(
   projectId: string,
-  kind: "import" | "shortsify" | "generate",
+  kind: "import" | "shortsify",
   input: unknown
 ): Promise<string> {
   const job = await prisma.renderJob.create({

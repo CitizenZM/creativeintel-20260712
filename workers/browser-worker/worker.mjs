@@ -26,7 +26,6 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import { runGeminiAppJob } from './playbooks/gemini-app.mjs';
 import { runFlowJob } from './playbooks/flow.mjs';
-import { runKlingJob } from './playbooks/kling.mjs';
 
 // ---- Config -----------------------------------------------------------
 
@@ -51,7 +50,6 @@ const API_ENDPOINT = `${APP_URL}/api/worker/browser-jobs`;
 const PLAYBOOKS = {
   ai_studio: runGeminiAppJob,
   flow: runFlowJob,
-  kling: runKlingJob,
 };
 
 // ---- Logging ------------------------------------------------------------

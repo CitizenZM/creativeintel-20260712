@@ -1,0 +1,11 @@
+{
+  "name": "research-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Mac worker daemon that executes research WorkerTask rows by driving the public ad libraries (Meta / TikTok / Google ATC) through ego-browser.",
+  "main": "worker.mjs",
+  "scripts": {
+    "start": "node worker.mjs"
+  }
+}

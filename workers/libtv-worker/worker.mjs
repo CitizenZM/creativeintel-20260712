@@ -54,6 +54,9 @@ const FIXTURE_PATH = fixtureArg
 
 const APP_URL = (process.env.APP_URL || 'https://creativeintel.vercel.app').replace(/\/+$/, '');
 const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
+// Vercel Deployment Protection (SSO) is on for this project; without the bypass
+// secret every API call is answered with an HTML login page.
+const VERCEL_BYPASS = process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '';
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 20000);
 const HEARTBEAT_INTERVAL_MS = 60 * 1000;
 const RUNS_DIR =
@@ -79,12 +82,20 @@ async function callWorkerApi(action, payload = {}) {
   if (!WORKER_TOKEN) {
     throw new Error('WORKER_TOKEN is not set — refusing to call the worker API without auth');
   }
+  const headers = { 'content-type': 'application/json', 'x-worker-token': WORKER_TOKEN };
+  if (VERCEL_BYPASS) headers['x-vercel-protection-bypass'] = VERCEL_BYPASS;
   const res = await fetch(API_ENDPOINT, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-worker-token': WORKER_TOKEN },
+    headers,
     body: JSON.stringify({ action, ...payload }),
   });
   const text = await res.text();
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('text/html') || /<html/i.test(text.slice(0, 200))) {
+    throw new Error(
+      `worker API ${action} was answered with an HTML page (HTTP ${res.status}) — blocked by Vercel Deployment Protection. Set VERCEL_AUTOMATION_BYPASS_SECRET (Vercel → Settings → Deployment Protection → Protection Bypass for Automation).`
+    );
+  }
   let body;
   try {
     body = text ? JSON.parse(text) : {};

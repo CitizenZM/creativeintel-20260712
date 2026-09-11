@@ -133,22 +133,19 @@ export async function completeJob(id: string, resultUrl: string) {
 }
 
 /**
- * Marks a job failed. Increments attempts (in case the caller wants a final
- * bump beyond the one already applied at claim time) — if attempts >= 3
- * the job is terminally "failed", otherwise it's returned to "queued" for
- * another worker to pick up.
+ * Marks a job failed. `attempts` is already incremented by claimNextJob, so it
+ * is NOT bumped again here — incrementing in both places counted every attempt
+ * twice and cut the effective retry budget from 3 to 1.
  */
 export async function failJob(id: string, error: string) {
   const job = await prisma.browserGenJob.findUnique({ where: { id } });
   if (!job) return null;
 
-  const attempts = job.attempts + 1;
-  const terminal = attempts >= MAX_ATTEMPTS;
+  const terminal = job.attempts >= MAX_ATTEMPTS;
 
   return prisma.browserGenJob.update({
     where: { id },
     data: {
-      attempts,
       error,
       status: terminal ? "failed" : "queued",
       workerId: terminal ? job.workerId : null,

@@ -23,6 +23,8 @@ touched from this machine; the only credential here is `WORKER_TOKEN`.
 ```bash
 export APP_URL="https://creativeintel.vercel.app"
 export WORKER_TOKEN="<same value as the app's WORKER_TOKEN>"
+# Deployment Protection (SSO) is enabled on the Vercel project — required:
+export VERCEL_AUTOMATION_BYPASS_SECRET="<Vercel → Settings → Deployment Protection → Protection Bypass for Automation>"
 
 # optional
 export LIBTV_BIN="$HOME/.libtv/libtv"

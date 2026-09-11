@@ -81,8 +81,9 @@ export function VideoLibraryPanel({ projectId }: { projectId: string }) {
   const loadRefs = useCallback(async () => {
     try {
       const res = await fetch(`/api/projects/${projectId}/video/references`);
-      const data = await res.json().catch(() => []);
-      if (Array.isArray(data)) setRefs(data);
+      const data = await res.json().catch(() => ({ references: [] }));
+      const list = Array.isArray(data) ? data : data.references;
+      if (Array.isArray(list)) setRefs(list);
     } catch {
       /* ignore */
     }
@@ -102,8 +103,12 @@ export function VideoLibraryPanel({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   useEffect(() => {
-    loadRefs();
-    loadJobs();
+    // Deferred so the first paint is not blocked by a cascading setState.
+    const id = setTimeout(() => {
+      loadRefs();
+      loadJobs();
+    }, 0);
+    return () => clearTimeout(id);
   }, [loadRefs, loadJobs]);
 
   // Poll while any job is active.

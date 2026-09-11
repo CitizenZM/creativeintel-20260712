@@ -16,6 +16,7 @@ consistent and the cuts on the beat.
 | Var | Why |
 |---|---|
 | `WORKER_TOKEN` | shared secret for `POST /api/worker/libtv`; `openssl rand -hex 32` |
+| `VERCEL_AUTOMATION_BYPASS_SECRET` | worker-side only — the Vercel project has Deployment Protection (SSO) on, so the worker sends `x-vercel-protection-bypass`; create it in Vercel → Settings → Deployment Protection → Protection Bypass for Automation |
 | `CLOUDINARY_URL` *or* `BLOB_READ_WRITE_TOKEN` | where keyframes, clips and masters are hosted |
 
 **Operator's Mac:**

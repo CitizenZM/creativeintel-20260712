@@ -88,10 +88,8 @@ export function LibtvRunPanel({
     [models.image, imageModel]
   );
 
-  useEffect(() => {
-    const durations = videoOption?.durations ?? [];
-    if (durations.length && !durations.includes(clipDurationSec)) setClipDurationSec(durations[0]);
-  }, [videoOption, clipDurationSec]);
+  const durations = videoOption?.durations?.length ? videoOption.durations : [6];
+  const effectiveDuration = durations.includes(clipDurationSec) ? clipDurationSec : durations[0];
 
   const frameCount = storyboard?.frames.length ?? 0;
   const ctaFrames = storyboard?.frames.filter((f) => (f.segment || "").toUpperCase() === "CTA").length ?? 0;
@@ -157,7 +155,7 @@ export function LibtvRunPanel({
         scriptId: storyboard.scriptId,
         imageModel,
         videoModel,
-        clipDurationSec,
+        clipDurationSec: effectiveDuration,
         aspectRatio: "9:16",
       });
       onRunsChanged(data.run as LibtvRunView);
@@ -296,11 +294,11 @@ export function LibtvRunPanel({
             Clip duration
           </span>
           <select
-            value={clipDurationSec}
+            value={effectiveDuration}
             onChange={(e) => setClipDurationSec(Number(e.target.value))}
             className="h-9 w-full rounded-md border border-border bg-background px-2 text-xs"
           >
-            {(videoOption?.durations ?? [6]).map((d) => (
+            {durations.map((d) => (
               <option key={d} value={d}>
                 {d}s
               </option>

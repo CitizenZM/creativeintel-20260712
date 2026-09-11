@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -70,23 +70,6 @@ export default function ResearchPage() {
   const [sources, setSources] = useState<SourceStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const checkStatus = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}`);
-      const data = await res.json().catch(() => null);
-      if (!data) return;
-      if (data.status === "ANALYZED" || data.status === "COMPLETE") {
-        setStatus("complete");
-        setProgress(100);
-      } else if (data.status === "ERROR") {
-        setStatus("error");
-        setError("Research failed. Try again.");
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [projectId]);
-
   // Step labels come from the runner's STEP_NAMES via the status API — never
   // from a hardcoded list that drifts out of sync (audit §1).
   function applyStatusPayload(data: {
@@ -152,32 +135,44 @@ export default function ResearchPage() {
   }
 
   useEffect(() => {
-    // Render whatever the last job recorded before deciding to start a new one.
-    fetch(`/api/projects/${projectId}/research/status`)
-      .then((r) => r.json().catch(() => null))
-      .then((d) => d && applyStatusPayload(d))
-      .catch(() => {});
+    let cancelled = false;
 
-    checkStatus().then(() => {
-      fetch(`/api/projects/${projectId}`)
-        .then((r) => r.json().catch(() => null))
-        .then((d) => {
-          if (!d) return;
-          if (d.status === "DRAFT") startResearch();
-          else if (d.status === "ANALYZED" || d.status === "COMPLETE") {
-            setStatus("complete");
-            setProgress(100);
-          } else if (d.status === "RESEARCHING") {
-            if (d._count?.contentAssets > 0 || d.brandHealthScore) {
-              setStatus("complete");
-              setProgress(100);
-            } else {
-              startResearch();
-            }
-          }
-        })
-        .catch(() => {});
-    });
+    async function bootstrap() {
+      // Render whatever the last job recorded before deciding to start a new one.
+      const last = await fetch(`/api/projects/${projectId}/research/status`)
+        .then((r) => r.json())
+        .catch(() => null);
+      if (cancelled) return;
+      if (last) applyStatusPayload(last);
+
+      const project = await fetch(`/api/projects/${projectId}`)
+        .then((r) => r.json())
+        .catch(() => null);
+      if (cancelled || !project) return;
+
+      if (project.status === "ANALYZED" || project.status === "COMPLETE") {
+        setStatus("complete");
+        setProgress(100);
+      } else if (project.status === "ERROR") {
+        setStatus("error");
+        setError("Research failed. Try again.");
+      } else if (project.status === "DRAFT") {
+        await startResearch();
+      } else if (project.status === "RESEARCHING") {
+        // Partially complete runs should show their results, not restart.
+        if (project._count?.contentAssets > 0 || project.brandHealthScore) {
+          setStatus("complete");
+          setProgress(100);
+        } else {
+          await startResearch();
+        }
+      }
+    }
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
