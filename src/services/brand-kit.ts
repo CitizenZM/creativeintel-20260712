@@ -211,12 +211,16 @@ export async function getBrandTruthForPrompts(projectId: string): Promise<string
     lines.push(`FONTS: ${fonts.map((f) => [f.role, f.family].filter(Boolean).join(": ")).join(", ")}`);
   }
 
-  const logo = kit?.assets.find((a) => a.kind === "LOGO");
-  if (logo) lines.push(`LOGO ASSET: ${logo.url}`);
+  // Never put asset URLs in prompt text: with the inline storage provider they
+  // are multi-megabyte data: URLs and blow past argv/context limits.
+  const logos = (kit?.assets || []).filter((a) => a.kind === "LOGO");
+  if (logos.length) lines.push(`LOGO: official logo on file (${logos.map((l) => l.variant || "default").join(", ")}) — composited locally, never rendered by AI`);
 
   const packshots = (kit?.assets || []).filter((a) => a.kind === "PACKSHOT");
   if (packshots.length) {
-    lines.push(`PACKSHOT REFERENCES (the real product — match exactly): ${packshots.map((p) => p.url).slice(0, 4).join(", ")}`);
+    lines.push(
+      `PACKSHOTS: ${packshots.length} official product photo(s) on file (${packshots.map((p) => p.variant || "front").slice(0, 4).join(", ")}) — the real product; match its shape, colours and label exactly and never invent packaging`
+    );
   }
 
   if (lines.length <= 1) return "";

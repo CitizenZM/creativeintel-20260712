@@ -453,10 +453,24 @@ async function processRun(payload) {
     await bindCanvas(payload, cli, runDir);
 
     const manifest = { runId, frames: payload.frames, clips: [], nodes: [] };
+    const failedNodes = new Set();
+    const MAX_PROMPT_CHARS = 6000;
 
     for (const job of payload.jobs) {
       await api.jobStarted(job.id);
       try {
+        // A clip is image-to-video off its keyframe; without the keyframe it
+        // can only fail (and would still be charged if it somehow ran).
+        const missingUpstream = (job.leftRefs || [])
+          .map((ref) => String(ref).replace(/^FF\s+/, ''))
+          .filter((name) => failedNodes.has(name));
+        if (missingUpstream.length) {
+          throw new Error(`upstream node failed: ${missingUpstream.join(', ')}`);
+        }
+        if (job.prompt && job.prompt.length > MAX_PROMPT_CHARS) {
+          logError(`node ${job.nodeName}: prompt is ${job.prompt.length} chars — truncating to ${MAX_PROMPT_CHARS}`);
+          job.prompt = job.prompt.slice(0, MAX_PROMPT_CHARS);
+        }
         const result = await executeJob(job, { cli, runDir, runId });
         creditsSpent += result.creditsSpent ?? 0;
         const coverage = job.kind === 'video' ? clipCoverage(job, result) : null;
@@ -486,8 +500,13 @@ async function processRun(payload) {
       } catch (err) {
         if (err instanceof LibtvAuthError) throw err;
         logError(`node ${job.nodeName} failed:`, err.message || err);
+        failedNodes.add(job.nodeName);
         await api.jobFailed(job.id, err.message || err);
       }
+    }
+
+    if (failedNodes.size) {
+      throw new Error(`${failedNodes.size} node(s) failed: ${[...failedNodes].join(', ')} — not assembling`);
     }
 
     await writeFile(path.join(runDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
