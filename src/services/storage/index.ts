@@ -137,6 +137,24 @@ export function readImageMeta(buffer: Buffer): ImageMeta {
   return {};
 }
 
+const IMAGE_FORMAT_MIME: Record<string, string> = {
+  png: "image/png",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+};
+
+/**
+ * Sniff a buffer's real content type from its leading bytes (magic numbers),
+ * ignoring whatever content-type a multipart part or client claimed. Returns
+ * undefined when the bytes don't match any recognized image signature.
+ */
+export function sniffImageContentType(buffer: Buffer): string | undefined {
+  const { format } = readImageMeta(buffer);
+  return format ? IMAGE_FORMAT_MIME[format] : undefined;
+}
+
 // ─── Providers ───────────────────────────────────────────────────────────────
 
 function sanitizeName(name: string): string {

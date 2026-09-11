@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { brandAssetMetaSchema } from "@/lib/validations";
 import { ensureBrandKit, refreshCompleteness } from "@/services/brand-kit";
-import { readImageMeta, uploadBuffer } from "@/services/storage";
+import { readImageMeta, sniffImageContentType, uploadBuffer } from "@/services/storage";
 
 export const maxDuration = 60;
 
@@ -61,13 +61,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid asset metadata", issues: meta.error.issues }, { status: 400 });
   }
 
-  const contentType = (file.type || "application/octet-stream").split(";")[0].toLowerCase();
-  if (!mimeAllowed(contentType)) {
-    return NextResponse.json(
-      { error: `Unsupported file type: ${contentType || "unknown"}. Allowed: PNG, JPEG, WebP, SVG, PDF, fonts.` },
-      { status: 415 }
-    );
-  }
+  const declaredType = (file.type || "application/octet-stream").split(";")[0].trim().toLowerCase();
 
   if (file.size > MAX_BYTES) {
     return NextResponse.json({ error: "File is larger than 15MB" }, { status: 413 });
@@ -77,6 +71,32 @@ export async function POST(
   if (buffer.length === 0) return NextResponse.json({ error: "File is empty" }, { status: 400 });
   if (buffer.length > MAX_BYTES) {
     return NextResponse.json({ error: "File is larger than 15MB" }, { status: 413 });
+  }
+
+  // Multipart part content-types are client-supplied and unreliable (missing,
+  // generic octet-stream, or just wrong for the actual bytes — e.g. a PNG
+  // saved with a .webp extension). Sniff the real type from the buffer's
+  // magic numbers and trust it over the declared type whenever they conflict.
+  const sniffedType = sniffImageContentType(buffer);
+  let contentType = declaredType;
+  if (!declaredType || declaredType === "application/octet-stream" || declaredType !== sniffedType) {
+    if (sniffedType) {
+      // Bytes are a recognized image — sniffed type wins even if the
+      // declared type disagreed (mislabeled) or was missing/generic.
+      contentType = sniffedType;
+    } else if (declaredType.startsWith("image/")) {
+      // Declared type claims an image, but the bytes don't match any known
+      // image signature (e.g. a text file renamed to .png). Don't trust the
+      // claim — force it through the allowlist rejection below.
+      contentType = "application/octet-stream";
+    }
+  }
+
+  if (!mimeAllowed(contentType)) {
+    return NextResponse.json(
+      { error: `Unsupported file type: ${contentType || "unknown"}. Allowed: PNG, JPEG, WebP, SVG, PDF, fonts.` },
+      { status: 415 }
+    );
   }
 
   const kit = await ensureBrandKit(projectId);
