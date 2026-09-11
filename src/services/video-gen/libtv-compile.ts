@@ -17,7 +17,7 @@
  * packaging.
  */
 import { prisma } from "@/lib/db";
-import { getBrandTruthForPrompts, type SkuDimensionsCm } from "@/services/brand-kit";
+import { type SkuDimensionsCm } from "@/services/brand-kit";
 import { FRAME_SECONDS, type GridFrame } from "@/lib/storyboard-grid";
 import {
   DEFAULT_BUDGET_MODE,
@@ -40,6 +40,35 @@ import {
 
 export const PRODUCT_LOCK_CLAUSE =
   "product stays exactly the same size, shape and label throughout — it must not grow, warp or re-letter";
+
+// Image/video models draw any copy they are given; offers, URLs, CTAs and claims
+// are composited locally, so generation prompts must never mention them.
+export const NO_TEXT_CLAUSE =
+  "Absolutely no text, letters, numbers, captions, subtitles, logos, watermarks, buttons, price tags, phone UI or screenshot frames anywhere in the image — a clean photographic frame only; the product label may stay soft and unreadable.";
+
+interface ProductTruthKit {
+  productSummary?: string | null;
+  doNotShow?: unknown;
+  colorsHex?: unknown;
+}
+
+/** Physical product facts only — never brand-kit copy (offer, URL, CTA, claims). */
+function productTruthFor(kit: ProductTruthKit | null, productName: string | null): string {
+  const lines: string[] = [];
+  const summary = kit?.productSummary?.trim();
+  if (summary) lines.push(`PRODUCT (match the uploaded packshot exactly): ${summary}`);
+  else if (productName) lines.push(`PRODUCT (match the uploaded packshot exactly): ${productName}`);
+  const colours = Array.isArray(kit?.colorsHex)
+    ? (kit!.colorsHex as Array<{ hex?: string; usage?: string; name?: string }>)
+        .filter((c) => c && c.hex)
+        .slice(0, 4)
+        .map((c) => `${c.hex}${c.usage ? ` (${c.usage})` : ""}`)
+    : [];
+  if (colours.length) lines.push(`Set and wardrobe palette may echo the brand colours ${colours.join(", ")} — as colour only, never as graphics.`);
+  const doNot = Array.isArray(kit?.doNotShow) ? (kit!.doNotShow as unknown[]).map(String).filter(Boolean) : [];
+  if (doNot.length) lines.push(`Never show: ${doNot.join("; ")}.`);
+  return lines.join("\n");
+}
 
 export class LibtvCompileError extends Error {
   status: number;
@@ -126,6 +155,7 @@ function imagePromptFor(
     );
   }
   parts.push("Capture the action mid-motion, never a static pose — this still becomes a clip's first frame.");
+  parts.push(NO_TEXT_CLAUSE);
 
   if (opts.brandTruth) parts.push(opts.brandTruth);
   return parts.join("\n\n");
@@ -141,7 +171,7 @@ function twoBeatMotion(frame: GridFrame): string {
 }
 
 function videoPromptFor(frame: GridFrame, brandTruth: string): string {
-  const parts = [twoBeatMotion(frame), PRODUCT_LOCK_CLAUSE];
+  const parts = [twoBeatMotion(frame), PRODUCT_LOCK_CLAUSE, "No on-screen text, captions, logos or UI."];
   if (frame.sfx) parts.push(`Sound design cue: ${clean(frame.sfx)}`);
   if (brandTruth) parts.push(brandTruth);
   return parts.join("\n\n");
@@ -195,7 +225,7 @@ function groupVideoPrompt(group: GridFrame[]): string {
 
   const beats = group.map((frame, i) => `Beat ${i + 1}: ${truncateWords(beatFor(frame), perBeat)}`);
   const phrase = truncateWords(`${beats.join(". ")}. ${CONTINUOUS_TAKE}`, budget + reserved - wordsOf(PRODUCT_LOCK_CLAUSE).length);
-  return `${phrase}\n\n${PRODUCT_LOCK_CLAUSE}`;
+  return `${phrase}\n\n${PRODUCT_LOCK_CLAUSE}. No on-screen text, captions, logos or UI.`;
 }
 
 /** Frame i of a group is cut from clip time [i·frameSeconds, +window length]. */
@@ -263,9 +293,9 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
   }
   const logo = (kit?.assets ?? []).find((a) => a.kind === "LOGO" && a.url) ?? null;
 
-  const brandTruth = await getBrandTruthForPrompts(projectId);
   const dims = (kit?.skuDimensionsCm as SkuDimensionsCm | null) ?? null;
   const skuName = kit?.skuName || project.productName || null;
+  const brandTruth = productTruthFor(kit as ProductTruthKit | null, skuName);
   const scale = scaleClause(skuName, dims);
 
   const video = findVideoModel(videoModel);
