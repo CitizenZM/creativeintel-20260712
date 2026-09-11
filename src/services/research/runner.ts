@@ -1,35 +1,50 @@
 import { prisma } from "@/lib/db";
-import { pMap, pMapSettled } from "@/lib/parallel";
+import { pMapSettled } from "@/lib/parallel";
 import { crawlWebsite, type CrawlResult } from "./website-crawler";
 import {
   quickBrandUnderstanding,
   extractSearchKeywords,
 } from "./keyword-extractor";
-import { searchVerifiedVideos, type VideoResult } from "./video-search";
-import { recordDiscoveredVideos } from "./video-corpus";
+import { searchVerifiedVideos } from "./video-search";
+import { fetchTikTokForYouFeed } from "./adapters/tiktok-creative-center";
 import { getCampaignPlatform } from "@/lib/campaign-platform";
-import { searchTikTokTopAds } from "./tiktok-creative-center";
-import { searchMetaAdLibrary, SkippedNoCredentialsError } from "./meta-ads";
+import { rankAndSaveCandidates } from "./persist";
+import { TOP_N_PER_COMPETITOR, BRAND_OWNER_KEY, UNOWNED_KEY } from "./ranking";
 import { runAnalysisPipeline } from "@/services/ai/analysis-pipeline";
 import {
   startStep,
   updateStep,
   completeStep,
+  recordStepSources,
   failJob,
   completeJob,
   type JobStep,
+  type JobSourceStatus,
 } from "./job-progress";
-import type { YouTubeVideo } from "./youtube-service";
+import type { AdCandidate } from "./ad-candidate";
+import type { SourceReport } from "./adapters/types";
 
 const CONCURRENCY = Number(process.env.RESEARCH_CONCURRENCY ?? 5);
 
 export const STEP_NAMES = [
   "Crawl websites",
   "Brand understanding",
-  "Video search",
-  "Paid media discovery",
+  "Ad discovery",
+  "Rank & save",
   "AI analysis",
 ] as const;
+
+const AD_DISCOVERY_STEP = STEP_NAMES[2];
+const RANK_STEP = STEP_NAMES[3];
+
+function toJobSources(reports: SourceReport[]): JobSourceStatus[] {
+  return reports.map((r) => ({
+    name: r.name,
+    status: r.status,
+    count: r.count,
+    note: r.note,
+  }));
+}
 
 export async function runResearch(projectId: string, jobId: string): Promise<void> {
   try {
@@ -63,11 +78,10 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
     );
 
     let brandCrawl: CrawlResult | null = null;
-    const competitorCrawls = new Map<string, CrawlResult>();
     crawlResults.forEach((r, i) => {
       if (r.status !== "fulfilled") return;
       if (r.value.id === "brand") brandCrawl = r.value.result;
-      else competitorCrawls.set(crawlTargets[i].id, r.value.result);
+      else void crawlTargets[i];
     });
     await completeStep(jobId, "Crawl websites");
 
@@ -86,248 +100,107 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
     );
     await completeStep(jobId, "Brand understanding");
 
-    // Step 3: parallel video search across brand + competitors
-    await startStep(jobId, "Video search");
+    // Step 3: ad discovery — adapters chosen by the campaign platform.
+    await startStep(jobId, AD_DISCOVERY_STEP);
 
-    // Search strategy + platform constraint come from the user's selected
-    // campaign platform when available; otherwise fall back to a campaign-goal
-    // heuristic. This keeps search consistent with "Platform & Duration".
     const campaignSelection = await prisma.campaignSelection
       .findUnique({ where: { projectId }, select: { platform: true } })
       .catch(() => null);
-    const campaignPlatform = getCampaignPlatform(campaignSelection?.platform);
-
-    let searchStrategy: "short_social" | "tvc" | "mixed";
-    let allowedPlatforms: VideoResult["platform"][] | undefined;
-
-    if (campaignPlatform) {
-      searchStrategy = campaignPlatform.searchStrategy;
-      allowedPlatforms = campaignPlatform.videoPlatforms;
-    } else {
-      const goal = (project.campaignGoal || "").toLowerCase();
-      const isShortFormSocial =
-        goal.includes("tiktok") || goal.includes("instagram") ||
-        goal.includes("shop") || goal.includes("social") ||
-        goal.includes("creator") || goal.includes("affiliate");
-      const isTVC =
-        goal.includes("tvc") || goal.includes("television") ||
-        goal.includes("brand awareness") || goal.includes("hero") ||
-        goal.includes("landing page");
-      searchStrategy = isShortFormSocial ? "short_social" : isTVC ? "tvc" : "mixed";
-    }
+    const campaign = getCampaignPlatform(campaignSelection?.platform);
 
     const brandProductName =
       project.productPageTitle || project.productName || undefined;
-    const videoTargets = [
-      { name: project.brandName, ownerId: null as string | null, productName: brandProductName },
+    const owners = [
+      {
+        name: project.brandName,
+        competitorId: null as string | null,
+        productName: brandProductName,
+      },
       ...project.competitors.map((c) => ({
         name: c.name,
-        ownerId: c.id,
+        competitorId: c.id as string | null,
         productName: undefined as string | undefined,
       })),
     ];
-    const videoResults = await pMapSettled(
-      videoTargets,
-      async (t, i) => {
-        // Search → score → LLM-verify → loop, keeping only videos that are
-        // relevant AND high-engagement (or exhausting the retry rounds).
-        const videos = await searchVerifiedVideos(t.name, keywords, searchStrategy, {
-          productName: t.productName,
-          targetCount: 6,
-          maxRounds: 3,
-          allowedPlatforms,
+
+    const perOwner = await pMapSettled(
+      owners,
+      async (owner, i) => {
+        const { candidates, reports } = await searchVerifiedVideos(owner.name, keywords, {
+          projectId,
+          competitorId: owner.competitorId,
+          productName: owner.productName,
+          campaign,
+          countries: ["US"],
+          limit: 20,
         });
-        const verifiedCount = videos.filter((v) => v.verified).length;
-        // Accumulate into the cross-project learning corpus (additive, never
-        // cleared) so discoveries persist across refreshes and projects.
-        await recordDiscoveredVideos(videos, {
-          brandName: t.name,
-          workspaceId: project.workspaceId ?? null,
-        });
+        await recordStepSources(jobId, AD_DISCOVERY_STEP, toJobSources(reports));
+        const paid = candidates.filter((c) => c.isPaidAd).length;
         await updateStep(
           jobId,
-          "Video search",
-          Math.round(((i + 1) / Math.max(videoTargets.length, 1)) * 100),
-          `${verifiedCount} verified videos for ${t.name}`
+          AD_DISCOVERY_STEP,
+          Math.round(((i + 1) / Math.max(owners.length, 1)) * 100),
+          `${paid}/${candidates.length} paid candidates for ${owner.name}`
         );
-        return { ownerId: t.ownerId, videos };
+        return candidates;
       },
       { concurrency: Math.min(CONCURRENCY, 3) }
     );
 
-    const allVideos: VideoResult[] = [];
-    const brandVideos: VideoResult[] = [];
-    const competitorVideosMap = new Map<string, VideoResult[]>();
-    videoResults.forEach((r) => {
-      if (r.status !== "fulfilled") return;
-      allVideos.push(...r.value.videos);
-      if (r.value.ownerId === null) brandVideos.push(...r.value.videos);
-      else competitorVideosMap.set(r.value.ownerId, r.value.videos);
+    const allCandidates: AdCandidate[] = [];
+    perOwner.forEach((r) => {
+      if (r.status === "fulfilled") allCandidates.push(...r.value);
     });
-    await completeStep(jobId, "Video search");
 
-    // Step 4: paid media (TikTok Creative Center)
-    await startStep(jobId, "Paid media discovery");
-    try {
-      const tiktokAds = await searchTikTokTopAds({
-        limit: 20,
-        industry: project.category ?? undefined,
-      });
-      const upsertResults = await pMap(
-        tiktokAds,
-        async (ad) => {
-          if (!ad.adId) return false;
-          const adUrl =
-            ad.videoUrl ||
-            `https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en?material_id=${ad.adId}`;
-          try {
-            await prisma.contentAsset.upsert({
-              where: { projectId_url: { projectId, url: adUrl } },
-              create: {
-                projectId,
-                type: "TIKTOK_VIDEO",
-                title: ad.title,
-                url: adUrl,
-                thumbnailUrl: ad.thumbnailUrl ?? null,
-                description: ad.brand
-                  ? `Top TikTok ad by ${ad.brand}`
-                  : "TikTok Creative Center top ad",
-                platform: "TikTok Ads",
-                isPaidMedia: true,
-                adSpendEstimate: {
-                  impressions: ad.impressions ?? null,
-                  ctr: ad.ctr ?? null,
-                  cvr: ad.cvr ?? null,
-                  firstSeen: ad.firstSeenAt ?? null,
-                  lastSeen: ad.lastSeenAt ?? null,
-                } as never,
-                dataSource: "PUBLIC_WEB",
-                rawData: ad.rawData as never,
-              },
-              update: {
-                title: ad.title,
-                thumbnailUrl: ad.thumbnailUrl ?? null,
-                adSpendEstimate: {
-                  impressions: ad.impressions ?? null,
-                  ctr: ad.ctr ?? null,
-                  cvr: ad.cvr ?? null,
-                  firstSeen: ad.firstSeenAt ?? null,
-                  lastSeen: ad.lastSeenAt ?? null,
-                } as never,
-              },
-            });
-            return true;
-          } catch {
-            return false;
-          }
-        },
-        { concurrency: 5 }
-      );
-      const saved = upsertResults.filter(Boolean).length;
-      await updateStep(
-        jobId,
-        "Paid media discovery",
-        100,
-        `${saved} TikTok paid ads saved`
-      );
-    } catch (err) {
-      await updateStep(
-        jobId,
-        "Paid media discovery",
-        100,
-        `Paid media skipped: ${err instanceof Error ? err.message : "unknown"}`
-      );
-    }
-    // Meta Ad Library (Instagram/Facebook paid ads) — additive, guarded so a
-    // missing token or API failure never breaks the run. Runs alongside the
-    // TikTok Creative Center step above (same "Paid media discovery" step).
-    try {
-      const metaAds = await searchMetaAdLibrary({
-        brand: project.brandName,
-        countries: ["US"],
-        limit: 20,
-      });
-      const metaSaved = await pMap(
-        metaAds,
-        async (ad) => {
-          if (!ad.adId || !ad.adSnapshotUrl) return false;
-          const isInstagramSnapshot = /instagram/i.test(ad.adSnapshotUrl);
-          try {
-            await prisma.contentAsset.upsert({
-              where: { projectId_url: { projectId, url: ad.adSnapshotUrl } },
-              create: {
-                projectId,
-                type: "SOCIAL_POST",
-                title: ad.creativeBody?.slice(0, 120) || ad.pageName || "Meta ad",
-                url: ad.adSnapshotUrl,
-                thumbnailUrl: ad.creativeImageUrl ?? null,
-                description: ad.creativeBody ?? null,
-                platform: isInstagramSnapshot ? "instagram" : "facebook",
-                isPaidMedia: true,
-                adSpendEstimate: {
-                  impressions: ad.impressions ?? null,
-                  spend: ad.spend ?? null,
-                  firstSeen: ad.firstSeenAt ?? null,
-                  lastSeen: ad.lastSeenAt ?? null,
-                } as never,
-                dataSource: "PUBLIC_WEB",
-                rawData: ad as never,
-              },
-              update: {
-                title: ad.creativeBody?.slice(0, 120) || ad.pageName || "Meta ad",
-                thumbnailUrl: ad.creativeImageUrl ?? null,
-                adSpendEstimate: {
-                  impressions: ad.impressions ?? null,
-                  spend: ad.spend ?? null,
-                  firstSeen: ad.firstSeenAt ?? null,
-                  lastSeen: ad.lastSeenAt ?? null,
-                } as never,
-              },
-            });
-            return true;
-          } catch {
-            return false;
-          }
-        },
-        { concurrency: 5 }
-      );
-      const savedCount = metaSaved.filter(Boolean).length;
-      await updateStep(
-        jobId,
-        "Paid media discovery",
-        100,
-        `${savedCount} Meta Ad Library ads saved`
-      );
-    } catch (err) {
-      if (err instanceof SkippedNoCredentialsError) {
-        await updateStep(jobId, "Paid media discovery", 100, err.message);
-      } else {
-        await updateStep(
-          jobId,
-          "Paid media discovery",
-          100,
-          `Meta Ad Library skipped: ${err instanceof Error ? err.message : "unknown error"}`
-        );
-      }
-    }
-    await completeStep(jobId, "Paid media discovery");
+    // Brand-agnostic TikTok top-ads feed: stored as unowned corpus, never
+    // allowed to occupy a competitor's Top-N slot.
+    const forYou = await fetchTikTokForYouFeed({
+      industry: project.category ?? undefined,
+      region: "US",
+      limit: 20,
+      advertiserNames: [project.brandName, ...project.competitors.map((c) => c.name)],
+    });
+    allCandidates.push(...forYou.candidates);
+    await recordStepSources(jobId, AD_DISCOVERY_STEP, toJobSources([forYou.report]));
 
-    // Step 5: AI analysis
-    await startStep(jobId, "AI analysis");
-    const ytBrand: YouTubeVideo[] = brandVideos.map(videoResultToYouTube);
-    const ytComp = new Map<string, YouTubeVideo[]>();
-    for (const [k, v] of competitorVideosMap.entries()) {
-      ytComp.set(k, v.map(videoResultToYouTube));
-    }
-    await runAnalysisPipeline(
+    await completeStep(jobId, AD_DISCOVERY_STEP);
+
+    // Step 4: gate, rank per owner, write ContentAsset rows.
+    await startStep(jobId, RANK_STEP);
+    const knownOwnerIds = new Set(project.competitors.map((c) => c.id));
+    const { saved, failed, perOwner: ownerCounts } = await rankAndSaveCandidates({
       projectId,
+      candidates: allCandidates,
+      knownOwnerIds,
+      topN: TOP_N_PER_COMPETITOR,
+    });
+
+    const nameByOwner = new Map<string, string>([
+      [BRAND_OWNER_KEY, project.brandName],
+      [UNOWNED_KEY, "unattributed feed"],
+      ...project.competitors.map((c) => [c.id, c.name] as [string, string]),
+    ]);
+    await updateStep(
       jobId,
-      brandCrawl,
-      competitorCrawls,
-      ytBrand,
-      ytComp,
-      allVideos
+      RANK_STEP,
+      100,
+      `${saved} assets saved (Top ${TOP_N_PER_COMPETITOR}/owner): ` +
+        ownerCounts
+          .map((o) => `${nameByOwner.get(o.ownerKey) ?? o.ownerKey} ${o.count}`)
+          .join(", ") +
+        (failed > 0 ? ` — ${failed} write(s) failed` : "")
     );
+    await completeStep(jobId, RANK_STEP);
+
+    // Step 5: AI analysis. The pipeline now reads assets back from the DB;
+    // it is no longer handed a video list.
+    await startStep(jobId, "AI analysis");
+    await runAnalysisPipeline(projectId, {
+      jobId,
+      onProgress: (step: string, pct: number) => {
+        void updateStep(jobId, "AI analysis", pct, step);
+      },
+    });
     await completeStep(jobId, "AI analysis");
 
     await prisma.project.update({
@@ -342,21 +215,6 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
       .update({ where: { id: projectId }, data: { status: "ERROR" } })
       .catch(() => {});
   }
-}
-
-function videoResultToYouTube(v: VideoResult): YouTubeVideo & { _platform?: string } {
-  return {
-    videoId: v.videoId,
-    title: v.title,
-    description: v.description,
-    publishedAt: v.publishedAt,
-    thumbnailUrl: v.thumbnailUrl,
-    channelTitle: v.channelTitle,
-    viewCount: v.viewCount,
-    likeCount: v.likeCount,
-    commentCount: v.commentCount,
-    _platform: v.platform,
-  };
 }
 
 export type { JobStep };

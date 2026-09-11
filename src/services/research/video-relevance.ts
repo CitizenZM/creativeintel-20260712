@@ -1,9 +1,19 @@
+/**
+ * Ad-vs-UGC classification for AdCandidates.
+ *
+ * The old verifier asked "is this relevant marketing/ad/brand content?", which
+ * a creator review passes trivially (audit §2c). It now asks the discriminating
+ * question — "is this a brand-PAID advertisement rather than a creator
+ * review/UGC?" — and returns a confidence the hard gates can threshold on.
+ *
+ * Candidates that already carry ad-library evidence skip the LLM entirely; a
+ * cheap regex pre-filter drops the obviously-irrelevant before spending tokens.
+ */
 import { z } from "zod";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
-import type { VideoResult } from "./video-search";
+import type { AdCandidate } from "./ad-candidate";
 import type { SearchKeywords } from "./keyword-extractor";
-
-// ─── Context ──────────────────────────────────────────────────────────────────
+import { isAdLibrarySource } from "./ranking";
 
 export interface RelevanceContext {
   brandName: string;
@@ -11,32 +21,30 @@ export interface RelevanceContext {
   keywords: SearchKeywords;
 }
 
-export interface ScoredVideo extends VideoResult {
-  relevanceScore: number; // 0..1 deterministic
-  qualityScore: number; // 0..1 from views/engagement/recency
-  verified: boolean; // passed LLM relevance check
-  verifyConfidence: number; // 0..1
-  verifyReason?: string;
-  combinedScore: number; // final ranking score
-}
+// ─── Cheap deterministic pre-filter ──────────────────────────────────────────
 
-// ─── Deterministic relevance ────────────────────────────────────────────────
+const EXCLUDE_HARD = [
+  "reaction",
+  "tutorial how to download",
+  "free download mod",
+  "full movie",
+  "lyrics",
+];
 
-const EXCLUDE_HARD = ["reaction", "tutorial how to download", "free download mod"];
+const AD_INTENT = /\b(ad|ads|advert|advertisement|commercial|campaign|spot|tvc|sponsored|promo)\b/;
 
 /**
  * Deterministic 0..1 relevance from title/description/channel against the brand
- * context. Returns -1 to signal a HARD reject (excluded term / wrong language).
+ * context. Returns -1 to signal a HARD reject (excluded term / wrong brand).
  */
-export function scoreRelevance(video: VideoResult, ctx: RelevanceContext): number {
+export function scoreRelevance(c: AdCandidate, ctx: RelevanceContext): number {
   const brand = ctx.brandName.toLowerCase();
-  const title = (video.title || "").toLowerCase();
-  const desc = (video.description || "").toLowerCase();
-  const channel = (video.channelTitle || "").toLowerCase();
+  const title = (c.title || "").toLowerCase();
+  const desc = (c.description || "").toLowerCase();
+  const channel = (c.channelTitle || c.advertiserName || "").toLowerCase();
   const text = `${title} ${desc}`;
   const bc = ctx.keywords.brandContext;
 
-  // Hard rejects: explicit "not related to" terms from brand disambiguation.
   for (const term of bc?.notRelatedTo ?? []) {
     if (term && text.includes(term.toLowerCase())) return -1;
   }
@@ -45,19 +53,16 @@ export function scoreRelevance(video: VideoResult, ctx: RelevanceContext): numbe
   }
 
   let score = 0;
-  // Brand presence
   if (title.includes(brand)) score += 0.4;
   else if (desc.includes(brand)) score += 0.2;
-  if (channel.includes(brand)) score += 0.25; // likely official channel
+  if (channel.includes(brand)) score += 0.25; // likely the official account
 
-  // Product name presence
   if (ctx.productName) {
     const p = ctx.productName.toLowerCase();
     if (title.includes(p)) score += 0.2;
     else if (desc.includes(p)) score += 0.1;
   }
 
-  // Disambiguation / category keyword hits (caps contribution)
   const disambig = bc?.disambiguationKeywords ?? [];
   const cats = ctx.keywords.categoryKeywords ?? [];
   const prods = ctx.keywords.productKeywords ?? [];
@@ -66,225 +71,171 @@ export function scoreRelevance(video: VideoResult, ctx: RelevanceContext): numbe
   ).length;
   score += Math.min(0.3, kwHits * 0.1);
 
-  // Ad/commercial intent signal
-  if (/\b(ad|advert|commercial|campaign|spot|tvc)\b/.test(text)) score += 0.1;
+  if (AD_INTENT.test(text)) score += 0.1;
 
   return Math.max(0, Math.min(1, score));
 }
 
-// ─── Quality (views / engagement / recency) ──────────────────────────────────
+// ─── LLM ad classifier ───────────────────────────────────────────────────────
 
-/**
- * 0..1 quality from view count, engagement rate, and recency. Sources without
- * metrics (Vimeo/IG via search) get a neutral baseline so they aren't unfairly
- * zeroed — relevance carries them instead.
- */
-export function scoreQuality(video: VideoResult): number {
-  const views = video.viewCount || 0;
-  const hasMetrics = views > 0;
-  if (!hasMetrics) return 0.35; // neutral baseline for metric-less sources
-
-  // Log-scaled view score: 1k→~0.3, 100k→~0.6, 10M→~1.0
-  const viewScore = Math.min(1, Math.log10(views + 1) / 7);
-
-  // Engagement rate = (likes + comments) / views, capped. Skip this term
-  // (fall back to view-based scoring only) when metrics are known to be
-  // fabricated/estimated, or when both like/comment counts are zero — real
-  // engagement data of exactly 0/0 is rare and usually means "not available".
-  const noRealEngagementData =
-    video.metricsEstimated === true ||
-    ((video.likeCount || 0) === 0 && (video.commentCount || 0) === 0);
-
-  let recencyScore = 0.5;
-  const ts = Date.parse(video.publishedAt);
-  if (!Number.isNaN(ts)) {
-    const ageDays = (Date.now() - ts) / 86_400_000;
-    recencyScore = ageDays <= 0 ? 0.5 : Math.max(0, Math.min(1, 1 - ageDays / 1095)); // ~3yr falloff
-  }
-
-  if (noRealEngagementData) {
-    // Redistribute the engagement weight into the view score.
-    return 0.9 * viewScore + 0.1 * recencyScore;
-  }
-
-  const eng =
-    ((video.likeCount || 0) + (video.commentCount || 0)) / Math.max(views, 1);
-  const engScore = Math.min(1, eng / 0.1); // 10% engagement → full marks
-
-  return 0.6 * viewScore + 0.3 * engScore + 0.1 * recencyScore;
-}
-
-// ─── LLM verification ────────────────────────────────────────────────────────
-
-const verifySchema = z.object({
+const adVerdictSchema = z.object({
   verdicts: z.array(
     z.object({
       index: z.coerce.number(),
-      relevant: z.boolean(),
-      confidence: z.coerce.number().min(0).max(1),
+      isAd: z.boolean(),
+      adConfidence: z.coerce.number().min(0).max(1),
+      advertiserGuess: z.string().optional().default(""),
       reason: z.string().optional().default(""),
     })
   ),
 });
 
-export type VerifyResult = {
-  relevant: boolean;
-  confidence: number;
+export interface AdVerdict {
+  isAd: boolean;
+  adConfidence: number;
+  advertiserGuess: string;
   reason: string;
-};
+}
 
-export type Verifier = (
-  videos: VideoResult[],
+export type AdClassifier = (
+  candidates: AdCandidate[],
   ctx: RelevanceContext
-) => Promise<VerifyResult[]>;
+) => Promise<AdVerdict[]>;
 
 /**
- * Batched LLM relevance check — "is each video actually about this brand's
- * product/marketing?" Returns one verdict per input video (index-aligned).
- * On failure, conservatively marks all as unverified (caller decides).
+ * Batched classifier — one verdict per input candidate, index-aligned.
+ * Throws when the LLM is unavailable so the caller can degrade deterministically
+ * instead of silently rejecting every candidate.
  */
-export const llmVerifier: Verifier = async (videos, ctx) => {
-  if (videos.length === 0) return [];
+export const llmAdClassifier: AdClassifier = async (candidates, ctx) => {
+  if (candidates.length === 0) return [];
   const bc = ctx.keywords.brandContext;
-  const list = videos
+  const list = candidates
     .map(
-      (v, i) =>
-        `${i}. [${v.platform}] "${v.title}" — channel: ${v.channelTitle} — ${(v.description || "").slice(0, 160)}`
+      (c, i) =>
+        `${i}. [${c.platform}${c.durationSec ? ` ${Math.round(c.durationSec)}s` : ""}] "${c.title}" — by: ${c.channelTitle || c.advertiserName || "unknown"} — ${(c.description || "").slice(0, 200)}`
     )
     .join("\n");
 
-  const system = `You verify whether each candidate video is genuinely relevant marketing/ad/brand content for a specific brand. Reject videos that merely mention the word but are about something else (homonyms, unrelated topics, fan edits, news, tutorials).`;
+  const system = `You classify short video creatives. For each candidate decide ONE thing: is this a BRAND-PAID ADVERTISEMENT (produced or commissioned by the brand and run as paid media — TV/YouTube pre-roll, in-feed social ad, branded spot, official product film) rather than creator-made organic content (review, unboxing, haul, comparison, reaction, tutorial, news coverage, fan edit)?
+
+An influencer post is only an ad when it is clearly a paid brand partnership for THIS brand. A video published on the brand's own official channel that reads as advertising counts as an ad. Anything about a different brand or a homonym is NOT an ad for this brand — return isAd=false with a low confidence.`;
 
   const user = `Brand: "${ctx.brandName}"${ctx.productName ? ` — product: ${ctx.productName}` : ""}
 Business: ${bc?.businessType ?? "?"} / ${bc?.industry ?? "?"}
 This brand IS about: ${(bc?.disambiguationKeywords ?? []).join(", ") || "(n/a)"}
 This brand is NOT: ${(bc?.notRelatedTo ?? []).join(", ") || "(n/a)"}
 
-For EACH candidate, decide if it is relevant brand/ad/product content for THIS brand.
-Return JSON: {"verdicts":[{"index":0,"relevant":true,"confidence":0.0-1.0,"reason":"short"}]}
-Be strict: if it's likely a homonym or off-topic, relevant=false.
+Return JSON: {"verdicts":[{"index":0,"isAd":true,"adConfidence":0.0-1.0,"advertiserGuess":"who paid for it","reason":"short"}]}
+adConfidence is your confidence that it IS a brand-paid ad. Be strict — a review that praises the product is still not an ad.
 
 Candidates:
 ${list}`;
 
-  try {
-    const res = await analyzeWithClaude({
-      systemPrompt: system,
-      userPrompt: user,
-      responseSchema: verifySchema,
-      maxTokens: Math.min(4000, 600 + videos.length * 120),
-    });
-    const byIndex = new Map(res.verdicts.map((v) => [v.index, v]));
-    return videos.map((_, i) => {
-      const v = byIndex.get(i);
-      return {
-        relevant: v?.relevant ?? false,
-        confidence: v?.confidence ?? 0,
-        reason: v?.reason ?? "no verdict",
-      };
-    });
-  } catch (err) {
-    // Signal failure to the caller so it can fall back to deterministic-only
-    // gating instead of silently dropping every video.
+  const res = await analyzeWithClaude({
+    systemPrompt: system,
+    userPrompt: user,
+    responseSchema: adVerdictSchema,
+    maxTokens: Math.min(4000, 600 + candidates.length * 120),
+  }).catch((err) => {
     throw new Error(
-      `LLM verification unavailable: ${err instanceof Error ? err.message : String(err)}`
+      `Ad classification unavailable: ${err instanceof Error ? err.message : String(err)}`
     );
-  }
+  });
+
+  const byIndex = new Map(res.verdicts.map((v) => [v.index, v]));
+  return candidates.map((_, i) => {
+    const v = byIndex.get(i);
+    return {
+      isAd: v?.isAd ?? false,
+      adConfidence: v?.adConfidence ?? 0,
+      advertiserGuess: v?.advertiserGuess ?? "",
+      reason: v?.reason ?? "no verdict",
+    };
+  });
 };
 
-// ─── Selection ────────────────────────────────────────────────────────────────
+// ─── Classification pass ─────────────────────────────────────────────────────
 
-export interface SelectOptions {
-  targetCount?: number;
-  minViews?: number;
-  minEngagementRate?: number;
-  minRelevance?: number; // deterministic prefilter
-  minConfidence?: number; // LLM confidence to count as verified
-  verifier?: Verifier;
+export interface ClassifyOptions {
+  minRelevance?: number;
+  classifier?: AdClassifier;
+  /** Cap on how many candidates are sent to the LLM in one run. */
+  maxToClassify?: number;
 }
 
-const DEFAULTS = {
-  targetCount: 6,
-  minViews: 1000,
-  minEngagementRate: 0.01,
-  minRelevance: 0.3,
-  minConfidence: 0.6,
-};
+export interface ClassifyResult {
+  candidates: AdCandidate[];
+  /** True when the LLM was unavailable and deterministic scoring stood in. */
+  degraded: boolean;
+  classifiedCount: number;
+}
 
 /**
- * Score, verify, and filter candidates down to the best relevant + high-quality
- * videos. A video passes only if it clears BOTH the relevance bar (deterministic
- * prefilter + LLM verification) AND the quality bar (views or engagement, with a
- * relevance exception for metric-less sources).
+ * Annotate candidates with `isPaidAd` / `adEvidence` / `adConfidence`.
+ * Ad-library candidates pass through untouched; the rest are pre-filtered on
+ * deterministic relevance, then classified in one batched LLM call.
  */
-export async function selectRelevantVideos(
-  candidates: VideoResult[],
+export async function classifyAdCandidates(
+  candidates: AdCandidate[],
   ctx: RelevanceContext,
-  opts: SelectOptions = {}
-): Promise<ScoredVideo[]> {
-  const o = { ...DEFAULTS, ...opts };
-  const verify = opts.verifier ?? llmVerifier;
+  opts: ClassifyOptions = {}
+): Promise<ClassifyResult> {
+  const minRelevance = opts.minRelevance ?? 0.3;
+  const classifier = opts.classifier ?? llmAdClassifier;
+  const maxToClassify = opts.maxToClassify ?? 40;
 
-  // 1) Deterministic prefilter — drop hard rejects and clearly-irrelevant.
-  const prefiltered = candidates
-    .map((v) => ({ v, rel: scoreRelevance(v, ctx) }))
-    .filter((x) => x.rel >= 0 && x.rel >= o.minRelevance);
+  const fromLibrary: AdCandidate[] = [];
+  const needsClassification: AdCandidate[] = [];
 
-  if (prefiltered.length === 0) return [];
-
-  // 2) LLM verification on the prefiltered set (batched). If the LLM is
-  //    unavailable (bad key, timeout), degrade gracefully to deterministic-only
-  //    gating rather than silently dropping every candidate.
-  let verdicts: VerifyResult[];
-  let degraded = false;
-  try {
-    verdicts = await verify(
-      prefiltered.map((x) => x.v),
-      ctx
-    );
-  } catch {
-    degraded = true;
-    verdicts = prefiltered.map(() => ({
-      relevant: false,
-      confidence: 0,
-      reason: "verify unavailable — deterministic fallback",
-    }));
+  for (const c of candidates) {
+    if (isAdLibrarySource(c.source) || c.adEvidence === "ad_library") {
+      fromLibrary.push({ ...c, isPaidAd: true, adConfidence: c.adConfidence ?? 1 });
+      continue;
+    }
+    const rel = scoreRelevance(c, ctx);
+    if (rel < 0 || rel < minRelevance) continue;
+    needsClassification.push({ ...c, adConfidence: rel });
   }
 
-  // 3) Combine + apply quality gate.
-  const scored: ScoredVideo[] = prefiltered.map((x, i) => {
-    const verdict = verdicts[i] ?? { relevant: false, confidence: 0, reason: "" };
-    const quality = scoreQuality(x.v);
-    const verified = verdict.relevant && verdict.confidence >= o.minConfidence;
-    const combinedScore = 0.55 * x.rel + 0.45 * quality;
+  const batch = needsClassification
+    .sort((a, b) => (b.adConfidence ?? 0) - (a.adConfidence ?? 0))
+    .slice(0, maxToClassify);
+
+  let verdicts: AdVerdict[];
+  let degraded = false;
+  try {
+    verdicts = await classifier(batch, ctx);
+  } catch {
+    degraded = true;
+    verdicts = [];
+  }
+
+  const classified: AdCandidate[] = batch.map((c, i) => {
+    if (degraded) {
+      // Deterministic fallback: only a strong ad-intent signal counts as paid.
+      const text = `${c.title} ${c.description ?? ""}`.toLowerCase();
+      const looksLikeAd = AD_INTENT.test(text) && (c.adConfidence ?? 0) >= 0.5;
+      return {
+        ...c,
+        isPaidAd: looksLikeAd,
+        adEvidence: looksLikeAd ? ("classifier" as const) : ("none" as const),
+        adConfidence: looksLikeAd ? 0.75 : (c.adConfidence ?? 0) * 0.5,
+      };
+    }
+    const v = verdicts[i];
     return {
-      ...x.v,
-      relevanceScore: x.rel,
-      qualityScore: quality,
-      verified,
-      verifyConfidence: verdict.confidence,
-      verifyReason: verdict.reason,
-      combinedScore,
+      ...c,
+      isPaidAd: v.isAd,
+      adEvidence: v.isAd ? ("classifier" as const) : ("none" as const),
+      adConfidence: v.adConfidence,
+      advertiserName: v.advertiserGuess || c.advertiserName,
     };
   });
 
-  const engRate = (v: ScoredVideo) =>
-    v.viewCount > 0
-      ? ((v.likeCount || 0) + (v.commentCount || 0)) / v.viewCount
-      : 0;
-
-  const passing = scored.filter((v) => {
-    // Relevance bar: LLM verification normally; a higher deterministic relevance
-    // bar when the LLM is unavailable.
-    const relevantEnough = degraded ? v.relevanceScore >= 0.5 : v.verified;
-    if (!relevantEnough) return false;
-    const hasMetrics = v.viewCount > 0;
-    const qualityOk = hasMetrics
-      ? v.viewCount >= o.minViews || engRate(v) >= o.minEngagementRate
-      : v.relevanceScore >= 0.6; // metric-less: require strong relevance
-    return qualityOk;
-  });
-
-  passing.sort((a, b) => b.combinedScore - a.combinedScore);
-  return passing.slice(0, o.targetCount);
+  return {
+    candidates: [...fromLibrary, ...classified],
+    degraded,
+    classifiedCount: batch.length,
+  };
 }

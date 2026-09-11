@@ -10,23 +10,54 @@ import {
   Circle,
   ArrowRight,
   Play,
-  Globe,
-  Video,
-  MessageSquare,
-  Brain,
-  BarChart3,
+  KeyRound,
+  Laptop,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const STEPS = [
-  { name: "Crawling websites", icon: Globe },
-  { name: "YouTube research", icon: Video },
-  { name: "Collecting mentions", icon: MessageSquare },
-  { name: "AI analysis", icon: Brain },
-  { name: "Scoring content", icon: BarChart3 },
-];
-
 type Status = "idle" | "running" | "complete" | "error";
+
+interface JobStep {
+  name: string;
+  status: "pending" | "running" | "complete" | "error";
+  progress: number;
+  message?: string;
+}
+
+interface SourceStatus {
+  name: string;
+  status: "ran" | "skipped_no_key" | "failed" | "pending_worker";
+  count: number;
+  note?: string;
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  youtube_shorts: "YouTube Shorts",
+  youtube_long: "YouTube (long-form)",
+  meta_ad_library: "Meta Ad Library API",
+  tiktok_cc: "TikTok Creative Center",
+  tiktok_cc_for_you: "TikTok top ads (feed)",
+  tiktok_organic: "TikTok organic",
+  ig_reels: "Instagram Reels",
+  ad_classifier: "Ad vs UGC classifier",
+  meta_ad_library_browser: "Meta Ad Library (worker)",
+  tiktok_ad_library_browser: "TikTok Ad Library (worker)",
+  google_ads_transparency_browser: "Google Ads Transparency (worker)",
+};
+
+const SOURCE_STATUS_STYLE: Record<SourceStatus["status"], string> = {
+  ran: "bg-[var(--status-healthy-bg)] text-[var(--status-healthy-fg)]",
+  skipped_no_key: "bg-muted text-muted-foreground",
+  failed: "bg-[var(--status-urgent-bg)] text-[var(--status-urgent-fg)]",
+  pending_worker: "bg-[var(--status-ai-bg)] text-[var(--status-ai-fg)]",
+};
+
+const SOURCE_STATUS_LABEL: Record<SourceStatus["status"], string> = {
+  ran: "ran",
+  skipped_no_key: "skipped — no key",
+  failed: "failed",
+  pending_worker: "pending local worker",
+};
 
 export default function ResearchPage() {
   const params = useParams();
@@ -35,6 +66,8 @@ export default function ResearchPage() {
 
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
+  const [steps, setSteps] = useState<JobStep[]>([]);
+  const [sources, setSources] = useState<SourceStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const checkStatus = useCallback(async () => {
@@ -54,6 +87,18 @@ export default function ResearchPage() {
     }
   }, [projectId]);
 
+  // Step labels come from the runner's STEP_NAMES via the status API — never
+  // from a hardcoded list that drifts out of sync (audit §1).
+  function applyStatusPayload(data: {
+    progress?: number;
+    steps?: JobStep[];
+    sources?: SourceStatus[];
+  }) {
+    if (typeof data.progress === "number") setProgress(data.progress);
+    if (Array.isArray(data.steps)) setSteps(data.steps);
+    if (Array.isArray(data.sources)) setSources(data.sources);
+  }
+
   async function pollStatus(jobId?: string): Promise<void> {
     const qs = jobId ? `?jobId=${encodeURIComponent(jobId)}` : "";
     while (true) {
@@ -63,7 +108,7 @@ export default function ResearchPage() {
         await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
-      if (typeof data.progress === "number") setProgress(data.progress);
+      applyStatusPayload(data);
       if (data.status === "complete") {
         setStatus("complete");
         setProgress(100);
@@ -107,6 +152,12 @@ export default function ResearchPage() {
   }
 
   useEffect(() => {
+    // Render whatever the last job recorded before deciding to start a new one.
+    fetch(`/api/projects/${projectId}/research/status`)
+      .then((r) => r.json().catch(() => null))
+      .then((d) => d && applyStatusPayload(d))
+      .catch(() => {});
+
     checkStatus().then(() => {
       fetch(`/api/projects/${projectId}`)
         .then((r) => r.json().catch(() => null))
@@ -117,7 +168,6 @@ export default function ResearchPage() {
             setStatus("complete");
             setProgress(100);
           } else if (d.status === "RESEARCHING") {
-            // Stuck in researching — data may be partially complete
             if (d._count?.contentAssets > 0 || d.brandHealthScore) {
               setStatus("complete");
               setProgress(100);
@@ -130,6 +180,9 @@ export default function ResearchPage() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const pendingWorker = sources.filter((s) => s.status === "pending_worker");
+  const missingKeys = sources.filter((s) => s.status === "skipped_no_key");
 
   return (
     <div className="max-w-xl mx-auto">
@@ -171,53 +224,95 @@ export default function ResearchPage() {
             </div>
           </div>
 
-          {/* Steps */}
+          {/* Steps — names and states come straight from the job record */}
           <div className="space-y-1">
-            {STEPS.map((step, i) => {
-              const stepProgress = (progress / 100) * STEPS.length;
-              const isComplete = stepProgress > i + 1;
-              const isRunning = stepProgress > i && stepProgress <= i + 1;
-              const Icon = step.icon;
-
-              return (
-                <div
-                  key={step.name}
-                  className="flex items-center gap-3 py-2"
-                >
-                  <div className="shrink-0">
-                    {isComplete ? (
+            {steps.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-2">Waiting for the job to start…</p>
+            ) : (
+              steps.map((step) => (
+                <div key={step.name} className="flex items-start gap-3 py-2">
+                  <div className="shrink-0 mt-0.5">
+                    {step.status === "complete" ? (
                       <CheckCircle2 className="h-4 w-4 text-[var(--status-healthy-fg)]" />
-                    ) : isRunning ? (
+                    ) : step.status === "running" ? (
                       <Loader2 className="h-4 w-4 text-[var(--status-ai-fg)] animate-spin" />
-                    ) : status === "error" && i === Math.floor(stepProgress) ? (
+                    ) : step.status === "error" ? (
                       <XCircle className="h-4 w-4 text-[var(--status-urgent-fg)]" />
                     ) : (
                       <Circle className="h-4 w-4 text-muted-foreground/40" />
                     )}
                   </div>
-                  <Icon className={cn(
-                    "h-4 w-4 shrink-0",
-                    isComplete || isRunning ? "text-foreground" : "text-muted-foreground/60"
-                  )} />
-                  <span className={cn(
-                    "text-sm font-medium",
-                    isComplete
-                      ? "text-foreground"
-                      : isRunning
-                        ? "text-foreground"
-                        : "text-muted-foreground"
-                  )}>
-                    {step.name}
-                  </span>
+                  <div className="min-w-0">
+                    <p
+                      className={cn(
+                        "text-sm font-medium",
+                        step.status === "pending" ? "text-muted-foreground" : "text-foreground"
+                      )}
+                    >
+                      {step.name}
+                    </p>
+                    {step.message && (
+                      <p className="text-[11px] text-muted-foreground mt-0.5 break-words">
+                        {step.message}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              );
-            })}
+              ))
+            )}
           </div>
 
-          {status === "running" && (
-            <p className="text-xs text-muted-foreground">
-              Crawling websites, searching YouTube, and running AI analysis. This takes ~30–60 seconds.
-            </p>
+          {/* Source ledger — what ran, what was skipped, what is queued */}
+          {sources.length > 0 && (
+            <div className="space-y-2 border-t border-border pt-4">
+              <p className="text-xs font-medium text-muted-foreground">Sources</p>
+              <ul className="space-y-1.5">
+                {sources.map((s) => (
+                  <li key={s.name} className="flex items-start justify-between gap-3 text-xs">
+                    <div className="min-w-0">
+                      <span className="font-medium">{SOURCE_LABELS[s.name] ?? s.name}</span>
+                      {s.note && (
+                        <span className="block text-[11px] text-muted-foreground break-words">
+                          {s.note}
+                        </span>
+                      )}
+                    </div>
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      <span className="num text-muted-foreground">{s.count}</span>
+                      <span
+                        className={cn(
+                          "rounded-full px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap",
+                          SOURCE_STATUS_STYLE[s.status]
+                        )}
+                      >
+                        {SOURCE_STATUS_LABEL[s.status]}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {missingKeys.length > 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
+              <KeyRound className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>
+                {missingKeys.length} source{missingKeys.length !== 1 ? "s" : ""} skipped for a
+                missing API key. Everything else still ran.
+              </span>
+            </div>
+          )}
+
+          {pendingWorker.length > 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
+              <Laptop className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>
+                {pendingWorker.length} ad-library fetch
+                {pendingWorker.length !== 1 ? "es are" : " is"} queued for the local research
+                worker. Results appear on the Content page once it runs.
+              </span>
+            </div>
           )}
         </div>
       </div>

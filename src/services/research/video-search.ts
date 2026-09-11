@@ -1,17 +1,40 @@
-import { createHash } from "node:crypto";
-import { searchYouTubeVideos, type YouTubeVideo } from "./youtube-service";
-import { searchDuckDuckGo } from "./duckduckgo";
-import { scrapeTikTokVideo } from "./tiktok-scraper";
-import { getVimeoMetadata } from "./vimeo-service";
+/**
+ * Adapter dispatch.
+ *
+ * The campaign platform decides WHICH adapters run (campaign-platform.ts
+ * `adapters`). The old code searched YouTube+Vimeo under `short_social` and
+ * then filtered every non-TikTok candidate away, emptying the pool (audit §2a,
+ * video-search.ts:51-57 / :406). There is no post-hoc `allowedPlatforms` filter
+ * here any more — the platform gate lives in ranking.ts and only sees
+ * candidates the dispatcher actually asked for.
+ */
 import type { SearchKeywords } from "./keyword-extractor";
-import { pMap } from "@/lib/parallel";
+import { dedupeCandidates, type AdCandidate } from "./ad-candidate";
 import {
-  selectRelevantVideos,
-  type RelevanceContext,
-  type ScoredVideo,
-  type SelectOptions,
-} from "./video-relevance";
+  adaptersFor,
+  BROWSER_ADAPTERS,
+  type AdapterId,
+  type CampaignPlatform,
+} from "@/lib/campaign-platform";
+import { pMapSettled } from "@/lib/parallel";
+import { youtubeShortsAdapter, youtubeLongAdapter } from "./adapters/youtube-shorts";
+import { metaAdLibraryAdapter } from "./adapters/meta-ad-library";
+import { tiktokCreativeCenterAdapter } from "./adapters/tiktok-creative-center";
+import { tiktokOrganicAdapter } from "./adapters/tiktok-organic";
+import { instagramAdapter } from "./adapters/instagram";
+import {
+  browserMetaAdapter,
+  browserTikTokAdapter,
+  browserGoogleAdapter,
+} from "./adapters/browser-adapters";
+import type { Adapter, AdapterContext, SourceReport } from "./adapters/types";
+import { classifyAdCandidates, type RelevanceContext } from "./video-relevance";
 
+/**
+ * Legacy row shape. Retained only so modules still mid-migration
+ * (analysis-pipeline.ts) keep compiling; nothing in the research pipeline
+ * produces or consumes it any more.
+ */
 export interface VideoResult {
   platform: "youtube" | "youtube_short" | "tiktok" | "vimeo" | "instagram";
   videoId: string;
@@ -24,399 +47,127 @@ export interface VideoResult {
   likeCount: number;
   commentCount: number;
   publishedAt: string;
-  /** True when likeCount/commentCount are heuristic estimates, not real data. */
   metricsEstimated?: boolean;
 }
 
-/**
- * Derive a short, stable, deterministic ID from a URL. Used as a fallback
- * whenever a platform-native ID can't be extracted (e.g. no numeric Vimeo ID
- * in the URL, or no recognizable Instagram shortcode). Normalizes the URL
- * (strips query string/fragment, lowercases) so the same video always maps
- * to the same ID.
- */
-function stableIdFromUrl(url: string): string {
-  let normalized = url.trim().toLowerCase();
-  normalized = normalized.split("#")[0].split("?")[0];
-  return createHash("sha1").update(normalized).digest("hex").slice(0, 12);
+const REGISTRY: Record<AdapterId, Adapter> = {
+  youtube_shorts: youtubeShortsAdapter,
+  youtube_long: youtubeLongAdapter,
+  meta_ad_library: metaAdLibraryAdapter,
+  tiktok_cc: tiktokCreativeCenterAdapter,
+  tiktok_organic: tiktokOrganicAdapter,
+  instagram: instagramAdapter,
+  browser_meta: browserMetaAdapter,
+  browser_tiktok: browserTikTokAdapter,
+  browser_google: browserGoogleAdapter,
+};
+
+export interface DispatchResult {
+  candidates: AdCandidate[];
+  reports: SourceReport[];
 }
 
-export async function searchAllPlatforms(
-  brandName: string,
-  keywords: SearchKeywords,
-  strategy: "short_social" | "tvc" | "mixed" = "mixed"
-): Promise<VideoResult[]> {
-  const allResults: VideoResult[] = [];
-
-  if (strategy === "short_social") {
-    // TikTok + YouTube Shorts only
-    const [ytShorts, vimeoResults] = await Promise.all([
-      searchYouTubeShorts(brandName, keywords),
-      searchVimeoContent(brandName, keywords),
-    ]);
-    allResults.push(...ytShorts, ...vimeoResults);
-  } else if (strategy === "tvc") {
-    // YouTube long-form + Vimeo
-    const [ytLong, vimeoResults] = await Promise.all([
-      searchYouTubeLong(brandName, keywords),
-      searchVimeoContent(brandName, keywords),
-    ]);
-    allResults.push(...ytLong, ...vimeoResults);
-  } else {
-    // Mixed: all platforms
-    const [ytLong, ytShorts, socialResults, vimeoResults] = await Promise.all([
-      searchYouTubeLong(brandName, keywords),
-      searchYouTubeShorts(brandName, keywords),
-      searchSocialPlatforms(brandName, keywords),
-      searchVimeoContent(brandName, keywords),
-    ]);
-    allResults.push(...ytLong, ...ytShorts, ...socialResults, ...vimeoResults);
-  }
-
-  // Deduplicate by videoId
-  const seen = new Set<string>();
-  return allResults.filter((v) => {
-    const key = `${v.platform}:${v.videoId}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-async function searchVimeoContent(
-  brandName: string,
-  keywords: SearchKeywords
-): Promise<VideoResult[]> {
-  const query = `site:vimeo.com "${brandName}" ${keywords.adSearchQueries[0] || "ad commercial"}`;
-  try {
-    const results = await searchDuckDuckGo(query, 5);
-    return results
-      .filter((r) => r.url.includes("vimeo.com"))
-      .map((r) => {
-        const idMatch = r.url.match(/vimeo\.com\/(\d+)/);
-        const videoId = idMatch?.[1] || stableIdFromUrl(r.url);
-        return {
-          platform: "vimeo" as const,
-          videoId,
-          title: r.title || `${brandName} Vimeo Video`,
-          description: r.snippet || "",
-          url: r.url,
-          thumbnailUrl: `https://vumbnail.com/${videoId}.jpg`,
-          channelTitle: "Vimeo",
-          viewCount: 0,
-          likeCount: 0,
-          commentCount: 0,
-          publishedAt: new Date().toISOString(),
-        };
-      });
-  } catch {
-    return [];
-  }
-}
-
-async function searchYouTubeLong(
-  brandName: string,
-  keywords: SearchKeywords
-): Promise<VideoResult[]> {
-  const queries = keywords.adSearchQueries.slice(0, 2);
-  if (queries.length === 0) {
-    const disambig = keywords.brandContext?.disambiguationKeywords?.[0] || "";
-    queries.push(`${brandName} ${disambig} official ad commercial`);
-  }
-
-  const mc = keywords.brandContext?.disambiguationKeywords;
-  const mnc = keywords.brandContext?.notRelatedTo;
-
-  const perQuery = await pMap(
-    queries,
-    async (query) => {
-      try {
-        const videos = await searchYouTubeVideos(query, 5, undefined, brandName, mc, mnc);
-        return videos.map((v) => youtubeToResult(v, "youtube"));
-      } catch {
-        return [];
-      }
-    },
-    { concurrency: 3 }
-  );
-  return perQuery.flat();
-}
-
-async function searchYouTubeShorts(
-  brandName: string,
-  keywords: SearchKeywords
-): Promise<VideoResult[]> {
-  const disambig = keywords.brandContext?.disambiguationKeywords?.[0] || "";
-  const query = `${brandName} ${disambig} ad short`;
-  const mc = keywords.brandContext?.disambiguationKeywords;
-  const mnc = keywords.brandContext?.notRelatedTo;
-  try {
-    const videos = await searchYouTubeVideos(query, 5, "EgIQCQ%3D%3D", brandName, mc, mnc);
-    return videos.map((v) => youtubeToResult(v, "youtube_short"));
-  } catch {
-    return [];
-  }
-}
-
-/** Extract a stable Instagram shortcode from a /reel/ or /p/ URL, ignoring
- * any trailing query string/fragment. Falls back to a URL hash if no
- * shortcode pattern matches. */
-function instagramVideoId(url: string): string {
-  const match = url.match(/\/(?:reel|p)\/([A-Za-z0-9_-]+)/);
-  if (match?.[1]) return match[1];
-  return stableIdFromUrl(url);
-}
-
-async function socialResultForDdgItem(
-  r: { title: string; url: string; snippet: string },
-  brandName: string
-): Promise<VideoResult | null> {
-  if (r.url.includes("tiktok.com") && r.url.includes("/video/")) {
-    const video = await scrapeTikTokVideo(r.url).catch(() => null);
-    if (!video) return null;
-    return {
-      platform: "tiktok",
-      videoId: video.videoId,
-      title: video.title || video.description.slice(0, 80),
-      description: video.description,
-      url: video.url,
-      thumbnailUrl: video.thumbnailUrl,
-      channelTitle: video.author || video.authorHandle,
-      viewCount: video.viewCount,
-      likeCount: video.likeCount,
-      commentCount: video.commentCount,
-      publishedAt: video.publishedAt,
-    };
-  }
-
-  if (r.url.includes("instagram.com") && (r.url.includes("/reel/") || r.url.includes("/p/"))) {
-    return {
-      platform: "instagram",
-      videoId: instagramVideoId(r.url),
-      title: r.title || `${brandName} Instagram Reel`,
-      description: r.snippet || "",
-      url: r.url,
-      thumbnailUrl: "",
-      channelTitle: "Instagram",
-      viewCount: 0,
-      likeCount: 0,
-      commentCount: 0,
-      publishedAt: new Date().toISOString(),
-    };
-  }
-
-  if (r.url.includes("vimeo.com")) {
-    const video = await getVimeoMetadata(r.url).catch(() => null);
-    if (!video) return null;
-    return {
-      platform: "vimeo",
-      videoId: video.videoId,
-      title: video.title,
-      description: video.description,
-      url: video.url,
-      thumbnailUrl: video.thumbnailUrl,
-      channelTitle: video.author,
-      viewCount: 0,
-      likeCount: 0,
-      commentCount: 0,
-      publishedAt: video.publishedAt,
-    };
-  }
-
-  return null;
-}
-
-async function searchSocialPlatforms(
-  brandName: string,
-  keywords: SearchKeywords
-): Promise<VideoResult[]> {
-  // Single DuckDuckGo query for TikTok + IG + Vimeo combined
-  const disambig = keywords.brandContext?.disambiguationKeywords?.[0] || "";
-  let results: VideoResult[] = [];
-
-  try {
-    const ddgResults = await searchDuckDuckGo(
-      `"${brandName}" ${disambig} tiktok OR instagram OR vimeo video ad`,
-      10
-    );
-
-    const perItem = await pMap(
-      ddgResults,
-      (r) => socialResultForDdgItem(r, brandName),
-      { concurrency: 3 }
-    );
-    results = perItem.filter((v): v is VideoResult => v !== null);
-  } catch {
-    // fall through
-  }
-
-  // If combined search found nothing, try individual TikTok search
-  if (results.length === 0) {
-    const ttResults = await searchTikTok(brandName, keywords);
-    results.push(...ttResults);
-  }
-
-  return results;
-}
-
-async function searchTikTok(
-  brandName: string,
-  keywords: SearchKeywords
-): Promise<VideoResult[]> {
-  const results: VideoResult[] = [];
-  const disambig = keywords.brandContext?.disambiguationKeywords?.[0] || "";
-
-  // Better queries: avoid overly restrictive "site:" filter
-  // DuckDuckGo returns more TikTok results with natural queries
-  const queries = [
-    `"${brandName}" ${disambig} tiktok video`,
-    `"${brandName}" tiktok viral ad`,
-    `site:tiktok.com "${brandName}" ${disambig}`,
-  ];
-
-  // Intentionally sequential: the `results.length >= 5` early-break below is
-  // a deliberate short-circuit once we have enough results, and running the
-  // queries in parallel would waste requests that this loop is designed to
-  // avoid. Leave as-is.
-  for (const query of queries) {
-    try {
-      const ddgResults = await searchDuckDuckGo(query, 8);
-      const tiktokUrls = ddgResults
-        .filter((r) => r.url.includes("tiktok.com") && r.url.includes("/video/"))
-        .slice(0, 3);
-
-      const scraped = await Promise.all(
-        tiktokUrls.map((r) => scrapeTikTokVideo(r.url))
-      );
-
-      for (const video of scraped) {
-        if (!video) continue;
-        results.push({
-          platform: "tiktok",
-          videoId: video.videoId,
-          title: video.title || video.description.slice(0, 80),
-          description: video.description,
-          url: video.url,
-          thumbnailUrl: video.thumbnailUrl,
-          channelTitle: video.author || video.authorHandle,
-          viewCount: video.viewCount,
-          likeCount: video.likeCount,
-          commentCount: video.commentCount,
-          publishedAt: video.publishedAt,
-        });
-      }
-    } catch {
-      // continue
-    }
-    if (results.length >= 5) break;
-  }
-
-  return results;
-}
-
-function youtubeToResult(
-  v: YouTubeVideo,
-  platform: "youtube" | "youtube_short"
-): VideoResult {
+/** Adapter ids this campaign dispatches, split into API-now vs worker-later. */
+export function dispatchPlan(campaign: CampaignPlatform | null): {
+  api: AdapterId[];
+  browser: AdapterId[];
+} {
+  const all = adaptersFor(campaign);
   return {
-    platform,
-    videoId: v.videoId,
-    title: v.title,
-    description: v.description,
-    url: `https://youtube.com/watch?v=${v.videoId}`,
-    thumbnailUrl: v.thumbnailUrl,
-    channelTitle: v.channelTitle,
-    viewCount: v.viewCount,
-    likeCount: v.likeCount,
-    commentCount: v.commentCount,
-    publishedAt: v.publishedAt,
-    metricsEstimated: v.metricsEstimated,
+    api: all.filter((a) => !BROWSER_ADAPTERS.has(a)),
+    browser: all.filter((a) => BROWSER_ADAPTERS.has(a)),
   };
 }
 
-// ─── Verified search loop ─────────────────────────────────────────────────────
+/** Run every adapter for one owner (brand or a single competitor). */
+export async function runAdapters(
+  adapterIds: AdapterId[],
+  ctx: AdapterContext
+): Promise<DispatchResult> {
+  const settled = await pMapSettled(
+    adapterIds,
+    (id) => REGISTRY[id](ctx),
+    { concurrency: 3 }
+  );
 
-/**
- * Broaden the search keywords for a given retry round by surfacing fresh
- * ad/category query variants to the FRONT (YouTube long-form only reads the
- * first two adSearchQueries, so order matters).
- */
-function broadenKeywords(
-  kw: SearchKeywords,
-  round: number,
-  brandName: string
-): SearchKeywords {
-  if (round <= 0) return kw;
-  const cat =
-    kw.categoryKeywords?.[0] || kw.brandContext?.industry || "product";
-  const byRound: string[][] = [
-    [],
-    [`${brandName} ${cat} ad commercial`, `${brandName} official ad`, `${brandName} ${cat} review`],
-    [`${brandName} viral ad`, `best ${cat} ads`, `${brandName} unboxing`],
-  ];
-  const extra = byRound[Math.min(round, byRound.length - 1)] ?? [];
-  return { ...kw, adSearchQueries: [...extra, ...(kw.adSearchQueries ?? [])] };
+  const candidates: AdCandidate[] = [];
+  const reports: SourceReport[] = [];
+  settled.forEach((r, i) => {
+    if (r.status === "fulfilled") {
+      candidates.push(...r.value.candidates);
+      reports.push(r.value.report);
+    } else {
+      reports.push({
+        name: adapterIds[i],
+        status: "failed",
+        count: 0,
+        note: r.reason instanceof Error ? r.reason.message : String(r.reason),
+      });
+    }
+  });
+
+  return { candidates: dedupeCandidates(candidates), reports };
 }
 
 export interface VerifiedSearchOptions {
+  projectId: string;
+  competitorId?: string | null;
   productName?: string;
-  targetCount?: number;
-  maxRounds?: number;
-  select?: SelectOptions;
-  /**
-   * Restrict results to these VideoResult platforms (e.g. ["tiktok"] when the
-   * campaign platform is TikTok). When omitted, all platforms are kept.
-   */
-  allowedPlatforms?: VideoResult["platform"][];
+  campaign: CampaignPlatform | null;
+  countries?: string[];
+  limit?: number;
+  /** Skip the LLM ad classifier (search-more runs its own scoring pass). */
+  skipClassifier?: boolean;
 }
 
 /**
- * Search across platforms and KEEP SEARCHING (broadening queries each round)
- * until we have `targetCount` videos that are both verified-relevant and
- * high-engagement, or `maxRounds` is exhausted. Candidates accumulate and
- * de-duplicate across rounds; the best-scored selection is always returned.
+ * Search every adapter the campaign dispatches for one owner, then annotate the
+ * non-ad-library candidates with the ad classifier. Export name kept for
+ * compatibility with the previous pipeline; the implementation is now
+ * adapter-driven and returns AdCandidates.
  */
 export async function searchVerifiedVideos(
-  brandName: string,
+  ownerName: string,
   keywords: SearchKeywords,
-  strategy: "short_social" | "tvc" | "mixed" = "mixed",
-  opts: VerifiedSearchOptions = {}
-): Promise<ScoredVideo[]> {
-  const targetCount = opts.targetCount ?? 6;
-  const maxRounds = opts.maxRounds ?? 3;
-  const ctx: RelevanceContext = {
-    brandName,
+  opts: VerifiedSearchOptions
+): Promise<DispatchResult> {
+  const { api, browser } = dispatchPlan(opts.campaign);
+  const ctx: AdapterContext = {
+    ownerName,
+    competitorId: opts.competitorId ?? null,
+    projectId: opts.projectId,
+    productName: opts.productName,
+    keywords,
+    countries: opts.countries,
+    limit: opts.limit,
+  };
+
+  const { candidates, reports } = await runAdapters([...api, ...browser], ctx);
+
+  if (opts.skipClassifier) return { candidates, reports };
+
+  const relevanceCtx: RelevanceContext = {
+    brandName: ownerName,
     productName: opts.productName,
     keywords,
   };
+  const classified = await classifyAdCandidates(candidates, relevanceCtx);
 
-  const allowed = opts.allowedPlatforms?.length
-    ? new Set(opts.allowedPlatforms)
-    : null;
-
-  const pool = new Map<string, VideoResult>();
-  let best: ScoredVideo[] = [];
-
-  for (let round = 0; round < maxRounds; round++) {
-    const roundKeywords = broadenKeywords(keywords, round, brandName);
-    try {
-      const found = await searchAllPlatforms(brandName, roundKeywords, strategy);
-      for (const v of found) {
-        // Keep results consistent with the chosen campaign platform.
-        if (allowed && !allowed.has(v.platform)) continue;
-        pool.set(`${v.platform}:${v.videoId}`, v);
-      }
-    } catch {
-      // keep whatever we have; try next round
-    }
-
-    best = await selectRelevantVideos([...pool.values()], ctx, {
-      targetCount,
-      ...opts.select,
+  if (classified.degraded) {
+    reports.push({
+      name: "ad_classifier",
+      status: "failed",
+      count: 0,
+      note: "LLM unavailable — fell back to deterministic ad-intent scoring",
     });
-
-    if (best.length >= targetCount) break;
+  } else {
+    reports.push({
+      name: "ad_classifier",
+      status: "ran",
+      count: classified.classifiedCount,
+      note: `${classified.classifiedCount} non-ad-library candidates classified`,
+    });
   }
 
-  return best;
+  return { candidates: classified.candidates, reports };
 }

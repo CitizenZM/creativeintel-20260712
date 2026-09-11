@@ -2,6 +2,15 @@ import { prisma } from "@/lib/db";
 
 export type JobStepStatus = "pending" | "running" | "complete" | "error";
 
+/** Per-adapter outcome, so the UI can say which sources ran, were skipped for a
+ * missing key, failed, or are waiting on the local browser worker. */
+export interface JobSourceStatus {
+  name: string;
+  status: "ran" | "skipped_no_key" | "failed" | "pending_worker";
+  count: number;
+  note?: string;
+}
+
 export interface JobStep {
   name: string;
   status: JobStepStatus;
@@ -9,6 +18,7 @@ export interface JobStep {
   message?: string;
   startedAt?: string;
   completedAt?: string;
+  sources?: JobSourceStatus[];
 }
 
 const FLUSH_MS = 1000;
@@ -93,6 +103,62 @@ export async function updateStep(
       data: { steps: next as never, progress: overall, currentStep: name },
     });
   });
+}
+
+/** Merge adapter outcomes into a step, de-duplicating by source name. */
+export async function recordStepSources(
+  jobId: string,
+  name: string,
+  sources: JobSourceStatus[]
+) {
+  if (sources.length === 0) return;
+  // Written directly (not debounced): scheduleWrite keeps only the latest
+  // pending writer per job, so a queued updateStep would drop these.
+  await flush(jobId);
+  {
+    const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
+    if (!row) return;
+    const steps = (row.steps as unknown as JobStep[] | null) ?? [];
+    const next = steps.map((s) => {
+      if (s.name !== name) return s;
+      const merged = new Map<string, JobSourceStatus>();
+      for (const prev of s.sources ?? []) merged.set(prev.name, prev);
+      for (const cur of sources) {
+        const prev = merged.get(cur.name);
+        merged.set(
+          cur.name,
+          prev
+            ? {
+                ...cur,
+                count: prev.count + cur.count,
+                // A single success is enough to call the source "ran".
+                status: prev.status === "ran" ? "ran" : cur.status,
+              }
+            : cur
+        );
+      }
+      return { ...s, sources: [...merged.values()] };
+    });
+    await prisma.researchJob.update({
+      where: { id: jobId },
+      data: { steps: next as never },
+    });
+  }
+}
+
+/** Flatten every step's source outcomes for GET /research/status. */
+export function collectSources(steps: JobStep[] | null | undefined): JobSourceStatus[] {
+  const merged = new Map<string, JobSourceStatus>();
+  for (const step of steps ?? []) {
+    for (const s of step.sources ?? []) {
+      const prev = merged.get(s.name);
+      merged.set(
+        s.name,
+        prev ? { ...s, count: prev.count + s.count } : s
+      );
+    }
+  }
+  return [...merged.values()];
 }
 
 export async function completeStep(jobId: string, name: string) {

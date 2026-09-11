@@ -24,7 +24,6 @@ import {
   resolveVideoPrice,
   videoCredits,
   videoSettings,
-  type LibtvSettings,
 } from "./libtv-pricing";
 
 export const PRODUCT_LOCK_CLAUSE =
@@ -60,7 +59,7 @@ export interface CompiledJobDraft {
   leftRefs: string[];
   prompt: string;
   modelName: string | null;
-  settings: LibtvSettings & { compositeLocally?: boolean; frameNumber?: number; segment?: string };
+  settings: Record<string, string | number | boolean>;
   sourceUrl: string | null;
   creditsEstimated: number;
 }

@@ -6,7 +6,7 @@ import { analyzeWithClaude } from "@/services/ai/claude-client";
 export const maxDuration = 60;
 
 const scriptSchema = z.object({
-  transcript: z.string(),
+  reconstructedScript: z.string(),
   summary: z.string(),
   keyMoments: z.array(z.object({
     timestamp: z.string(),
@@ -29,10 +29,10 @@ export async function POST(
     }
 
     const system = `You are a video content analyst. Given a video's title, description, and metadata, reconstruct what the video's script/narration likely contains.
-Generate a realistic, detailed script transcript as if you watched the video.
+This is an INFERRED reconstruction, not a transcript — never present it as the words actually spoken.
 Respond with valid JSON matching this structure:
 {
-  "transcript": "Full script/narration text of the video, paragraph by paragraph",
+  "reconstructedScript": "Full inferred script/narration text of the video, paragraph by paragraph",
   "summary": "2-3 sentence summary of the video content",
   "keyMoments": [
     { "timestamp": "0:00", "description": "Opening hook" },
@@ -60,12 +60,25 @@ Generate a realistic ~300 word script/transcript that this video likely contains
       maxTokens: 2048,
     });
 
+    const rawData =
+      asset.rawData && typeof asset.rawData === "object" && !Array.isArray(asset.rawData)
+        ? (asset.rawData as Record<string, unknown>)
+        : {};
+
     await prisma.contentAsset.update({
       where: { id: assetId },
-      data: { transcript: result.transcript },
+      data: {
+        rawData: {
+          ...rawData,
+          reconstructedScript: result.reconstructedScript,
+          reconstructedScriptSummary: result.summary,
+          reconstructedScriptKeyMoments: result.keyMoments,
+          reconstructedScriptAt: new Date().toISOString(),
+        } as never,
+      },
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, transcript: asset.transcript });
   } catch (err) {
     console.error("Script generation failed:", err);
     return NextResponse.json(

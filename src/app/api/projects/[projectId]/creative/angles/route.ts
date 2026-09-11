@@ -3,6 +3,11 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { buildAngleGenerationPrompt } from "@/services/ai/prompts/angle-generation";
+import {
+  getScriptTemplate,
+  isVideoType,
+  defaultTemplateBatch,
+} from "@/services/ai/prompts/script-templates";
 
 const anglesSchema = z.object({
   angles: z.array(

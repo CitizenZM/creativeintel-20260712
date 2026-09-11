@@ -17,6 +17,7 @@ export async function GET(
     "commentCount",
     "publishedAt",
     "createdAt",
+    "rankInOwner",
   ]);
   const CONTENT_TYPES = new Set([
     "YOUTUBE_VIDEO",
@@ -27,23 +28,36 @@ export async function GET(
     "SOCIAL_POST",
     "WEB_MENTION",
     "REVIEW",
+    "META_AD",
+    "TIKTOK_AD",
+    "GOOGLE_AD",
+    "INSTAGRAM_REEL",
   ]);
 
   const typeParam = url.searchParams.get("type");
   const sortByParam = url.searchParams.get("sortBy") || "overallScore";
   const orderParam = url.searchParams.get("order") || "desc";
+  // Paid-only is the default view; ?paid=all opts out.
+  const paidParam = url.searchParams.get("paid") || "paid";
+  const competitorParam = url.searchParams.get("competitorId");
+  const rankedOnly = url.searchParams.get("ranked") === "1";
 
   const sortBy = SORTABLE.has(sortByParam) ? sortByParam : "overallScore";
   const order = orderParam === "asc" ? "asc" : "desc";
 
   const where: Record<string, unknown> = { projectId };
   if (typeParam && CONTENT_TYPES.has(typeParam)) where.type = typeParam;
+  if (paidParam !== "all") where.isPaidMedia = true;
+  if (competitorParam) {
+    where.competitorId = competitorParam === "brand" ? null : competitorParam;
+  }
+  if (rankedOnly) where.rankInOwner = { not: null };
 
   const assets = await prisma.contentAsset.findMany({
     where,
-    orderBy: { [sortBy]: order },
+    orderBy: [{ [sortBy]: order }],
     include: {
-      competitor: { select: { name: true } },
+      competitor: { select: { id: true, name: true } },
     },
   });
 

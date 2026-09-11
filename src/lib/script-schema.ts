@@ -64,6 +64,23 @@ export const scriptSceneSchema = z.object({
   transition: z.string().default(""),
 });
 
+const EMPTY_HOOK = {
+  text: "",
+  visual: "",
+  shot: "",
+  durationSec: 3,
+  hookFormula: "",
+};
+
+const EMPTY_CTA = {
+  text: "",
+  offer: "",
+  urgency: "",
+  visual: "",
+  shot: "",
+  durationSec: 3,
+};
+
 export const scriptV2Schema = z.object({
   title: z.string(),
   angle: z.string().default(""),
@@ -74,9 +91,9 @@ export const scriptV2Schema = z.object({
   template: z.string().default(""),
   totalDurationSec: z.coerce.number().default(30),
 
-  hook: scriptHookSchema.default({}),
+  hook: scriptHookSchema.default(EMPTY_HOOK),
   body: z.array(scriptBodyBeatSchema).default([]),
-  cta: scriptCtaSchema.default({}),
+  cta: scriptCtaSchema.default(EMPTY_CTA),
 
   hookVariants: z.array(z.string()).default([]),
   ctaVariants: z.array(z.string()).default([]),

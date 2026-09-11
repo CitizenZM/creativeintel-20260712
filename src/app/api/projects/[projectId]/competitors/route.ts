@@ -23,8 +23,32 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Per-owner paid/ranked counts so the Content page can show how full each
+  // competitor's Top-N actually is rather than a raw asset total.
+  const grouped = await prisma.contentAsset.groupBy({
+    by: ["competitorId"],
+    where: { projectId, isPaidMedia: true },
+    _count: { _all: true },
+  });
+  const rankedGrouped = await prisma.contentAsset.groupBy({
+    by: ["competitorId"],
+    where: { projectId, rankInOwner: { not: null } },
+    _count: { _all: true },
+  });
+
+  const paidByOwner = new Map(grouped.map((g) => [g.competitorId ?? "brand", g._count._all]));
+  const rankedByOwner = new Map(
+    rankedGrouped.map((g) => [g.competitorId ?? "brand", g._count._all])
+  );
+
   return NextResponse.json({
     brand: project.brand,
-    competitors: project.competitors,
+    brandPaidCount: paidByOwner.get("brand") ?? 0,
+    brandRankedCount: rankedByOwner.get("brand") ?? 0,
+    competitors: project.competitors.map((c) => ({
+      ...c,
+      paidCount: paidByOwner.get(c.id) ?? 0,
+      rankedCount: rankedByOwner.get(c.id) ?? 0,
+    })),
   });
 }

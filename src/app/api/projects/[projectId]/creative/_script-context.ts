@@ -119,7 +119,9 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
 
   const teardowns = await loadTeardownHighlights(projectId);
 
-  const ctaOptions = (Array.isArray(brandKit?.ctaOptions) ? brandKit.ctaOptions : []) as BrandCtaOption[];
+  const ctaOptions = (
+    Array.isArray(brandKit?.ctaOptions) ? brandKit.ctaOptions : []
+  ) as unknown as BrandCtaOption[];
   const ctaPool = ctaOptions
     .slice()
     .sort((a, b) => (a?.priority ?? 99) - (b?.priority ?? 99))

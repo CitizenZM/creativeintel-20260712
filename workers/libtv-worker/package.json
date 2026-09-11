@@ -1,0 +1,16 @@
+{
+  "name": "libtv-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Mac worker that executes an approved LibtvRun with the libtv CLI and assembles the cut locally.",
+  "main": "worker.mjs",
+  "scripts": {
+    "start": "node worker.mjs",
+    "dry-run": "node worker.mjs --dry-run --fixture"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.8.0",
+    "cloudinary": "^2.10.0"
+  }
+}

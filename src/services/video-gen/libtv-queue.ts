@@ -286,7 +286,8 @@ export async function runDone(input: RunDoneInput) {
     input.creditsSpent ??
     (await prisma.libtvJob
       .aggregate({ where: { runId: input.runId }, _sum: { creditsSpent: true } })
-      .then((r) => r._sum.creditsSpent ?? 0));
+      .then((r) => r._sum.creditsSpent ?? 0)) ??
+    0;
 
   return prisma.libtvRun.update({
     where: { id: input.runId },

@@ -3,19 +3,52 @@ import { prisma } from "@/lib/db";
 
 /**
  * PATCH /api/projects/{projectId}/creative/storyboards/{storyboardId}/frames
- * Updates a single frame within a storyboard's frames JSON array.
- * Body: { frameNumber: number, imageUrl?, transitionEffect?, approved?, feedback? }
+ * Merges a partial update into one frame of a storyboard's frames JSON array.
+ *
+ * Grid-owned fields (frameNumber, startSec, endSec, duration, segment) are not
+ * patchable — they come from src/lib/storyboard-grid.ts and must stay in sync
+ * with the 2-second cadence.
  */
+const PATCHABLE_FIELDS = new Set([
+  "scene",
+  "visualDirection",
+  "voiceover",
+  "textOverlay",
+  "cameraNotes",
+  "imagePrompt",
+  "videoPrompt",
+  "shotType",
+  "cameraMove",
+  "subject",
+  "productAction",
+  "sfx",
+  "sellingPoint",
+  "howExpressed",
+  "imageUrl",
+  "transitionEffect",
+  "approved",
+  "feedback",
+]);
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string; storyboardId: string }> }
 ) {
   const { projectId, storyboardId } = await params;
   const body = await request.json().catch(() => ({}));
-  const { frameNumber, ...updates } = body;
+  const { frameNumber, ...rest } = body as { frameNumber?: unknown } & Record<string, unknown>;
 
   if (typeof frameNumber !== "number") {
     return NextResponse.json({ error: "frameNumber required" }, { status: 400 });
+  }
+
+  const updates: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rest)) {
+    if (PATCHABLE_FIELDS.has(key)) updates[key] = value;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "No patchable fields supplied" }, { status: 400 });
   }
 
   const storyboard = await prisma.storyboard.findFirst({
@@ -26,16 +59,17 @@ export async function PATCH(
     return NextResponse.json({ error: "Storyboard not found" }, { status: 404 });
   }
 
-  // Merge updates into the specific frame
   const existingFrames = Array.isArray(storyboard.frames)
     ? (storyboard.frames as Array<Record<string, unknown>>)
     : [];
-  const frames = existingFrames.map(frame => {
-    if (frame.frameNumber === frameNumber) {
-      return { ...frame, ...updates };
-    }
-    return frame;
-  });
+
+  if (!existingFrames.some((f) => f.frameNumber === frameNumber)) {
+    return NextResponse.json({ error: `Frame ${frameNumber} not found` }, { status: 404 });
+  }
+
+  const frames = existingFrames.map((frame) =>
+    frame.frameNumber === frameNumber ? { ...frame, ...updates } : frame
+  );
 
   const updated = await prisma.storyboard.update({
     where: { id: storyboardId },

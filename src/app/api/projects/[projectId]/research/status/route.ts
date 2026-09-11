@@ -3,7 +3,10 @@ import { prisma } from "@/lib/db";
 import {
   getActiveJobForProject,
   getJob,
+  collectSources,
+  type JobStep,
 } from "@/services/research/job-progress";
+import { getTaskStatusCounts } from "@/services/worker-tasks";
 
 export async function GET(
   request: Request,
@@ -22,15 +25,23 @@ export async function GET(
     }));
 
   if (!job) {
-    return NextResponse.json({ status: "idle" });
+    return NextResponse.json({ status: "idle", sources: [] });
   }
+
+  const steps = (job.steps as unknown as JobStep[] | null) ?? [];
+  const sources = collectSources(steps);
+  const workerCounts = await getTaskStatusCounts(projectId, "ad_library_fetch").catch(
+    () => ({}) as Record<string, number>
+  );
 
   return NextResponse.json({
     jobId: job.id,
     status: job.status,
     progress: job.progress,
     currentStep: job.currentStep,
-    steps: job.steps,
+    steps,
+    sources,
+    workerTasks: workerCounts,
     error: job.error,
     startedAt: job.startedAt,
     completedAt: job.completedAt,

@@ -3,9 +3,10 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Loader2, ImageIcon, CheckCircle2, XCircle, RefreshCw,
-  MessageSquare, ChevronDown, Camera, Zap, ChevronRight,
+  MessageSquare, ChevronDown, Camera, Zap, ChevronRight, Film,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { segmentStyle } from "./segment-styles";
 
 // ─── Transition effects catalogue ────────────────────────────────────────────
 
@@ -39,12 +40,21 @@ export interface StoryboardFrameData {
   duration: string;
   startSec?: number;
   endSec?: number;
+  segment?: string;
   scene: string;
   visualDirection: string;
   voiceover: string;
   textOverlay: string;
   cameraNotes: string;
   imagePrompt: string;
+  videoPrompt?: string;
+  shotType?: string;
+  cameraMove?: string;
+  subject?: string;
+  productAction?: string;
+  sfx?: string;
+  sellingPoint?: string;
+  howExpressed?: string;
   imageUrl?: string | null;
   transitionEffect?: TransitionId | null;
   approved?: boolean | null;
@@ -155,7 +165,10 @@ export function StoryboardFrameCard({
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState(frame.feedback || "");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showI2V, setShowI2V] = useState(false);
   const autoLoadedRef = useRef(false);
+  const style = segmentStyle(frame.segment);
 
   useEffect(() => {
     if (autoLoad && !imageUrl && !loading && !autoLoadedRef.current) {
@@ -167,6 +180,7 @@ export function StoryboardFrameCard({
 
   async function generateImage() {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/studio/frames`, {
         method: "POST",
@@ -178,25 +192,36 @@ export function StoryboardFrameCard({
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (data.imageUrl) {
-        setImageUrl(data.imageUrl);
-        await saveFrameUpdate({ imageUrl: data.imageUrl });
-      }
-    } catch { /* silently fail */ }
-    finally { setLoading(false); }
+      if (!res.ok) throw new Error(data.error || `Image generation failed (${res.status})`);
+      if (!data.imageUrl) throw new Error("Image generation returned no image");
+      setImageUrl(data.imageUrl);
+      await saveFrameUpdate({ imageUrl: data.imageUrl });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Image generation failed");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function saveFrameUpdate(updates: Partial<StoryboardFrameData>) {
     setSaving(true);
     try {
-      await fetch(`/api/projects/${projectId}/creative/storyboards/${storyboardId}/frames`, {
+      const res = await fetch(`/api/projects/${projectId}/creative/storyboards/${storyboardId}/frames`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ frameNumber: frame.frameNumber, ...updates }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Save failed (${res.status})`);
+      }
+      setError(null);
       onUpdate?.(frame.frameNumber, updates);
-    } catch { /* silently fail */ }
-    finally { setSaving(false); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleTransitionChange(id: TransitionId) {
@@ -220,8 +245,9 @@ export function StoryboardFrameCard({
       "rounded-xl border-2 overflow-hidden bg-card transition-all",
       approved === true && "border-emerald-400",
       approved === false && "border-red-300",
-      approved === null && "border-border hover:border-foreground/20"
+      approved === null && cn(style.border, "hover:border-foreground/30")
     )}>
+      <div className={cn("h-1 w-full", style.bar)} />
       {/* ── Image ─────────────────────────────────────── */}
       <div className="aspect-video relative overflow-hidden bg-muted/60 group">
         {imageUrl ? (
@@ -254,6 +280,9 @@ export function StoryboardFrameCard({
         {/* Badges */}
         <div className="absolute top-1.5 left-1.5 flex gap-1">
           <span className="bg-foreground/80 text-background text-[9px] font-bold px-1.5 py-0.5 rounded-full">#{frame.frameNumber}</span>
+          <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-wider", style.badge)}>
+            {style.label}
+          </span>
           {approved === true && <span className="bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">✓</span>}
           {approved === false && <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">✗</span>}
         </div>
@@ -269,11 +298,63 @@ export function StoryboardFrameCard({
         {frame.voiceover && (
           <p className="text-[9px] text-muted-foreground italic mt-0.5 line-clamp-1">&ldquo;{frame.voiceover}&rdquo;</p>
         )}
+        {(frame.shotType || frame.cameraMove) && (
+          <p className="text-[9px] text-muted-foreground mt-0.5 line-clamp-1">
+            {[frame.shotType, frame.cameraMove].filter(Boolean).join(" · ")}
+          </p>
+        )}
       </div>
+
+      {error && (
+        <div className="mx-2 mb-1 rounded border border-red-200 bg-red-50 px-1.5 py-1">
+          <p className="text-[9px] text-red-700 leading-snug">{error}</p>
+        </div>
+      )}
 
       {/* ── Expandable detail ─────────────────────────── */}
       {showDetail && (
         <div className="px-2 pb-1.5 space-y-1.5 border-t border-border pt-1.5">
+          <dl className="space-y-0.5">
+            {frame.shotType && (
+              <div className="flex gap-1 text-[9px]">
+                <dt className="text-muted-foreground shrink-0">Shot</dt>
+                <dd className="font-medium leading-snug">{frame.shotType}</dd>
+              </div>
+            )}
+            {frame.cameraMove && (
+              <div className="flex gap-1 text-[9px]">
+                <dt className="text-muted-foreground shrink-0">Camera</dt>
+                <dd className="font-medium leading-snug">{frame.cameraMove}</dd>
+              </div>
+            )}
+            {frame.subject && (
+              <div className="flex gap-1 text-[9px]">
+                <dt className="text-muted-foreground shrink-0">Subject</dt>
+                <dd className="font-medium leading-snug">{frame.subject}</dd>
+              </div>
+            )}
+            {frame.productAction && (
+              <div className="flex gap-1 text-[9px]">
+                <dt className="text-muted-foreground shrink-0">Product</dt>
+                <dd className="font-medium leading-snug">{frame.productAction}</dd>
+              </div>
+            )}
+            {frame.sfx && (
+              <div className="flex gap-1 text-[9px]">
+                <dt className="text-muted-foreground shrink-0">SFX</dt>
+                <dd className="font-medium leading-snug">{frame.sfx}</dd>
+              </div>
+            )}
+            {frame.sellingPoint && (
+              <div className="flex gap-1 text-[9px]">
+                <dt className="text-muted-foreground shrink-0">Sells</dt>
+                <dd className="font-medium leading-snug">
+                  {frame.sellingPoint}
+                  {frame.howExpressed ? ` — ${frame.howExpressed}` : ""}
+                </dd>
+              </div>
+            )}
+          </dl>
           {frame.cameraNotes && (
             <div className="flex items-start gap-1">
               <Camera className="h-2.5 w-2.5 text-muted-foreground flex-shrink-0 mt-0.5" />
@@ -287,6 +368,23 @@ export function StoryboardFrameCard({
             <div className="rounded bg-foreground/5 border border-border px-1.5 py-1">
               <p className="text-[8px] text-muted-foreground font-semibold uppercase mb-0.5">On Screen</p>
               <p className="text-[9px] font-bold">{frame.textOverlay}</p>
+            </div>
+          )}
+          {frame.videoPrompt && (
+            <div>
+              <button
+                onClick={() => setShowI2V(!showI2V)}
+                className="flex items-center gap-0.5 text-[9px] font-semibold text-muted-foreground hover:text-foreground"
+              >
+                <Film className="h-2.5 w-2.5" />
+                i2v prompt
+                <ChevronRight className={cn("h-2.5 w-2.5 transition-transform", showI2V && "rotate-90")} />
+              </button>
+              {showI2V && (
+                <p className="mt-1 rounded bg-muted/60 border border-border px-1.5 py-1 text-[9px] leading-snug">
+                  {frame.videoPrompt}
+                </p>
+              )}
             </div>
           )}
           {/* Feedback */}
