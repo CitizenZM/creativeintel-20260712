@@ -219,6 +219,8 @@ OUTPUT JSON (no markdown, no extra keys):
 - cta.urgency must be an empty string unless the approved offer text itself states a deadline — never add urgency on your own initiative.`
       : "";
 
+  const numericClaimsBlock = `\nNUMERIC CLAIMS (hard constraint, applies even when no claims/CTA data is supplied above): any number, percentage, count, "X in Y" / "X out of Y" ratio, review count, or star rating you write anywhere (hook, body, proof, CTA) MUST appear verbatim — or as the exact same number — in BRAND TRUTH, the PROJECT BRIEF, the ALLOWED CLAIMS list, or the approved offer text below. Never invent, round, estimate, or infer a statistic from category knowledge or "common sense" ("most women notice X by 40" is not license to say "84%"). If no sourced stat exists for a beat that calls for one, write a qualitative hook instead (e.g. "Most women over forty notice lip lines first" rather than "Eighty-four percent of women over forty…") and set hook.hookFormula to note "no sourced stat available".`;
+
   const ctaBlock =
     input.ctaPool?.length || input.offer || input.landingUrl
       ? `\nAPPROVED CTA POOL (cta.text and every ctaVariant must come from this list — do not invent new CTA copy):\n${(input.ctaPool ?? [])
@@ -314,6 +316,7 @@ Campaign Goal: ${input.campaignGoal || "Conversion"}
 ${input.audienceSummary ? `\n${input.audienceSummary}` : ""}
 ${brandTruthBlock}
 ${complianceBlock}
+${numericClaimsBlock}
 
 KEY SELLING POINTS (each body beat must name exactly one of these, verbatim):
 ${input.sellingPoints.map((p, i) => `${i + 1}. ${p}`).join("\n")}

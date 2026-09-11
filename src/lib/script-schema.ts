@@ -223,6 +223,13 @@ export interface ScriptClaimsAuditInput {
   claimsForbidden?: string[];
   ctaOptions?: string[];
   offerText?: string;
+  /**
+   * Brand truth + briefing + claimsAllowed + offerText, concatenated — the
+   * only place a number/percentage/count/ratio/star-rating/review-count
+   * claim in the script is allowed to come from. Optional for backward
+   * compatibility: when omitted, the numeric-claims check is skipped.
+   */
+  sourceText?: string;
 }
 
 export interface ScriptClaimsViolation {
@@ -280,6 +287,143 @@ function findAbsoluteMatches(text: string): string[] {
   return hits;
 }
 
+// ---------------------------------------------------------------------------
+// Numeric-claim extraction — catches fabricated stats ("84% of women…") that
+// slip past the forbidden-phrase and absolute-word checks above because the
+// number itself, not a banned word, is the fabrication.
+
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+  ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+  sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+
+/** "eighty-four" -> 84, "twelve" -> 12. Only covers one..ninety-nine. */
+function spelledToNumber(phrase: string): number | null {
+  const parts = phrase.toLowerCase().trim().split(/[\s-]+/);
+  if (parts.length === 1) {
+    return NUMBER_WORDS[parts[0]] ?? null;
+  }
+  if (parts.length === 2) {
+    const tens = NUMBER_WORDS[parts[0]];
+    const ones = NUMBER_WORDS[parts[1]];
+    if (tens !== undefined && tens % 10 === 0 && tens >= 20 && ones !== undefined && ones < 10) {
+      return tens + ones;
+    }
+  }
+  return null;
+}
+
+function parseNumericLiteral(raw: string): number {
+  return Number(raw.replace(/,/g, ""));
+}
+
+/** Structural timing/measurement numbers that are never a "claim": "10s", "2 sec", "7-day", "Day 1". */
+const STRUCTURAL_UNIT_AFTER = /^[\s-]*(seconds?|secs?|s|mm|cm|ml|oz|fps)\b/i;
+const STRUCTURAL_DAY_AFTER = /^[\s-]*days?\b/i;
+const STRUCTURAL_DAY_BEFORE = /\bdays?[\s-]*$/i;
+
+function isStructuralNumber(text: string, start: number, end: number): boolean {
+  const after = text.slice(end, end + 12);
+  const before = text.slice(Math.max(0, start - 12), start);
+  return (
+    STRUCTURAL_UNIT_AFTER.test(after) || STRUCTURAL_DAY_AFTER.test(after) || STRUCTURAL_DAY_BEFORE.test(before)
+  );
+}
+
+export interface NumericClaim {
+  /** The matched substring, e.g. "84%", "4.8-star", "10,000 reviews", "3 in 4". */
+  raw: string;
+  value: number;
+}
+
+/**
+ * Extract every number-like claim from `text`: percentages, star ratings,
+ * review/rating counts, "X in Y" / "X out of Y" ratios, spelled-out numbers
+ * (one..ninety-nine) followed by "percent"/"%"/"in"/"out of", and any other
+ * bare number — excluding structural timing/measurement numbers (durations,
+ * "Day N", units).
+ */
+export function extractNumericClaims(text: string): NumericClaim[] {
+  if (!text) return [];
+  const claims: NumericClaim[] = [];
+  const claimedRanges: Array<[number, number]> = [];
+
+  const overlaps = (start: number, end: number) =>
+    claimedRanges.some(([s, e]) => start < e && end > s);
+
+  const claim = (start: number, end: number, raw: string, value: number) => {
+    if (!Number.isFinite(value)) return;
+    claimedRanges.push([start, end]);
+    claims.push({ raw, value });
+  };
+
+  // Percent: "84%" / "84 percent"
+  for (const m of text.matchAll(/\d[\d,]*(?:\.\d+)?\s?(%|percent\b)/gi)) {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    const numMatch = m[0].match(/\d[\d,]*(?:\.\d+)?/);
+    if (numMatch) claim(start, end, m[0], parseNumericLiteral(numMatch[0]));
+  }
+
+  // Star ratings: "4.8-star" / "4.8 stars"
+  for (const m of text.matchAll(/\d[\d,]*(?:\.\d+)?[\s-]*stars?\b/gi)) {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    if (overlaps(start, end)) continue;
+    const numMatch = m[0].match(/\d[\d,]*(?:\.\d+)?/);
+    if (numMatch) claim(start, end, m[0], parseNumericLiteral(numMatch[0]));
+  }
+
+  // Review / rating counts: "10,000 reviews"
+  for (const m of text.matchAll(/\d[\d,]*(?:\.\d+)?\+?\s+(?:reviews?|ratings?)\b/gi)) {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    if (overlaps(start, end)) continue;
+    const numMatch = m[0].match(/\d[\d,]*(?:\.\d+)?/);
+    if (numMatch) claim(start, end, m[0], parseNumericLiteral(numMatch[0]));
+  }
+
+  // "X in Y" / "X out of Y"
+  for (const m of text.matchAll(/\b(\d+)\s+(?:in|out of)\s+(\d+)\b/gi)) {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    if (overlaps(start, end)) continue;
+    claimedRanges.push([start, end]);
+    claims.push({ raw: m[0], value: Number(m[1]) });
+    claims.push({ raw: m[0], value: Number(m[2]) });
+  }
+
+  // Spelled-out numbers followed by percent/%/in/out of
+  for (const m of text.matchAll(/\b([a-z]+(?:[\s-][a-z]+)?)\s+(percent|%|in|out of)\b/gi)) {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    if (overlaps(start, end)) continue;
+    const value = spelledToNumber(m[1]);
+    if (value != null) claim(start, end, m[0], value);
+  }
+
+  // Any remaining bare number, excluding structural timing/measurement numbers
+  for (const m of text.matchAll(/\d[\d,]*(?:\.\d+)?/g)) {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    if (overlaps(start, end)) continue;
+    if (isStructuralNumber(text, start, end)) continue;
+    claim(start, end, m[0], parseNumericLiteral(m[0]));
+  }
+
+  return claims;
+}
+
+/** Does `value` occur anywhere in `sourceText`, as a number (digits or spelled-out)? */
+function numberOccursIn(value: number, sourceText: string): boolean {
+  if (!sourceText) return false;
+  if (extractNumericClaims(sourceText).some((c) => c.value === value)) return true;
+  const spelled = Object.entries(NUMBER_WORDS).find(([, n]) => n === value)?.[0];
+  return spelled ? new RegExp(`\\b${spelled}\\b`, "i").test(sourceText) : false;
+}
+
 /**
  * Deterministic post-generation compliance scan. Checks hook/body/cta text
  * fields plus the fully rendered body for brand-forbidden phrases and a fixed
@@ -292,6 +436,7 @@ export function auditScriptClaims(script: ScriptV2, opts: ScriptClaimsAuditInput
   );
   const ctaOptions = (opts.ctaOptions ?? []).map((c) => c.trim()).filter(Boolean);
   const offerText = opts.offerText ?? "";
+  const sourceText = opts.sourceText ?? "";
 
   const violations: ScriptClaimsViolation[] = [];
 
@@ -316,6 +461,17 @@ export function auditScriptClaims(script: ScriptV2, opts: ScriptClaimsAuditInput
     }
     for (const hit of findAbsoluteMatches(field.text)) {
       violations.push({ path: field.path, text: hit, reason: `absolute/curative claim: "${hit}"` });
+    }
+    if (sourceText) {
+      for (const nc of extractNumericClaims(field.text)) {
+        if (!numberOccursIn(nc.value, sourceText)) {
+          violations.push({
+            path: field.path,
+            text: nc.raw,
+            reason: `unsourced numeric claim: "${nc.raw}" does not appear (as the same number) in brand truth / briefing / claimsAllowed / offer text`,
+          });
+        }
+      }
     }
   }
 

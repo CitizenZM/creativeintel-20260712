@@ -255,11 +255,24 @@ export function buildScriptInput(
 
 /** Brand-kit fields `auditScriptClaims` needs, pulled from the loaded context. */
 export function auditContext(ctx: ScriptContext): ScriptClaimsAuditInput {
+  // The only place a number/percentage/count/ratio/star-rating/review-count
+  // claim in a script is allowed to come from — brand truth, the project
+  // briefing, the approved claims list, and the approved offer text.
+  const sourceText = [
+    ctx.brandTruth,
+    ctx.project.briefingText,
+    ctx.claimsAllowed?.join("\n"),
+    ctx.offer,
+  ]
+    .filter((part): part is string => Boolean(part && part.trim()))
+    .join("\n\n");
+
   return {
     claimsAllowed: ctx.claimsAllowed,
     claimsForbidden: ctx.claimsForbidden,
     ctaOptions: ctx.ctaPool,
     offerText: ctx.offer,
+    sourceText,
   };
 }
 
