@@ -19,7 +19,7 @@ export type HookType = (typeof HOOK_TYPES)[number];
 
 export const CTA_PLACEMENTS = ["end_card", "mid_roll", "persistent_overlay", "none"] as const;
 
-export type EvidenceLevel = "vision_transcript" | "transcript" | "thumbnail" | "metadata";
+export type EvidenceLevel = "vision_transcript" | "vision" | "transcript" | "thumbnail" | "metadata";
 
 export interface TeardownTranscriptSegment {
   start: number;
@@ -91,7 +91,7 @@ Respond with ONLY a JSON object:
   "offer": "discount / bundle / free shipping / trial as stated, or null",
   "landingUrl": "destination URL if visible or supplied, else null",
   "whyItWorks": "3-5 sentences: the mechanism of this ad — what it does to attention, desire and action, and what evidence you based that on",
-  "evidenceLevel": "vision_transcript|transcript|thumbnail|metadata",
+  "evidenceLevel": "vision_transcript|vision|transcript|thumbnail|metadata",
   "confidence": "high|medium|low"
 }
 
@@ -103,6 +103,7 @@ Rules:
 
   const evidenceNote: Record<EvidenceLevel, string> = {
     vision_transcript: "Keyframes AND a timestamped transcript are provided. This is the strongest tier — read both.",
+    vision: "Several keyframes spanning the video are provided but no transcript. Describe the visual structure, on-screen text and product moments you can actually see; do not invent spoken lines; confidence 'medium' at most.",
     transcript: "A transcript is provided but no usable frames. Do not describe visuals you cannot verify; keep 'visual' fields short and hedged.",
     thumbnail: "Only still images (thumbnail/storyboard) are provided — no audio. You cannot quote speech; base hookText on visible on-screen text or the title, and mark confidence 'low'.",
     metadata: "No frames and no transcript — only metadata. Keep beats coarse, set confidence 'low', and say plainly in whyItWorks that this is metadata-only inference.",

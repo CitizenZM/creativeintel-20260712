@@ -715,11 +715,13 @@ async function resolveEvidence(asset: DeepAsset): Promise<{
   const hasVision = frames.frameUrls.length >= 2;
   const evidenceLevel: EvidenceLevel = hasVision && transcript
     ? "vision_transcript"
-    : transcript
-      ? "transcript"
-      : frames.frameUrls.length > 0
-        ? "thumbnail"
-        : "metadata";
+    : hasVision
+      ? "vision"
+      : transcript
+        ? "transcript"
+        : frames.frameUrls.length > 0
+          ? "thumbnail"
+          : "metadata";
 
   return {
     frameUrls: frames.frameUrls,

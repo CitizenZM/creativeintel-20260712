@@ -81,6 +81,7 @@ const BEAT_COLORS: Record<string, string> = {
 
 const EVIDENCE_STYLES: Record<string, string> = {
   vision_transcript: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  vision: "bg-teal-50 text-teal-700 border-teal-200",
   transcript: "bg-blue-50 text-blue-700 border-blue-200",
   thumbnail: "bg-amber-50 text-amber-700 border-amber-200",
   metadata: "bg-gray-100 text-gray-600 border-gray-200",
@@ -88,6 +89,7 @@ const EVIDENCE_STYLES: Record<string, string> = {
 
 const EVIDENCE_LABELS: Record<string, string> = {
   vision_transcript: "frames + transcript",
+  vision: "frames only",
   transcript: "transcript only",
   thumbnail: "stills only",
   metadata: "metadata only",
