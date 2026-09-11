@@ -6,6 +6,19 @@
 // grid and read each card's own <video> element — the mp4 URL and the poster
 // are on the card itself, no click into a snapshot view is needed.
 //
+// Root-caused live on 2026-09-11: every task was failing with "0 candidates —
+// no Library ID nodes found" even for advertisers that clearly run video ads
+// (Crepe Erase, Grande Cosmetics, Olay). The page was rendering fully — ~48
+// results, real video cards — but in Simplified Chinese
+// (document.documentElement.lang === "zh-Hans") because the worker machine's
+// browser locale/egress isn't US-English. The label reads
+// "资料库编号：<digits>" instead of "Library ID: <digits>", so the English-only
+// regex never matched anything and the playbook always saw an empty grid.
+// `&locale=en_US` on the search URL reliably forces the English render
+// (verified: lang flips to "en", label flips to "Library ID: <digits>"), so
+// that's the primary fix. The card-matching regex is also made bilingual as a
+// defense-in-depth fallback in case a future session ignores the locale param.
+//
 // Public pages only. No login, no CAPTCHA, one page load per task.
 
 import { runEgoScript, parseDateRange, unwrapFacebookLink, aspectFrom } from './_ego.mjs';
@@ -15,6 +28,7 @@ function searchUrl({ advertiser, country }) {
     active_status: 'all',
     ad_type: 'all',
     country,
+    locale: 'en_US',
     media_type: 'video',
     q: advertiser,
     search_type: 'keyword_unordered',
@@ -26,7 +40,32 @@ const SCRAPE = `
 const task = await openSpace("creativeintel research worker");
 const page = task.page("p1");
 await page.goto(URL);
-await page.waitForTimeout(4000);
+
+// Poll for the Library ID label (either language — see the file header) for
+// up to 25s instead of a fixed sleep, since the grid can take a while to
+// hydrate. If it still hasn't appeared, scroll once and keep polling briefly
+// — some sessions only populate the grid after the first scroll event.
+const ID_TEXT_RE = /(?:Library ID|\\u8d44\\u6599\\u5e93\\u7f16\\u53f7)[:\\uff1a]\\s*\\d+/;
+async function waitForIdText(budgetMs) {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    const found = await page.evaluate(
+      (re) => new RegExp(re[0], re[1]).test(document.body.innerText || ""),
+      [ID_TEXT_RE.source, ID_TEXT_RE.flags]
+    );
+    if (found) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+let scrolls = 0;
+let found = await waitForIdText(18000);
+if (!found && scrolls < 2) {
+  await page.mouse.wheel(0, 1600);
+  scrolls++;
+  found = await waitForIdText(7000);
+}
 
 // Give the lazily-attached <video> elements a chance to report metadata.
 await page.evaluate(() => {
@@ -36,9 +75,19 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(2500);
 
+// One more scroll (still within the two-scroll budget) to surface any
+// remaining lazy cards before reading the grid.
+if (scrolls < 2) {
+  await page.mouse.wheel(0, 1600);
+  scrolls++;
+  await page.waitForTimeout(1500);
+}
+
 const cards = await page.evaluate((limit) => {
-  const idEls = [...document.querySelectorAll("div")]
-    .filter((d) => /^Library ID:\\s*\\d+$/.test((d.textContent || "").trim()));
+  const ID_RE = /^(?:Library ID|\\u8d44\\u6599\\u5e93\\u7f16\\u53f7)[:\\uff1a]\\s*(\\d+)$/;
+  const ID_RE_LOOSE = /(?:Library ID|\\u8d44\\u6599\\u5e93\\u7f16\\u53f7)[:\\uff1a]\\s*(\\d+)/;
+  const idEls = [...document.querySelectorAll("div,span")]
+    .filter((d) => ID_RE.test((d.textContent || "").trim()));
   if (idEls.length === 0) return { cards: [], reason: "no Library ID nodes found" };
 
   let node = idEls[0];
@@ -49,34 +98,41 @@ const cards = await page.evaluate((limit) => {
   const out = [];
   for (const card of [...grid.children]) {
     const text = card.innerText || "";
-    const libraryId = (text.match(/Library ID:\\s*(\\d+)/) || [])[1];
+    const libraryId = (text.match(ID_RE_LOOSE) || [])[1];
     if (!libraryId || seen.has(libraryId)) continue;
+
+    // Only cards that actually carry a <video> count as video ads — a
+    // keyword search can still surface a non-video card even with
+    // media_type=video applied.
+    const video = card.querySelector("video");
+    if (!video) continue;
     seen.add(libraryId);
 
     const advertiserAnchor = card.querySelector('a[href*="facebook.com/"]:not([href*="/l.php"])');
     const ctaAnchor = card.querySelector('a[href*="/l.php"]');
-    const video = card.querySelector("video");
 
     out.push({
       libraryId,
       dateText:
         (text.match(/Started running on ([^\\n]+)/) || [])[1] ||
         (text.match(/([A-Z][a-z]{2} \\d{1,2}, \\d{4} - [A-Z][a-z]{2} \\d{1,2}, \\d{4})/) || [])[1] ||
+        (text.match(/([^\\n]*\\u5f00\\u59cb\\u6295\\u653e)/) || [])[1] ||
+        (text.match(/(\\d{4}\\u5e74\\d{1,2}\\u6708\\d{1,2}\\u65e5\\s*-\\s*\\d{4}\\u5e74\\d{1,2}\\u6708\\d{1,2}\\u65e5)/) || [])[1] ||
         "",
-      active: /\\bActive\\b/.test(text),
+      active: /\\bActive\\b/.test(text) || /\\u6295\\u653e\\u4e2d/.test(text),
       advertiser: advertiserAnchor ? (advertiserAnchor.innerText || "").trim() : "",
       advertiserHref: advertiserAnchor ? advertiserAnchor.href : "",
       ctaHref: ctaAnchor ? ctaAnchor.href : "",
       body: text.slice(0, 600),
-      videoSrc: video ? video.currentSrc || video.src || "" : "",
-      poster: video ? video.poster || "" : "",
-      durationSec: video && isFinite(video.duration) && video.duration > 0 ? video.duration : null,
-      videoWidth: video ? video.videoWidth : 0,
-      videoHeight: video ? video.videoHeight : 0,
+      videoSrc: video.currentSrc || video.src || "",
+      poster: video.poster || "",
+      durationSec: isFinite(video.duration) && video.duration > 0 ? video.duration : null,
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
     });
     if (out.length >= limit) break;
   }
-  return { cards: out, reason: out.length === 0 ? "grid produced no cards" : "" };
+  return { cards: out, reason: out.length === 0 ? "grid produced no cards with a <video>" : "" };
 }, LIMIT);
 
 emit({ spaceId: task.spaceId, ...cards });
@@ -99,16 +155,21 @@ function bodyTitle(text, advertiser) {
       (l) =>
         l &&
         !/^Library ID:/.test(l) &&
-        !/^(Active|Inactive|Sponsored|Open Dropdown)$/i.test(l) &&
+        !/^资料库编号[:：]/.test(l) &&
+        !/^(Active|Inactive|Sponsored|Open Dropdown|投放中|已停止|赞助内容|打开下拉菜单)$/i.test(l) &&
         !/^Started running on/.test(l) &&
-        !/^See (ad details|summary details)$/i.test(l)
+        !/开始投放$/.test(l) &&
+        !/^See (ad details|summary details)$/i.test(l) &&
+        !/^(查看广告详情|查看摘要详情)$/.test(l)
     );
   return (cleaned.find((l) => l.length > 12) || advertiser || 'Meta ad').slice(0, 160);
 }
 
 export async function runMetaAdLibrary(payload) {
   const country = (payload.countries?.[0] || 'US').toUpperCase();
-  const limit = Math.min(payload.limit || 20, 40);
+  // Capped at 20 per task regardless of what's requested — this playbook
+  // scrolls at most twice, which is not enough headroom to safely go higher.
+  const limit = Math.min(payload.limit || 20, 20);
   const url = searchUrl({ advertiser: payload.advertiser, country });
 
   const body = `const URL = ${JSON.stringify(url)};

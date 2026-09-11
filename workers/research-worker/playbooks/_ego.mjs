@@ -127,11 +127,34 @@ export function parseDateRange(text) {
   }
   const single = text.match(/([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})/);
   if (single) return { firstSeen: toIso(single[1]) };
+
+  // Defense-in-depth: the meta-ad-library playbook forces &locale=en_US, but
+  // if a future session ever renders the page in Simplified Chinese anyway
+  // (root cause of the 2026-09-11 "0 candidates" bug — see that playbook's
+  // header comment), dates show up as "YYYY年M月D日" instead. Parse that form
+  // too rather than silently dropping every date.
+  const cnRange = text.match(
+    /(\d{4})年(\d{1,2})月(\d{1,2})日\s*[-－]\s*(\d{4})年(\d{1,2})月(\d{1,2})日/
+  );
+  if (cnRange) {
+    return {
+      firstSeen: toIsoFromYmd(cnRange[1], cnRange[2], cnRange[3]),
+      lastSeen: toIsoFromYmd(cnRange[4], cnRange[5], cnRange[6]),
+    };
+  }
+  const cnSingle = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (cnSingle) return { firstSeen: toIsoFromYmd(cnSingle[1], cnSingle[2], cnSingle[3]) };
+
   return {};
 }
 
 function toIso(value) {
   const ts = Date.parse(value);
+  return Number.isNaN(ts) ? undefined : new Date(ts).toISOString();
+}
+
+function toIsoFromYmd(year, month, day) {
+  const ts = Date.UTC(Number(year), Number(month) - 1, Number(day));
   return Number.isNaN(ts) ? undefined : new Date(ts).toISOString();
 }
 
