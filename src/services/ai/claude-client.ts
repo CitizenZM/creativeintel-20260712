@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { jsonrepair } from "jsonrepair";
 import { ZodSchema } from "zod";
 
 // Route priority: OpenAI → Gemini → OpenRouter. Each provider is tried in order
@@ -12,7 +13,8 @@ type ProviderName = "openai" | "gemini" | "openrouter";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
 const GEMINI_DEFAULT_MODEL = "gemini-3.8-flash";
-const GEMINI_MAX_TOKENS = 8192;
+// Gemini 3.x emits long JSON (deep analysis ~15 KB+); the old 8192 cap truncated it.
+const GEMINI_MAX_TOKENS = 32768;
 const GEMINI_IMAGE_FETCH_TIMEOUT_MS = 10_000;
 const GEMINI_IMAGE_MAX_BYTES = 6 * 1024 * 1024;
 
@@ -235,6 +237,19 @@ function extractJsonCandidate(text: string): string {
   return text.trim();
 }
 
+/** Strict parse first; on failure repair common LLM slips (missing commas, trailing commas, truncated arrays, unescaped newlines). */
+function parseJsonLenient(jsonStr: string): unknown {
+  try {
+    return JSON.parse(jsonStr);
+  } catch (strictErr) {
+    try {
+      return JSON.parse(jsonrepair(jsonStr));
+    } catch {
+      throw strictErr;
+    }
+  }
+}
+
 function parseErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "parse error";
 }
@@ -344,7 +359,7 @@ export async function analyzeWithClaude<T>(options: {
   const jsonStr = extractJsonCandidate(text);
 
   try {
-    const parsed = JSON.parse(jsonStr);
+    const parsed = parseJsonLenient(jsonStr);
     return responseSchema.parse(parsed);
   } catch (parseError) {
     // Retry with the full original context (not the failed output verbatim) plus a
@@ -374,7 +389,7 @@ export async function analyzeWithClaude<T>(options: {
     const retryJsonStr = extractJsonCandidate(retryText);
 
     try {
-      const retryParsed = JSON.parse(retryJsonStr);
+      const retryParsed = parseJsonLenient(retryJsonStr);
       return responseSchema.parse(retryParsed);
     } catch (retryError) {
       throw new AIResponseError(

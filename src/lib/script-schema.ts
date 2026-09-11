@@ -319,10 +319,20 @@ function parseNumericLiteral(raw: string): number {
   return Number(raw.replace(/,/g, ""));
 }
 
-/** Structural timing/measurement numbers that are never a "claim": "10s", "2 sec", "7-day", "Day 1". */
-const STRUCTURAL_UNIT_AFTER = /^[\s-]*(seconds?|secs?|s|mm|cm|ml|oz|fps)\b/i;
-const STRUCTURAL_DAY_AFTER = /^[\s-]*days?\b/i;
-const STRUCTURAL_DAY_BEFORE = /\bdays?[\s-]*$/i;
+/**
+ * Structural timing/measurement numbers that are never a "claim": "10s",
+ * "2 sec", "7-day", "Day 1" — and beat-range spans like "3–4.2s" (rendered
+ * with an en dash, and using the raw, pre-repair fractional seconds the
+ * audit runs against before `validateAndRepairDurations` rounds them), where
+ * the *start* of the range sits one or more dash/number hops before the unit.
+ */
+const DASH_CLASS = "\\s\\-\\u2010-\\u2015"; // ascii space/hyphen + unicode hyphen..horizontal-bar (incl. en/em dash)
+const STRUCTURAL_UNIT_AFTER = new RegExp(
+  `^[${DASH_CLASS}]*(?:\\d[\\d,]*(?:\\.\\d+)?[${DASH_CLASS}]*)?(seconds?|secs?|s|mm|cm|ml|oz|fps|year[-\\s]?olds?|years?\\s+old|yo)\\b`,
+  "i"
+);
+const STRUCTURAL_DAY_AFTER = new RegExp(`^[${DASH_CLASS}]*days?\\b`, "i");
+const STRUCTURAL_DAY_BEFORE = new RegExp(`\\bdays?[${DASH_CLASS}]*$`, "i");
 
 function isStructuralNumber(text: string, start: number, end: number): boolean {
   const after = text.slice(end, end + 12);
