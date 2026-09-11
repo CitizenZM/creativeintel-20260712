@@ -109,6 +109,14 @@ export interface ClaimedRunPayload {
     creditCap: number | null;
   };
   project: { brandName: string; libtvCanvasUuid: string | null };
+  /** Colours/fonts/CTA copy for local compositing (assemble.py reads `brandKit`). */
+  brandKit: {
+    colorsHex: unknown;
+    fonts: unknown;
+    ctaOptions: unknown;
+    offerText: string | null;
+    landingUrl: string | null;
+  } | null;
   scriptTitle: string | null;
   storyboardTitle: string | null;
   frames: unknown[];
@@ -154,11 +162,15 @@ async function buildClaimPayload(runId: string): Promise<ClaimedRunPayload | nul
   });
   if (!run) return null;
 
-  const [script, storyboard] = await Promise.all([
+  const [script, storyboard, kit] = await Promise.all([
     run.scriptId ? prisma.script.findUnique({ where: { id: run.scriptId }, select: { title: true } }) : null,
     run.storyboardId
       ? prisma.storyboard.findUnique({ where: { id: run.storyboardId }, select: { title: true, frames: true } })
       : null,
+    prisma.brandKit.findUnique({
+      where: { projectId: run.projectId },
+      select: { colorsHex: true, fonts: true, ctaOptions: true, offerText: true, landingUrl: true },
+    }),
   ]);
 
   return {
@@ -178,6 +190,15 @@ async function buildClaimPayload(runId: string): Promise<ClaimedRunPayload | nul
       creditCap: run.creditCap,
     },
     project: run.project,
+    brandKit: kit
+      ? {
+          colorsHex: kit.colorsHex ?? null,
+          fonts: kit.fonts ?? null,
+          ctaOptions: kit.ctaOptions ?? null,
+          offerText: kit.offerText ?? null,
+          landingUrl: kit.landingUrl ?? null,
+        }
+      : null,
     scriptTitle: script?.title ?? null,
     storyboardTitle: storyboard?.title ?? null,
     frames: Array.isArray(storyboard?.frames) ? (storyboard.frames as unknown[]) : [],
