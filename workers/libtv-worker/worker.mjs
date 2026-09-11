@@ -540,6 +540,13 @@ async function processRun(payload) {
       publishFile(outputs.contactSheet, { runId, nodeName: 'contact-sheet', kind: 'image' }).catch(() => null),
     ]);
 
+    if (DRY_RUN) {
+      // A rehearsal must never look like a delivered ad in the dashboard.
+      await api.runFailed(runId, 'dry-run rehearsal — commands printed, no LibTV nodes executed, no credits spent');
+      log(`run ${runId} rehearsed (dry-run) — ${creditsSpent} credits would be spent`);
+      return { ok: true, dryRun: true };
+    }
+
     await api.runDone({
       runId,
       masterMp4Url: master?.url,
