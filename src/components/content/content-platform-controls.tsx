@@ -4,21 +4,49 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Search, RefreshCw, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CAMPAIGN_PLATFORMS, adaptersFor } from "@/lib/campaign-platform";
 
 interface PlatformOption {
   id: string;
   label: string;
   icon: string;
   durationSec: number;
+  /** The sources this platform dispatches, shown so the choice is legible. */
+  sources: string;
 }
 
-const PLATFORMS: PlatformOption[] = [
-  { id: "tiktok", label: "TikTok / Reels", icon: "⬛", durationSec: 30 },
-  { id: "instagram", label: "Instagram Feed", icon: "📸", durationSec: 15 },
-  { id: "youtube", label: "YouTube Pre-roll", icon: "▶️", durationSec: 30 },
-  { id: "tvc", label: "TVC (Television)", icon: "📺", durationSec: 60 },
-  { id: "amazon", label: "Amazon PDP Video", icon: "📦", durationSec: 30 },
-];
+const ADAPTER_LABELS: Record<string, string> = {
+  youtube_long: "YouTube",
+  youtube_shorts: "YT Shorts",
+  meta_ad_library: "Meta Ad Library",
+  tiktok_cc: "TikTok Creative Center",
+  tiktok_organic: "TikTok",
+  instagram: "Instagram",
+  browser_meta: "Meta AL (worker)",
+  browser_tiktok: "TikTok AL (worker)",
+  browser_google: "Google ATC (worker)",
+};
+
+const ICONS: Record<string, string> = {
+  tiktok: "⬛",
+  instagram: "📸",
+  youtube: "▶️",
+  tvc: "📺",
+  amazon: "📦",
+};
+
+// Derived from the dispatch table, so the picker can never offer a platform the
+// research runner has no adapters for.
+const PLATFORMS: PlatformOption[] = Object.values(CAMPAIGN_PLATFORMS).map((p) => ({
+  id: p.id,
+  label: p.label,
+  icon: ICONS[p.id] ?? "🎬",
+  durationSec: p.defaultDurationSec,
+  sources: adaptersFor(p)
+    .map((a) => ADAPTER_LABELS[a])
+    .filter(Boolean)
+    .join(" · "),
+}));
 
 const DURATIONS = [15, 30, 45, 60];
 
@@ -77,7 +105,7 @@ export function ContentPlatformControls({
         <div>
           <h3 className="text-sm font-semibold tracking-tight">Video mode</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Where will this ad run and how long? Search & filtering follow this.
+            Where will this ad run and how long? This picks which ad sources are searched.
           </p>
         </div>
         <button
@@ -119,6 +147,9 @@ export function ContentPlatformControls({
             <span className="text-lg leading-none">{p.icon}</span>
             <span className="text-xs font-medium leading-tight">{p.label}</span>
             <span className="text-[10px] text-muted-foreground">{p.durationSec}s default</span>
+            <span className="text-[10px] text-muted-foreground/70 leading-tight line-clamp-2">
+              {p.sources}
+            </span>
           </button>
         ))}
       </div>

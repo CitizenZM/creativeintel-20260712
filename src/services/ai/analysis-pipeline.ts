@@ -14,7 +14,7 @@ import {
   type EvidenceLevel,
   type TeardownTranscriptSegment,
 } from "./prompts/ad-teardown";
-import { buildCompetitorRollupPrompt, COMPETITOR_ROLLUP_PROMPT_VERSION, type RollupTeardown } from "./prompts/competitor-rollup";
+import { buildCompetitorRollupPrompt, type RollupTeardown } from "./prompts/competitor-rollup";
 import { buildCompetitiveGapPrompt, GAP_CATEGORIES, type GapCategory } from "./prompts/competitive-gap";
 import { crawlWebsite, type CrawlResult } from "@/services/research/website-crawler";
 import { collectVideoSignal } from "@/services/research/video-signal";
@@ -213,7 +213,7 @@ const rollupSchema = z.object({
     ctaStartPct: z.coerce.number().optional().default(0),
     beatsPerAd: z.coerce.number().optional().default(0),
     notes: z.string().optional().default(""),
-  }).optional().default({}),
+  }).optional(),
   summary: z.string().optional().default(""),
 });
 
@@ -356,6 +356,13 @@ function storedSegments(rawData: unknown): TeardownTranscriptSegment[] | undefin
     })
     .filter((s) => s.text.length > 0);
   return parsed.length > 0 ? parsed : undefined;
+}
+
+function signalPlatform(platform: string | null, url: string): string {
+  const slug = (platform || "").toLowerCase().replace(/\s+/g, "_");
+  if (slug.startsWith("youtube_short") || /youtube\.com\/shorts\//.test(url)) return "youtube_short";
+  if (slug.startsWith("youtube") || /youtube\.com|youtu\.be/.test(url)) return "youtube";
+  return slug || "unknown";
 }
 
 function jsonArray<T>(value: unknown): T[] {
@@ -692,7 +699,7 @@ async function resolveEvidence(asset: DeepAsset): Promise<{
 
   if (!transcript) {
     const signal = await collectVideoSignal({
-      platform: (asset.platform || "youtube").toLowerCase().replace(/\s+/g, "_"),
+      platform: signalPlatform(asset.platform, asset.url),
       url: asset.videoUrl || asset.url,
       videoId: asset.id,
       thumbnailUrl: asset.thumbnailUrl || undefined,
@@ -909,7 +916,7 @@ export async function runCompetitorRollupStage(projectId: string, deadline?: num
           dominantFormats: r.dominantFormats as never,
           offerLadder: r.offerLadder as never,
           ctaPatterns: r.ctaPatterns as never,
-          cadence: r.cadence as never,
+          cadence: (r.cadence ?? {}) as never,
           summary: r.summary,
         };
         await prisma.competitorRollup.upsert({

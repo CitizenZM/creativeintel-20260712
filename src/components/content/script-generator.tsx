@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Loader2, FileText, Clock } from "lucide-react";
 
 interface ScriptResult {
-  transcript: string;
+  reconstructedScript: string;
+  transcript?: string | null;
   summary: string;
   keyMoments: { timestamp: string; description: string }[];
 }
@@ -44,7 +45,9 @@ export function ScriptGenerator({
     }
   }
 
-  const transcript = result?.transcript || existingTranscript;
+  const transcript = existingTranscript || result?.transcript || null;
+  const reconstructed = result?.reconstructedScript || null;
+  const scriptText = transcript || reconstructed;
 
   return (
     <div className="rounded-lg border border-border bg-card p-5 space-y-4">
@@ -55,7 +58,7 @@ export function ScriptGenerator({
             Script / Transcript
           </p>
         </div>
-        {!transcript && (
+        {!scriptText && (
           <Button
             onClick={generate}
             disabled={loading}
@@ -75,7 +78,7 @@ export function ScriptGenerator({
             )}
           </Button>
         )}
-        {transcript && !result && (
+        {scriptText && !result && (
           <Button
             onClick={generate}
             disabled={loading}
@@ -98,7 +101,7 @@ export function ScriptGenerator({
         </div>
       )}
 
-      {loading && !transcript && (
+      {loading && !scriptText && (
         <div className="py-8 text-center">
           <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground mb-2" />
           <p className="text-xs text-muted-foreground">
@@ -135,21 +138,23 @@ export function ScriptGenerator({
         </div>
       )}
 
-      {transcript && (
+      {scriptText && (
         <div>
           <p className="text-[11px] uppercase tracking-wider font-medium text-muted-foreground mb-2">
-            Full script
+            {transcript ? "Transcript" : "Reconstructed script"}
           </p>
           <div className="rounded-md bg-muted p-4 text-sm leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto">
-            {transcript}
+            {scriptText}
           </div>
           <p className="text-[10px] text-muted-foreground mt-2">
-            AI-reconstructed transcript · May not match the original video exactly
+            {transcript
+              ? "Real transcript captured from the video's audio"
+              : "AI-reconstructed from metadata · Not the words actually spoken"}
           </p>
         </div>
       )}
 
-      {!transcript && !loading && !error && (
+      {!scriptText && !loading && !error && (
         <p className="text-xs text-muted-foreground py-4 text-center">
           Click &ldquo;Generate script&rdquo; to reconstruct the video&apos;s transcript using AI.
         </p>

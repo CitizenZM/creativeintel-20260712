@@ -15,6 +15,8 @@ import {
   SellingPointsSection,
   NarrativePatternsSection,
 } from "@/components/insights/insights-client";
+import { CompetitorsSection, type CompetitorSummaryView } from "@/components/insights/competitors-section";
+import { getConfiguredModelLabel } from "@/services/ai/claude-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -142,14 +144,42 @@ function TimelineDiagramServer({ timeline }: { timeline: VideoTimeline }) {
 export default async function InsightsListPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
 
-  const [patterns, sellingPoints, insights, deepAnalysis, brand, project] = await Promise.all([
+  const [patterns, sellingPoints, insights, deepAnalysis, brand, project, competitorRows] = await Promise.all([
     prisma.narrativePattern.findMany({ where: { projectId }, orderBy: { avgPerformance: "desc" } }),
     prisma.sellingPoint.findMany({ where: { projectId }, orderBy: { strength: "desc" } }),
     prisma.insight.findMany({ where: { projectId }, orderBy: { importance: "desc" } }),
     prisma.deepAnalysis.findUnique({ where: { projectId } }),
     prisma.brand.findUnique({ where: { projectId } }),
     prisma.project.findUnique({ where: { id: projectId }, select: { campaignGoal: true, brandName: true, category: true } }),
+    prisma.competitor.findMany({
+      where: { projectId },
+      include: {
+        rollup: true,
+        _count: { select: { contentAssets: true, adTeardowns: true, insights: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
   ]);
+
+  const competitorSummaries: CompetitorSummaryView[] = competitorRows.map((c) => ({
+    id: c.id,
+    name: c.name,
+    url: c.url,
+    adCount: c._count.contentAssets,
+    teardownCount: c._count.adTeardowns,
+    insightCount: c._count.insights,
+    rollup: c.rollup
+      ? {
+          dominantHooks: c.rollup.dominantHooks,
+          dominantFormats: c.rollup.dominantFormats,
+          offerLadder: c.rollup.offerLadder,
+          ctaPatterns: c.rollup.ctaPatterns,
+          summary: c.rollup.summary,
+        }
+      : null,
+  }));
+
+  const generalInsights = insights.filter((i) => !i.competitorId);
 
   const deep = deepAnalysis as unknown as (DeepAnalysisData & { id: string }) | null;
 
@@ -163,7 +193,7 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
   const sellingPointVisuals = (deep?.sellingPointVisuals as SellingPointVisual[] | null) || [];
   const videoTimeline = deep?.videoTimeline as VideoTimeline | null;
   const maxCameraFreq = cameraAngles.length > 0 ? Math.max(...cameraAngles.map(c => c.frequency)) : 1;
-  const aiModel = process.env.AI_MODEL || (process.env.OPENROUTER_API_KEY ? "openrouter/free" : "gpt-4o-mini");
+  const aiModel = getConfiguredModelLabel();
 
   return (
     <div className="space-y-8">
@@ -179,6 +209,8 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
         </div>
         <ActionButton endpoint={`/api/projects/${projectId}/insights/reanalyze`} label="Re-analyze" loadingLabel="Analyzing…" icon="brain" />
       </div>
+
+      <CompetitorsSection projectId={projectId} competitors={competitorSummaries} />
 
       {/* ══════════════════════════════════════════════════
           PRIORITY BLOCK 1: Production Context (top)
@@ -569,14 +601,14 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
           BLOCK 10: Strategic Insights (selectable → script)
       ══════════════════════════════════════════════════ */}
 
-      {insights.length > 0 && (
+      {generalInsights.length > 0 && (
         <section className="space-y-3">
           <div className="flex items-center gap-2">
             <Lightbulb className="h-4 w-4 text-yellow-500" />
             <p className="text-sm font-bold">Strategic Insights</p>
             <span className="text-[10px] text-muted-foreground">— select any to add to your script or ideation context</span>
           </div>
-          <InsightsSelectableSection insights={insights.map(ins => ({
+          <InsightsSelectableSection insights={generalInsights.map(ins => ({
             id: ins.id, category: ins.category, title: ins.title,
             description: ins.description, importance: ins.importance || 0,
             recommendation: ins.recommendation,
