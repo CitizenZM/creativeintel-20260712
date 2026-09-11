@@ -32,6 +32,10 @@ enum ContentType {
   SOCIAL_POST
   WEB_MENTION
   REVIEW
+  META_AD
+  TIKTOK_AD
+  GOOGLE_AD
+  INSTAGRAM_REEL
 }
 
 enum NarrativeType {
@@ -159,6 +163,9 @@ model Project {
   category     String?
   campaignGoal String?
 
+  // LibTV canvas this project's studio runs render into (bound once, reused).
+  libtvCanvasUuid String?
+
   // Product definition — user-specified, foundational source of truth
   productUrl        String? // specific product page URL (Amazon PDP, DTC page)
   productName       String? // exact product name entered by user
@@ -191,6 +198,10 @@ model Project {
   renderJobs        RenderJob[]
   videoReferences   VideoReference[]
   falVideoJobs      FalVideoJob[]
+  brandKit          BrandKit?
+  adTeardowns       AdTeardown[]
+  competitorRollups CompetitorRollup[]
+  libtvRuns         LibtvRun[]
 }
 
 model Brand {
@@ -247,6 +258,9 @@ model Competitor {
   weaknesses       Json?
 
   contentAssets ContentAsset[]
+  adTeardowns   AdTeardown[]
+  rollup        CompetitorRollup?
+  insights      Insight[]
 
   dataSource   DataSource @default(AI_INFERRED)
   rawCrawlData Json?
@@ -292,16 +306,89 @@ model ContentAsset {
   isPaidMedia     Boolean @default(false)
   adSpendEstimate Json?
 
+  // Ad-candidate provenance & format (populated by research adapters)
+  adSource       String? // meta_ad_library | tiktok_ad_library | tiktok_cc | google_ats | youtube | ig_reels | ddg
+  adEvidence     String? // ad_library | paid_label | classifier | none
+  adConfidence   Float? // 0..1 — classifier confidence that this is a brand-paid ad
+  advertiserName String?
+  advertiserId   String?
+  adLibraryId    String?
+  durationSec    Float?
+  aspectRatio    String? // 9:16 | 1:1 | 16:9 | 4:5
+  format         String? // vertical_short | square | horizontal | unknown
+  videoUrl       String? // direct media URL when known (ad library snapshot / worker capture)
+  landingUrl     String?
+  firstSeenAt    DateTime?
+  lastSeenAt     DateTime?
+  frameUrls      Json? // string[] — extracted keyframes for vision teardown
+  rankInOwner    Int? // Top-N rank within its competitor (or brand) after ranking
+
   dataSource DataSource @default(OFFICIAL_API)
   rawData    Json?
   createdAt  DateTime   @default(now())
 
   insights Insight[]
+  teardown AdTeardown?
 
   @@unique([projectId, url])
   @@index([projectId, type])
   @@index([projectId, overallScore])
   @@index([projectId, isPaidMedia])
+  @@index([projectId, competitorId, rankInOwner])
+}
+
+// Per-ad structured teardown — deep tier only (Top-N per competitor).
+model AdTeardown {
+  id             String       @id @default(cuid())
+  projectId      String
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contentAssetId String       @unique
+  contentAsset   ContentAsset @relation(fields: [contentAssetId], references: [id], onDelete: Cascade)
+  competitorId   String?
+  competitor     Competitor?  @relation(fields: [competitorId], references: [id], onDelete: SetNull)
+
+  rank          Int?
+  hookType      String
+  hookText      String
+  hookVisual    String
+  beats         Json // [{startSec,endSec,role,visual,vo,onScreenText}]
+  sellingPoints Json // [{point, evidenceTimestamp}]
+  proofDevices  Json // [{type, description, timestamp}]
+  ctaText       String?
+  ctaPlacement  String? // end_card | mid_roll | persistent_overlay
+  offer         String?
+  landingUrl    String?
+  whyItWorks    String  @db.Text
+  evidenceLevel String // vision_transcript | transcript | thumbnail | metadata
+  confidence    String // high | medium | low
+  promptVersion Int     @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, competitorId, rank])
+}
+
+// Per-competitor rollup of its Top-N teardowns.
+model CompetitorRollup {
+  id           String     @id @default(cuid())
+  projectId    String
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  competitorId String     @unique
+  competitor   Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  topAssetIds     Json // string[]
+  dominantHooks   Json
+  dominantFormats Json
+  offerLadder     Json
+  ctaPatterns     Json
+  cadence         Json
+  summary         String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
 }
 
 model Insight {
@@ -310,6 +397,8 @@ model Insight {
   project        Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   contentAssetId String?
   contentAsset   ContentAsset? @relation(fields: [contentAssetId], references: [id], onDelete: SetNull)
+  competitorId   String?
+  competitor     Competitor?   @relation(fields: [competitorId], references: [id], onDelete: SetNull)
 
   category       String
   title          String
@@ -322,6 +411,7 @@ model Insight {
   createdAt  DateTime   @default(now())
 
   @@index([projectId, category])
+  @@index([projectId, competitorId])
 }
 
 model NarrativePattern {
@@ -364,22 +454,31 @@ model Script {
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  title            String
-  angle            String
-  format           String
-  duration         String
-  platform         String?
-  totalDurationSec Int?
-  hookVariants     Json
-  body             String
-  ctaVariants      Json
-  narrativeType    NarrativeType?
-  targetEmotion    String?
-  predictedScore   Float?
-  scenes           Json? // [{sceneNumber, startSec, endSec, segmentLabel, shotType, focalLength, cameraMovement, aperture, location, lighting, actorAction, productAction, voiceover, textOverlay, transition}]
+  title              String
+  angle              String
+  format             String
+  duration           String
+  platform           String?
+  totalDurationSec   Int?
+  hookVariants       Json
+  body               String
+  ctaVariants        Json
+  narrativeType      NarrativeType?
+  targetEmotion      String?
+  predictedScore     Float?
+  scenes             Json? // [{sceneNumber, startSec, endSec, segmentLabel, shotType, focalLength, cameraMovement, aperture, location, lighting, actorAction, productAction, voiceover, textOverlay, transition}]
   platformTechniques Json? // string[] — platform-playbook techniques applied (e.g. "native text overlay in frame 1")
 
+  // Structured script (v2) — see src/services/ai/prompts/script-templates.ts
+  videoType String? // PRODUCT_INTRO | PROMO_OFFER | AWARENESS_INTEREST
+  template  String? // ScriptTemplate id, e.g. PROBLEM_AGITATE_SOLVE
+  hook      Json? // {text, visual, shot, durationSec, hookFormula}
+  bodyBeats Json? // [{beat, sellingPoint, howExpressed, shot, startSec, endSec, voiceover, textOverlay, proof}]
+  cta       Json? // {text, offer, urgency, visual, shot, durationSec}
+
   createdAt DateTime @default(now())
+
+  @@index([projectId, videoType])
 }
 
 model Storyboard {
@@ -389,11 +488,153 @@ model Storyboard {
   scriptId  String?
 
   title         String
-  frames        Json
+  frames        Json // GridFrame[] — one per 2s window, each tagged HOOK|BODY|CTA (src/lib/storyboard-grid.ts)
   totalDuration String?
   style         String?
+  frameSeconds  Int     @default(2)
 
   createdAt DateTime @default(now())
+}
+
+// ─── Brand Kit — the brand truth every generated ad must stay consistent with ──
+model BrandKit {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  colorsHex       Json? // [{name, hex, usage: primary|secondary|accent|background}]
+  fonts           Json? // [{role: headline|body, family, source}]
+  ctaOptions      Json? // [{text, priority}] — approved CTA copy pool
+  offerText       String?
+  landingUrl      String?
+  claimsAllowed   Json? // string[]
+  claimsForbidden Json? // string[]
+  toneGuidelines  String? @db.Text
+  doNotShow       Json? // string[] — visual do-nots
+  skuName         String?
+  skuDimensionsCm Json? // {height, width, depth, weightG}
+  productSummary  String? @db.Text // one-paragraph canonical description for prompts
+
+  completenessScore Int          @default(0)
+  assets            BrandAsset[]
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+}
+
+model BrandAsset {
+  id         String   @id @default(cuid())
+  brandKitId String
+  brandKit   BrandKit @relation(fields: [brandKitId], references: [id], onDelete: Cascade)
+
+  kind     String // LOGO | PACKSHOT | LIFESTYLE | FONT | OTHER
+  variant  String? // light | dark | front | side | back | in-hand | transparent
+  url      String
+  publicId String? // storage provider id (Cloudinary public_id / blob path)
+  provider String  @default("cloudinary")
+  width    Int?
+  height   Int?
+  format   String?
+  bytes    Int?
+  verified Boolean @default(false)
+  caption  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([brandKitId, kind])
+}
+
+// ─── Generic local-worker tasks (browser-only research: ad libraries etc.) ────
+model WorkerTask {
+  id        String  @id @default(cuid())
+  projectId String?
+  kind      String // ad_library_fetch | video_probe | ...
+  payload   Json
+  priority  Int     @default(0)
+
+  status      String    @default("queued") // queued|claimed|running|completed|failed
+  result      Json?
+  error       String?
+  attempts    Int       @default(0)
+  workerId    String?
+  claimedAt   DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, kind, priority])
+  @@index([projectId, kind])
+}
+
+// ─── LibTV production runs — executed by the local libtv-worker ───────────────
+model LibtvRun {
+  id           String  @id @default(cuid())
+  projectId    String
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scriptId     String?
+  storyboardId String?
+
+  status           String    @default("draft") // draft|awaiting_approval|approved|claimed|running|assembling|completed|failed|cancelled
+  canvasUuid       String?
+  canvasUrl        String?
+  canvasName       String?
+  imageModel       String    @default("Seedream 5.0 Pro")
+  videoModel       String    @default("Hailuo 2.3 Fast")
+  aspectRatio      String    @default("9:16")
+  clipDurationSec  Int       @default(6)
+  creditsEstimated Int       @default(0)
+  creditsSpent     Int       @default(0)
+  creditCap        Int?
+  approvedAt       DateTime?
+  masterMp4Url     String?
+  previewMp4Url    String?
+  contactSheetUrl  String?
+  error            String?
+  workerId         String?
+  claimedAt        DateTime?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  jobs LibtvJob[]
+
+  @@index([projectId, status])
+  @@index([status])
+}
+
+model LibtvJob {
+  id        String   @id @default(cuid())
+  runId     String
+  run       LibtvRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  projectId String
+
+  shotIndex        Int // 0-based frame index this job serves (-1 for uploads)
+  kind             String // upload | image | video
+  nodeName         String // K3 / V3 / PROD-sku — unique on the canvas
+  nodeId           String?
+  leftRefs         Json? // string[] — upstream node names (e.g. ["PROD-sku"], ["FF K3"])
+  prompt           String  @db.Text
+  modelName        String?
+  settings         Json? // {modeType, ratio, quality, duration, resolution, ...}
+  sourceUrl        String? // for uploads: asset URL to fetch then upload
+  creditsEstimated Int     @default(0)
+  creditsSpent     Int?
+
+  status      String    @default("queued") // queued|running|completed|failed|skipped
+  resultUrl   String? // Cloudinary/blob URL of the downloaded output
+  remoteUrl   String? // libtv-hosted asset URL if exposed
+  localPath   String?
+  error       String?
+  attempts    Int       @default(0)
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([runId, nodeName])
+  @@index([runId, status])
+  @@index([projectId])
 }
 
 model CreativeVariant {
