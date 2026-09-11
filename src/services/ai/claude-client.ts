@@ -1,51 +1,66 @@
 import OpenAI from "openai";
-import { z, ZodSchema } from "zod";
+import { ZodSchema } from "zod";
 
-// Route priority: OpenAI (subscription plan) → OpenRouter (free fallback)
-// OPENAI_API_KEY set → use directly, full GPT-4o + GPT Image 2 access
-// Only falls back to OpenRouter if OPENAI_API_KEY is absent
-let _client: OpenAI | null = null;
-let _clientIsOpenRouter = false;
+// Route priority: OpenAI → OpenRouter. OpenAI is preferred while its key works;
+// the first 401 from OpenAI permanently (per process) reroutes to OpenRouter so a
+// rotated/revoked key degrades to the fallback instead of failing every call.
+let _openai: OpenAI | null = null;
+let _openrouter: OpenAI | null = null;
+let _openaiDisabled = false;
 
-function getClient(): OpenAI {
-  if (_client) return _client;
+function openaiClient(): OpenAI | null {
+  if (_openaiDisabled || !process.env.OPENAI_API_KEY) return null;
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _openai;
+}
 
-  // Priority 1: Direct OpenAI — uses your subscription plan
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (openaiKey) {
-    _client = new OpenAI({ apiKey: openaiKey });
-    _clientIsOpenRouter = false;
-    return _client;
-  }
-
-  // Priority 2: OpenRouter free tier — fallback when no OpenAI key
-  const openrouterKey = process.env.OPENROUTER_API_KEY;
-  if (openrouterKey) {
-    _client = new OpenAI({
-      apiKey: openrouterKey,
+function openrouterClient(): OpenAI | null {
+  if (!process.env.OPENROUTER_API_KEY) return null;
+  if (!_openrouter) {
+    _openrouter = new OpenAI({
+      apiKey: process.env.OPENROUTER_API_KEY,
       baseURL: "https://openrouter.ai/api/v1",
       defaultHeaders: {
         "HTTP-Referer": "https://creativeintel.vercel.app",
         "X-Title": "CreativeIntel OS",
       },
     });
-    _clientIsOpenRouter = true;
-    return _client;
   }
+  return _openrouter;
+}
 
+interface Route {
+  client: OpenAI;
+  isOpenRouter: boolean;
+}
+
+function resolveRoute(): Route {
+  const oa = openaiClient();
+  if (oa) return { client: oa, isOpenRouter: false };
+  const or = openrouterClient();
+  if (or) return { client: or, isOpenRouter: true };
   throw new Error("No AI key configured — set OPENAI_API_KEY or OPENROUTER_API_KEY");
 }
 
+function isAuthError(err: unknown): boolean {
+  const status = (err as { status?: number } | null)?.status;
+  return status === 401 || status === 403;
+}
+
+/** Translate a bare OpenAI model id into OpenRouter's namespaced form. */
+function toOpenRouterModel(model: string): string {
+  if (model.includes("/")) return model;
+  return `openai/${model}`;
+}
+
 function getModel(): string {
-  // Explicit override always wins
-  if (process.env.AI_MODEL) return process.env.AI_MODEL;
-  // OpenAI key present → use GPT-4o (subscription plan)
-  if (process.env.OPENAI_API_KEY) return "gpt-4o";
-  // Fallback to OpenRouter free tier — override via AI_FALLBACK_MODEL
+  if (!_openaiDisabled && process.env.OPENAI_API_KEY) return process.env.AI_MODEL || "gpt-4o";
   if (process.env.OPENROUTER_API_KEY) {
-    return process.env.AI_FALLBACK_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
+    if (process.env.AI_FALLBACK_MODEL) return process.env.AI_FALLBACK_MODEL;
+    if (process.env.AI_MODEL) return toOpenRouterModel(process.env.AI_MODEL);
+    return "meta-llama/llama-3.3-70b-instruct:free";
   }
-  return "gpt-4o";
+  return process.env.AI_MODEL || "gpt-4o";
 }
 
 /** The model id this deployment actually calls for text analysis — safe to render in the UI. */
@@ -59,7 +74,7 @@ export function getConfiguredModelLabel(): string {
  */
 export function getVisionModel(): string {
   if (process.env.AI_VISION_MODEL) return process.env.AI_VISION_MODEL;
-  if (!process.env.OPENAI_API_KEY && process.env.OPENROUTER_API_KEY) return "openai/gpt-4o";
+  if ((_openaiDisabled || !process.env.OPENAI_API_KEY) && process.env.OPENROUTER_API_KEY) return "openai/gpt-4o";
   return "gpt-4o";
 }
 
@@ -131,42 +146,44 @@ export async function analyzeWithClaude<T>(options: {
     }
   }
 
-  const model = modelOverride || getModel();
+  let route = resolveRoute();
+  let model = modelOverride || getModel();
 
   // OpenAI requires "json" in the messages when using json_object format
   const systemWithJson = systemPrompt.toLowerCase().includes("json")
     ? systemPrompt
     : systemPrompt + "\n\nRespond with valid JSON only.";
 
-  // json_object response_format: supported by OpenAI-compatible endpoints (OpenAI directly,
-  // and OpenRouter passes it through for models that support it). Attempt it on both paths;
-  // fall back to an unstructured request if the API rejects the param.
-  const client = getClient();
-  const wantsJsonFormat = !!process.env.OPENAI_API_KEY || _clientIsOpenRouter;
+  async function createOnRoute(messages: OpenAI.Chat.ChatCompletionMessageParam[], modelToUse: string) {
+    try {
+      return await route.client.chat.completions.create({
+        model: modelToUse,
+        max_tokens: maxTokens,
+        messages,
+        response_format: { type: "json_object" },
+      });
+    } catch (err) {
+      if (isAuthError(err)) throw err;
+      // Some OpenRouter models reject response_format — retry without it.
+      return await route.client.chat.completions.create({
+        model: modelToUse,
+        max_tokens: maxTokens,
+        messages,
+      });
+    }
+  }
 
   async function callModel(messages: OpenAI.Chat.ChatCompletionMessageParam[], modelToUse: string) {
-    if (wantsJsonFormat) {
-      try {
-        return await client.chat.completions.create({
-          model: modelToUse,
-          max_tokens: maxTokens,
-          messages,
-          response_format: { type: "json_object" },
-        });
-      } catch (err) {
-        // Some OpenRouter models reject response_format — retry without it.
-        return await client.chat.completions.create({
-          model: modelToUse,
-          max_tokens: maxTokens,
-          messages,
-        });
-      }
+    try {
+      return await createOnRoute(messages, modelToUse);
+    } catch (err) {
+      if (!isAuthError(err) || route.isOpenRouter || !openrouterClient()) throw err;
+      console.warn("[ai] OpenAI rejected the API key — rerouting this process to OpenRouter");
+      _openaiDisabled = true;
+      route = resolveRoute();
+      model = modelOverride ? toOpenRouterModel(modelOverride) : getModel();
+      return await createOnRoute(messages, model);
     }
-    return client.chat.completions.create({
-      model: modelToUse,
-      max_tokens: maxTokens,
-      messages,
-    });
   }
 
   const userContent = toUserContent(userPrompt);

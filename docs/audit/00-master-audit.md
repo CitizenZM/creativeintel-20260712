@@ -47,8 +47,12 @@ Models used: Claude Opus (research, insights, scripts, studio), Claude Sonnet (i
 
 ### Structural (Codex)
 - `prisma db push --accept-data-loss` runs on every production build.
-- No authentication on any project route.
+- No authentication on any project route (mitigated today by Vercel Deployment Protection / team SSO — confirmed enabled).
 - Long work launched via `waitUntil` inside 60 s functions — not a durable queue.
+
+### Operational (found during QC, 2026-09-11)
+- **The production `OPENAI_API_KEY` is rejected by OpenAI (HTTP 401)** and the client preferred OpenAI whenever the key was present, so every analysis / script / storyboard call in production has been failing. The client now reroutes to OpenRouter on the first 401.
+- **The OpenRouter account balance is nearly exhausted** (a single gpt-4o script call was refused for lack of credits). Until the OpenAI key is rotated or OpenRouter is topped up, only cheap models (`openai/gpt-4o-mini`, free Llama) work.
 
 ## 解决方案 (Target architecture)
 
