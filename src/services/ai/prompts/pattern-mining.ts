@@ -1,3 +1,15 @@
+export interface PatternTeardown {
+  hookType: string;
+  hookVisual: string;
+  beats: { startSec?: number; endSec?: number; role?: string; visual?: string; vo?: string }[];
+  sellingPoints: string[];
+  proofDevices: string[];
+  ctaText?: string | null;
+  ctaPlacement?: string | null;
+  offer?: string | null;
+  whyItWorks?: string;
+}
+
 export interface ScoredContent {
   title: string;
   narrativeType: string;
@@ -5,6 +17,8 @@ export interface ScoredContent {
   hookText: string;
   keyMessages: string[];
   evidenceLevel?: string;
+  owner?: string;
+  teardown?: PatternTeardown;
 }
 
 export function buildPatternMiningPrompt(
@@ -13,7 +27,8 @@ export function buildPatternMiningPrompt(
 ) {
   const system = `You are a creative strategist identifying content patterns and narrative trends.
 Analyze the scored content and identify recurring narrative patterns.
-Weight content with "evidence: transcript" more heavily than "evidence: metadata" when judging what patterns actually work — transcript-evidenced scores reflect real content, metadata-only scores are conservative guesses.
+Weight content with "evidence: transcript" or "evidence: vision_transcript" more heavily than "evidence: metadata" when judging what patterns actually work — evidenced scores reflect real content, metadata-only scores are conservative guesses.
+Items that carry a TEARDOWN block have been decomposed beat by beat from real frames and transcript. Ground your patterns, selling points and best practices in those beats, hooks, proof devices and CTAs — quote them — rather than inferring from titles.
 Respond with ONLY a JSON object:
 {
   "patterns": [
@@ -42,12 +57,24 @@ Respond with ONLY a JSON object:
 
 Scored Content:
 ${contents
-  .map(
-    (c, i) => `[${i + 1}] "${c.title}"
+  .map((c, i) => {
+    const t = c.teardown;
+    const teardownBlock = t
+      ? `
+  TEARDOWN — hook type: ${t.hookType} | hook visual: ${t.hookVisual}
+    Beats: ${t.beats
+      .slice(0, 8)
+      .map((b) => `${b.startSec ?? 0}-${b.endSec ?? 0}s [${b.role || "?"}] ${b.visual || ""}`)
+      .join(" · ")}
+    Selling points in-ad: ${t.sellingPoints.join(" | ") || "none"}
+    Proof devices: ${t.proofDevices.join(" | ") || "none"}
+    CTA: ${t.ctaText ? `"${t.ctaText}"` : "none"}${t.ctaPlacement ? ` (${t.ctaPlacement})` : ""}${t.offer ? ` | Offer: ${t.offer}` : ""}${t.whyItWorks ? `\n    Why it works: ${t.whyItWorks}` : ""}`
+      : "";
+    return `[${i + 1}] "${c.title}"${c.owner ? ` — ${c.owner}` : ""}
   Type: ${c.narrativeType} | Score: ${c.overallScore} | Evidence: ${c.evidenceLevel || "metadata"}
   Hook: ${c.hookText}
-  Messages: ${c.keyMessages.join(", ")}`
-  )
+  Messages: ${c.keyMessages.join(", ")}${teardownBlock}`;
+  })
   .join("\n\n")}
 
 Identify:

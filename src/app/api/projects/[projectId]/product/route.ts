@@ -1,14 +1,63 @@
 /**
  * Product definition API
- * GET  — returns current product definition (url, name, images, description)
- * POST — scrape a product URL and save results as the canonical product source
- * PATCH — update product fields (name, description) or save user-uploaded images
+ * GET   — current product definition (url, name, images, description)
+ * POST  — scrape a product URL and save results as the canonical product source
+ * PATCH — mode "preview" scrapes without writing, mode "commit" scrapes and
+ *         writes, no mode updates the supplied fields only
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { scrapeProductPage } from "@/services/research/product-page-scraper";
+import { scrapeProductPageDetailed } from "@/services/research/product-page-scraper";
+import type { ProductPageData, ScrapeOutcome } from "@/services/research/product-page-scraper";
 
 export const maxDuration = 30;
+
+const PROJECT_SELECT = {
+  productUrl: true,
+  productName: true,
+  productPageTitle: true,
+  productPageImages: true,
+  productPageText: true,
+  userProductImages: true,
+} as const;
+
+function toScrapeResult(outcome: ScrapeOutcome) {
+  return {
+    ok: !!outcome.data,
+    adapter: outcome.adapter,
+    error: outcome.error ?? null,
+    attempts: outcome.attempts,
+    imageCount: outcome.data?.images.length ?? 0,
+    title: outcome.data?.title ?? null,
+    hasDescription: !!outcome.data?.description,
+    featureCount: outcome.data?.features.length ?? 0,
+  };
+}
+
+async function commitScrape(projectId: string, productUrl: string, scraped: ProductPageData) {
+  const project = await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      productUrl,
+      productPageTitle: scraped.title,
+      productPageImages: scraped.images as never,
+      productPageText: [scraped.description, ...scraped.features].filter(Boolean).join("\n\n"),
+      productName: scraped.title || undefined,
+    },
+    select: PROJECT_SELECT,
+  });
+
+  await prisma.brand.updateMany({
+    where: { projectId },
+    data: {
+      productCategory: scraped.brand ? `${scraped.brand} — from product page` : undefined,
+      productDescription: scraped.description || undefined,
+      productVerified: false,
+    },
+  });
+
+  return project;
+}
 
 export async function GET(
   _req: Request,
@@ -17,14 +66,7 @@ export async function GET(
   const { projectId } = await params;
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: {
-      productUrl: true,
-      productName: true,
-      productPageTitle: true,
-      productPageImages: true,
-      productPageText: true,
-      userProductImages: true,
-    },
+    select: PROJECT_SELECT,
   });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(project);
@@ -40,48 +82,25 @@ export async function POST(
 
   if (!productUrl) return NextResponse.json({ error: "productUrl required" }, { status: 400 });
 
-  try {
-    const scraped = await scrapeProductPage(productUrl);
+  const outcome = await scrapeProductPageDetailed(productUrl);
+  const scrapeResult = toScrapeResult(outcome);
 
-    const project = await prisma.project.update({
-      where: { id: projectId },
-      data: {
-        productUrl,
-        productPageTitle: scraped.title,
-        productPageImages: scraped.images as never,
-        productPageText: [scraped.description, ...scraped.features].filter(Boolean).join("\n\n"),
-        // Also set productName from scraped title if not already set
-        productName: scraped.title || undefined,
-      },
-    });
-
-    // Also update the brand model with product intelligence
-    await prisma.brand.updateMany({
-      where: { projectId },
-      data: {
-        productCategory: scraped.brand
-          ? `${scraped.brand} — from product page`
-          : undefined,
-        productDescription: scraped.description || undefined,
-        // Mark as not verified so user reviews the new data
-        productVerified: false,
-      },
-    });
-
-    return NextResponse.json({
-      productUrl: project.productUrl,
-      productPageTitle: project.productPageTitle,
-      productPageImages: project.productPageImages,
-      imageCount: scraped.images.length,
-      hasDescription: !!scraped.description,
-      featureCount: scraped.features.length,
-    });
-  } catch (err) {
+  if (!outcome.data) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to scrape product page" },
-      { status: 500 }
+      { error: outcome.error || "Failed to read product page", scrapeResult },
+      { status: 422 }
     );
   }
+
+  const project = await commitScrape(projectId, productUrl, outcome.data);
+
+  return NextResponse.json({
+    ...project,
+    scrapeResult,
+    imageCount: scrapeResult.imageCount,
+    hasDescription: scrapeResult.hasDescription,
+    featureCount: scrapeResult.featureCount,
+  });
 }
 
 export async function PATCH(
@@ -90,6 +109,41 @@ export async function PATCH(
 ) {
   const { projectId } = await params;
   const body = await req.json().catch(() => ({}));
+  const mode = (body as { mode?: string }).mode;
+
+  if (mode === "preview" || mode === "commit") {
+    const productUrl = (body as { productUrl?: string }).productUrl;
+    if (!productUrl) return NextResponse.json({ error: "productUrl required" }, { status: 400 });
+
+    const outcome = await scrapeProductPageDetailed(productUrl);
+    const scrapeResult = toScrapeResult(outcome);
+
+    if (!outcome.data) {
+      return NextResponse.json(
+        { mode, error: outcome.error || "Failed to read product page", scrapeResult },
+        { status: 422 }
+      );
+    }
+
+    if (mode === "preview") {
+      return NextResponse.json({
+        mode,
+        scrapeResult,
+        preview: {
+          productUrl,
+          title: outcome.data.title,
+          description: outcome.data.description,
+          features: outcome.data.features,
+          images: outcome.data.images,
+          price: outcome.data.price ?? null,
+          brand: outcome.data.brand ?? null,
+        },
+      });
+    }
+
+    const project = await commitScrape(projectId, productUrl, outcome.data);
+    return NextResponse.json({ mode, scrapeResult, ...project });
+  }
 
   const allowed = ["productUrl", "productName", "productPageText", "userProductImages", "productPageImages"];
   const data: Record<string, unknown> = {};
@@ -97,17 +151,14 @@ export async function PATCH(
     if (key in body) data[key] = body[key];
   }
 
+  if (Object.keys(data).length === 0) {
+    return NextResponse.json({ error: "No updatable fields provided" }, { status: 400 });
+  }
+
   const project = await prisma.project.update({
     where: { id: projectId },
     data,
-    select: {
-      productUrl: true,
-      productName: true,
-      productPageTitle: true,
-      productPageImages: true,
-      productPageText: true,
-      userProductImages: true,
-    },
+    select: PROJECT_SELECT,
   });
 
   return NextResponse.json(project);

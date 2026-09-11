@@ -6,7 +6,10 @@ import {
   upsertCompetitorProfile,
 } from "@/services/brand-library";
 import { getActiveWorkspace, projectWorkspaceFilter } from "@/services/workspace";
-import { scrapeProductPage } from "@/services/research/product-page-scraper";
+import {
+  scrapeProductPageDetailed,
+  type AdapterAttempt,
+} from "@/services/research/product-page-scraper";
 
 export const maxDuration = 30;
 
@@ -45,19 +48,47 @@ export async function POST(request: Request) {
       )
     );
 
-    // Scrape product page if URL provided — this is the primary product truth source
+    // Scrape product page if URL provided — this is the primary product truth
+    // source. Failures never block creation, but they are always reported back.
     let productPageTitle: string | undefined;
     let productPageImages: { url: string; alt: string }[] | undefined;
     let productPageText: string | undefined;
 
+    let scrapeResult: {
+      ok: boolean;
+      adapter: string | null;
+      error: string | null;
+      attempts: AdapterAttempt[];
+      imageCount: number;
+      title: string | null;
+    } | null = null;
+
     if (data.productUrl) {
       try {
-        const scraped = await scrapeProductPage(data.productUrl);
-        productPageTitle = scraped.title || undefined;
-        productPageImages = scraped.images;
-        productPageText = [scraped.description, ...scraped.features].filter(Boolean).join("\n\n") || undefined;
+        const outcome = await scrapeProductPageDetailed(data.productUrl);
+        if (outcome.data) {
+          productPageTitle = outcome.data.title || undefined;
+          productPageImages = outcome.data.images;
+          productPageText =
+            [outcome.data.description, ...outcome.data.features].filter(Boolean).join("\n\n") || undefined;
+        }
+        scrapeResult = {
+          ok: !!outcome.data,
+          adapter: outcome.adapter,
+          error: outcome.error ?? null,
+          attempts: outcome.attempts,
+          imageCount: outcome.data?.images.length ?? 0,
+          title: outcome.data?.title ?? null,
+        };
       } catch (e) {
-        console.warn("Product page scrape failed (non-blocking):", e);
+        scrapeResult = {
+          ok: false,
+          adapter: null,
+          error: e instanceof Error ? e.message : "Product page scrape failed",
+          attempts: [],
+          imageCount: 0,
+          title: null,
+        };
       }
     }
 
@@ -101,10 +132,14 @@ export async function POST(request: Request) {
       },
     });
 
-    return NextResponse.json(project, { status: 201 });
+    return NextResponse.json({ ...project, scrapeResult }, { status: 201 });
   } catch (err) {
     if (err instanceof Error && err.name === "ZodError") {
-      return NextResponse.json({ error: "Invalid input", details: err }, { status: 400 });
+      const issues = (err as unknown as { issues?: { path: (string | number)[]; message: string }[] }).issues || [];
+      return NextResponse.json(
+        { error: issues[0]?.message || "Invalid input", issues },
+        { status: 400 }
+      );
     }
     console.error("Failed to create project:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

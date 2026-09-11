@@ -12,46 +12,80 @@ export interface YouTubeVideo {
   viewCount: number;
   likeCount: number;
   commentCount: number;
+  /** Real duration in seconds — ISO-8601 on the API path, lengthText on scrape. */
+  durationSec?: number;
   /** True when likeCount/commentCount are heuristic estimates, not real data
    * (set on results from the HTML-scrape path, which has no engagement data). */
   metricsEstimated?: boolean;
 }
 
+export interface YouTubeSearchOptions {
+  maxResults?: number;
+  /** `sp=` parameter for the scrape path (e.g. the Shorts filter). */
+  spFilter?: string;
+  /** Maps to the API's `videoDuration` param; mirrored by spFilter on scrape. */
+  videoDuration?: "short" | "medium" | "long" | "any";
+  brandName?: string;
+  mustContain?: string[];
+  mustNotContain?: string[];
+}
+
 const youtube = google.youtube("v3");
 
+/**
+ * Search YouTube. Quality filters (`brandName` / `mustContain` /
+ * `mustNotContain`) are applied on BOTH the API and the scrape path — having
+ * an API key must not silently disable disambiguation (audit §2b).
+ */
 export async function searchYouTubeVideos(
   query: string,
-  maxResults = 10,
-  spFilter?: string,
-  brandName?: string,
-  mustContain?: string[],
-  mustNotContain?: string[]
+  options: YouTubeSearchOptions = {}
 ): Promise<YouTubeVideo[]> {
   if (process.env.MOCK_CRAWL === "true") {
     return [];
   }
 
+  const {
+    maxResults = 10,
+    spFilter,
+    videoDuration,
+    brandName,
+    mustContain,
+    mustNotContain,
+  } = options;
+
   return cached(
     {
       kind: "youtube:search",
-      params: { query, maxResults, spFilter: spFilter ?? null, brandName: brandName ?? null, mustContain: mustContain ?? null, mustNotContain: mustNotContain ?? null },
+      params: {
+        query,
+        maxResults,
+        spFilter: spFilter ?? null,
+        videoDuration: videoDuration ?? null,
+        brandName: brandName ?? null,
+        mustContain: mustContain ?? null,
+        mustNotContain: mustNotContain ?? null,
+      },
       ttlSec: 60 * 60 * 12,
-      schemaVersion: 1,
+      schemaVersion: 2,
     },
     async () => {
+      const apply = (results: YouTubeVideo[]) => {
+        const filtered = brandName
+          ? filterQuality(results, brandName, mustContain, mustNotContain)
+          : results;
+        return filtered.slice(0, maxResults);
+      };
+
       if (process.env.YOUTUBE_API_KEY) {
         try {
-          return await searchViaAPI(query, maxResults);
+          return apply(await searchViaAPI(query, maxResults + 5, videoDuration));
         } catch (error) {
           console.error("YouTube API error:", error);
         }
       }
       try {
-        const results = await scrapeYouTubeSearch(query, maxResults + 5, spFilter);
-        const filtered = brandName
-          ? filterQuality(results, brandName, mustContain, mustNotContain)
-          : results;
-        return filtered.slice(0, maxResults);
+        return apply(await scrapeYouTubeSearch(query, maxResults + 5, spFilter));
       } catch (error) {
         console.error("YouTube scrape error:", error);
       }
@@ -60,7 +94,35 @@ export async function searchYouTubeVideos(
   );
 }
 
-async function searchViaAPI(query: string, maxResults: number): Promise<YouTubeVideo[]> {
+/** `PT1M30S` → 90. Returns undefined for anything unparseable. */
+export function parseIsoDuration(iso: string | null | undefined): number | undefined {
+  if (!iso) return undefined;
+  const m = iso.match(/^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/);
+  if (!m) return undefined;
+  const [, d, h, min, s] = m;
+  const total =
+    Number(d ?? 0) * 86400 +
+    Number(h ?? 0) * 3600 +
+    Number(min ?? 0) * 60 +
+    Number(s ?? 0);
+  return Number.isFinite(total) && total > 0 ? total : undefined;
+}
+
+/** `1:23` / `1:02:03` → seconds. */
+function parseLengthText(text: string | undefined): number | undefined {
+  if (!text) return undefined;
+  const parts = text.trim().split(":").map((p) => Number(p));
+  if (parts.some((n) => Number.isNaN(n))) return undefined;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return undefined;
+}
+
+async function searchViaAPI(
+  query: string,
+  maxResults: number,
+  videoDuration?: "short" | "medium" | "long" | "any"
+): Promise<YouTubeVideo[]> {
   const searchResponse = await youtube.search.list({
     key: process.env.YOUTUBE_API_KEY,
     q: query,
@@ -68,6 +130,7 @@ async function searchViaAPI(query: string, maxResults: number): Promise<YouTubeV
     type: ["video"],
     maxResults,
     order: "relevance",
+    ...(videoDuration && videoDuration !== "any" ? { videoDuration } : {}),
   });
 
   const videoIds = (searchResponse.data.items || [])
@@ -76,10 +139,12 @@ async function searchViaAPI(query: string, maxResults: number): Promise<YouTubeV
 
   if (videoIds.length === 0) return [];
 
+  // contentDetails is what carries the real ISO-8601 duration — the search
+  // endpoint never returns it.
   const statsResponse = await youtube.videos.list({
     key: process.env.YOUTUBE_API_KEY,
     id: videoIds,
-    part: ["statistics", "snippet"],
+    part: ["statistics", "snippet", "contentDetails"],
   });
 
   return (statsResponse.data.items || []).map((item) => ({
@@ -95,6 +160,7 @@ async function searchViaAPI(query: string, maxResults: number): Promise<YouTubeV
     viewCount: parseInt(item.statistics?.viewCount || "0", 10),
     likeCount: parseInt(item.statistics?.likeCount || "0", 10),
     commentCount: parseInt(item.statistics?.commentCount || "0", 10),
+    durationSec: parseIsoDuration(item.contentDetails?.duration),
   }));
 }
 
@@ -135,14 +201,14 @@ function filterQuality(
     // Reject if contains any "not related to" terms
     if (mustNotContain && mustNotContain.length > 0) {
       for (const term of mustNotContain) {
-        if (text.includes(term.toLowerCase())) return false;
+        if (term && text.includes(term.toLowerCase())) return false;
       }
     }
 
     // For ambiguous brand names, require at least one disambiguation keyword
     if (isAmbiguous && mustContain && mustContain.length > 0) {
-      const hasRelevantKeyword = mustContain.some((kw) =>
-        text.includes(kw.toLowerCase())
+      const hasRelevantKeyword = mustContain.some(
+        (kw) => kw && text.includes(kw.toLowerCase())
       );
       const titleHasBrand = v.title.toLowerCase().includes(brandLower);
       // Pass if: has a relevant keyword, OR title has brand + high view count (likely official)
@@ -239,6 +305,8 @@ function parseYtInitialData(jsonStr: string, maxResults: number): YouTubeVideo[]
         vr.viewCountText?.simpleText || vr.viewCountText?.runs?.[0]?.text || "";
       const publishedText =
         vr.publishedTimeText?.simpleText || "";
+      const lengthText =
+        vr.lengthText?.simpleText || vr.lengthText?.runs?.[0]?.text || "";
 
       // Get highest quality thumbnail
       const thumbnails = vr.thumbnail?.thumbnails || [];
@@ -271,6 +339,7 @@ function parseYtInitialData(jsonStr: string, maxResults: number): YouTubeVideo[]
         viewCount,
         likeCount: 0,
         commentCount: 0,
+        durationSec: parseLengthText(lengthText),
         metricsEstimated: true,
       });
 

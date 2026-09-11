@@ -1,10 +1,19 @@
 import type { CrawlResult } from "@/services/research/website-crawler";
 
+export interface CompetitorAdEvidence {
+  title: string;
+  hookType?: string;
+  hookText?: string;
+  ctaText?: string | null;
+  offer?: string | null;
+}
+
 export function buildCompetitorIntelPrompt(
   brandName: string,
   brandCrawl: CrawlResult | null,
   competitorName: string,
-  competitorCrawl: CrawlResult
+  competitorCrawl: CrawlResult,
+  adEvidence?: CompetitorAdEvidence[]
 ) {
   const system = `You are a competitive intelligence analyst.
 You will receive TWO companies' websites. Analyze ONLY the competitor (the second one), then compare against the brand.
@@ -49,7 +58,16 @@ Headings: ${competitorCrawl.headings.slice(0, 10).join(", ")}
 CTAs: ${competitorCrawl.ctaTexts.join(", ")}
 Features: ${competitorCrawl.productFeatures.slice(0, 10).join(", ")}
 Content: ${competitorCrawl.bodyText.slice(0, 1500)}
-===================================
+${
+  adEvidence?.length
+    ? `\nTHEIR ACTUAL ADS (torn down from real creative — weight these above website copy):\n${adEvidence
+        .map(
+          (a, i) =>
+            `  [${i + 1}] "${a.title}" — hook (${a.hookType || "?"}): "${a.hookText || ""}"${a.ctaText ? ` | CTA: "${a.ctaText}"` : ""}${a.offer ? ` | Offer: ${a.offer}` : ""}`
+        )
+        .join("\n")}\n`
+    : ""
+}===================================
 
 Fill the JSON with data about "${competitorName}" ONLY (using its own website above). The "strengths"/"weaknesses"/"opportunities" arrays compare the competitor against "${brandName}".`;
 

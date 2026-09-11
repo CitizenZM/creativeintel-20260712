@@ -1,12 +1,28 @@
-import type { YouTubeVideo } from "@/services/research/youtube-service";
-
 export interface VideoEvidence {
   transcript?: string;
   transcriptSource?: "groq" | "openai" | "none";
   thumbnailUrl?: string;
 }
 
-type ScoringVideo = YouTubeVideo & { _platform?: string };
+/**
+ * Structural shape accepted by the scorer. Satisfied both by research
+ * `YouTubeVideo` results and by `ContentAsset` rows read back from the DB,
+ * so the pipeline can score persisted assets without re-fetching search results.
+ */
+export interface ScoringItem {
+  videoId: string;
+  title: string;
+  description?: string | null;
+  channelTitle?: string | null;
+  platform?: string | null;
+  viewCount?: number | null;
+  likeCount?: number | null;
+  commentCount?: number | null;
+  publishedAt?: string | Date | null;
+  _platform?: string;
+}
+
+type ScoringVideo = ScoringItem;
 
 function firstSeconds(transcript: string, approxWordsFor15s = 40): string {
   // Whisper output has no reliable per-word timestamps here, so approximate
@@ -88,16 +104,19 @@ Thumbnail available (reference only, described contextually — no transcript). 
         : `Evidence tier: metadata
 No transcript or thumbnail available. You MUST set confidence: "low" and keep hookStrength/pacing/storytellingArc/emotionalAppeal in the 40-60 conservative mid-range.`;
 
+    const published =
+      v.publishedAt instanceof Date ? v.publishedAt.toISOString().slice(0, 10) : v.publishedAt || "unknown";
+
     return `
 [${i + 1}] Video ID: ${v.videoId}
 Title: ${v.title}
-Channel: ${v.channelTitle}
-Platform: ${v._platform || "youtube"}
-Description: ${v.description.slice(0, 400)}
-Views: ${v.viewCount.toLocaleString()}
-Likes: ${v.likeCount.toLocaleString()}
-Comments: ${v.commentCount.toLocaleString()}
-Published: ${v.publishedAt}
+Channel: ${v.channelTitle || "unknown"}
+Platform: ${v._platform || v.platform || "youtube"}
+Description: ${(v.description || "").slice(0, 400)}
+Views: ${(v.viewCount ?? 0).toLocaleString()}
+Likes: ${(v.likeCount ?? 0).toLocaleString()}
+Comments: ${(v.commentCount ?? 0).toLocaleString()}
+Published: ${published}
 ${evidenceBlock}
 `;
   })

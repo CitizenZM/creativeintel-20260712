@@ -1,141 +1,140 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
-import { prisma } from "@/lib/db";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { buildScriptWritingPrompt } from "@/services/ai/prompts/script-writing";
-import { NarrativeType } from "@/generated/prisma/enums";
+import {
+  defaultTemplateBatch,
+  getScriptTemplate,
+  isVideoType,
+  type ScriptTemplate,
+  type VideoType,
+} from "@/services/ai/prompts/script-templates";
+import { scriptV2Schema } from "@/lib/script-schema";
+import { withIdempotency } from "@/lib/idempotency";
+import { pMapSettled } from "@/lib/parallel";
+import {
+  loadScriptContext,
+  buildScriptInput,
+  persistScript,
+  type ScriptAngle,
+} from "../_script-context";
 
 export const maxDuration = 60;
 
-const scriptSchema = z.object({
-  title: z.string(),
-  angle: z.string(),
-  format: z.string(),
-  duration: z.string(),
-  hookVariants: z.array(z.string()),
-  body: z.string(),
-  ctaVariants: z.array(z.string()),
-  narrativeType: z.string(),
-  targetEmotion: z.string(),
-  predictedScore: z.number(),
-  platformTechniques: z.array(z.string()).optional().default([]),
-});
-
-const validTypes: NarrativeType[] = [
-  "PROBLEM_SOLUTION", "TESTIMONIAL", "DEMONSTRATION", "LIFESTYLE",
-  "EDUCATIONAL", "COMPARISON", "STORY_ARC", "UGC_STYLE",
-  "TREND_RIDING", "BEFORE_AFTER",
-];
+const DEFAULT_COUNT = 10;
+const MAX_COUNT = 20;
+const CONCURRENCY = 4;
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
-  const body = await request.json().catch(() => ({}));
-  const { angles } = body as {
-    angles: Array<{
-      title: string;
-      description: string;
-      targetEmotion: string;
-      narrativeType: string;
-    }>;
+  const idem = await withIdempotency<unknown>(request, {
+    route: "creative/scripts-batch",
+    projectId,
+  });
+  if (idem.replay && idem.response) return idem.response;
+
+  const body = (await request.json().catch(() => ({}))) as {
+    templateIds?: string[];
+    count?: number;
+    angles?: ScriptAngle[];
+    videoType?: string;
+    totalDurationSec?: number;
   };
 
-  if (!angles || !Array.isArray(angles) || angles.length === 0) {
-    return NextResponse.json({ error: "angles array required" }, { status: 400 });
-  }
-
   try {
-    const project = await prisma.project.findUnique({ where: { id: projectId } });
-    if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const ctx = await loadScriptContext(projectId);
+    if (!ctx) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const [sellingPoints, campaignSel, deepAnal] = await Promise.all([
-      prisma.sellingPoint.findMany({
-        where: { projectId },
-        orderBy: { strength: "desc" },
-        take: 5,
-      }),
-      prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null),
-      prisma.deepAnalysis.findUnique({ where: { projectId } }).catch(() => null),
-    ]);
-    const spStrings = sellingPoints.map((sp) => sp.point);
-    const platformId = (campaignSel?.platform as string | null) || undefined;
+    const count = Math.min(MAX_COUNT, Math.max(1, Number(body.count) || DEFAULT_COUNT));
 
-    // Close the loop with research: surface DeepAnalysis.platformInsights as a
-    // lightweight "what's working in this niche" summary, truncated to ~1500 chars.
-    let nicheResearch: string | undefined;
-    if (deepAnal?.platformInsights) {
-      const insights = deepAnal.platformInsights as Array<{
-        platform: string;
-        contentStyle?: string;
-        bestPractices?: string[];
-        avoidPatterns?: string[];
-      }>;
-      const relevant = platformId
-        ? insights.filter((i) => i.platform?.toLowerCase() === platformId.toLowerCase())
-        : insights;
-      const chosen = (relevant.length ? relevant : insights).slice(0, 2);
-      const lines: string[] = [];
-      for (const i of chosen) {
-        if (i.contentStyle) lines.push(`[${i.platform}] ${i.contentStyle}`);
-        if (i.bestPractices?.length) lines.push(`Best practices: ${i.bestPractices.slice(0, 3).join("; ")}`);
-        if (i.avoidPatterns?.length) lines.push(`Avoid: ${i.avoidPatterns.slice(0, 2).join("; ")}`);
+    let templates: ScriptTemplate[];
+    if (Array.isArray(body.templateIds) && body.templateIds.length) {
+      templates = body.templateIds
+        .map((id) => getScriptTemplate(id))
+        .filter((t): t is ScriptTemplate => t !== null)
+        .slice(0, MAX_COUNT);
+      if (!templates.length) {
+        return NextResponse.json({ error: "No valid templateIds" }, { status: 400 });
       }
-      if (lines.length) nicheResearch = lines.join("\n").slice(0, 1500);
+    } else {
+      templates = defaultTemplateBatch(ctx.platformId, count);
     }
 
-    // Generate scripts for all angles in parallel
-    const scriptPromises = angles.slice(0, 3).map(async (angle) => {
-      try {
-        const prompt = buildScriptWritingPrompt({
-          brandName: project.brandName,
-          angle,
-          sellingPoints: spStrings,
-          campaignGoal: project.campaignGoal || undefined,
-          platform: platformId,
-          platformId,
-          nicheResearch,
-        });
+    const angles = Array.isArray(body.angles) ? body.angles : [];
+    const requestedType = typeof body.videoType === "string" ? body.videoType.toUpperCase() : "";
+    const overrideType: VideoType | null = isVideoType(requestedType) ? requestedType : null;
+    const totalDurationSec = Number(body.totalDurationSec) || ctx.totalDurationSec;
+
+    const settled = await pMapSettled(
+      templates,
+      async (template, i) => {
+        const videoType = overrideType ?? template.videoType;
+        const angle = angles.length ? angles[i % angles.length] : undefined;
+
+        const prompt = buildScriptWritingPrompt(
+          buildScriptInput(ctx, { template, videoType, angle, totalDurationSec })
+        );
 
         const result = await analyzeWithClaude({
           systemPrompt: prompt.system,
           userPrompt: prompt.user,
-          responseSchema: scriptSchema,
-          maxTokens: 4096,
+          responseSchema: scriptV2Schema,
+          maxTokens: 8000,
         });
 
-        const narrativeType = validTypes.includes(result.narrativeType as NarrativeType)
-          ? (result.narrativeType as NarrativeType)
-          : "DEMONSTRATION";
-
-        const script = await prisma.script.create({
-          data: {
-            projectId,
-            title: result.title,
-            angle: result.angle,
-            format: result.format,
-            duration: result.duration,
-            hookVariants: result.hookVariants,
-            body: result.body,
-            ctaVariants: result.ctaVariants,
-            narrativeType,
-            targetEmotion: result.targetEmotion,
-            predictedScore: result.predictedScore,
-            platformTechniques: result.platformTechniques as never,
-          },
+        return persistScript(projectId, result, {
+          template,
+          videoType,
+          totalDurationSec,
+          angleTitle: angle?.title,
         });
-        return script;
-      } catch (err) {
-        console.error("Script generation failed for angle:", angle.title, err);
-        return null;
-      }
-    });
+      },
+      { concurrency: CONCURRENCY }
+    );
 
-    const scripts = (await Promise.all(scriptPromises)).filter((s) => s !== null);
-    return NextResponse.json({ scripts });
+    const scripts = settled
+      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof persistScript>>> =>
+        r.status === "fulfilled"
+      )
+      .map((r) => r.value);
+
+    const failures = settled
+      .map((r, i) =>
+        r.status === "rejected"
+          ? {
+              templateId: templates[i].id,
+              error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+            }
+          : null
+      )
+      .filter((f): f is { templateId: string; error: string } => f !== null);
+
+    for (const f of failures) {
+      console.error("Script generation failed for template:", f.templateId, f.error);
+    }
+
+    if (!scripts.length) {
+      const payload = {
+        error: "Every script in this batch failed",
+        failures,
+      };
+      return NextResponse.json(payload, { status: 500 });
+    }
+
+    const payload = {
+      scripts,
+      requested: templates.length,
+      failures,
+    };
+    await idem.commit?.(payload, 200);
+    return NextResponse.json(payload);
   } catch (err) {
     console.error("Scripts batch failed:", err);
-    return NextResponse.json({ error: "Failed to generate scripts" }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to generate scripts" },
+      { status: 500 }
+    );
   }
 }

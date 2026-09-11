@@ -2,23 +2,34 @@ import { z } from "zod";
 import type { Prisma } from "@/generated/prisma/client";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { buildStoryboardPrompt } from "@/services/ai/prompts/storyboard";
+import { getScriptTemplate, DEFAULT_BEATS } from "@/services/ai/prompts/script-templates";
 import {
   computeWindows,
   repairFrames,
-  type SceneLike,
+  scenesFromScript,
+  FRAME_SECONDS,
 } from "@/lib/storyboard-grid";
 
-// Lenient schema — the LLM may omit or rename fields. We validate loosely here
-// and then repair the frames onto the exact 3-second grid afterwards.
+// Lenient schema — the LLM may omit or rename fields. Frames are then stamped
+// onto the exact 2-second grid by repairFrames().
 const frameSchema = z.object({
   frameNumber: z.coerce.number().optional(),
   duration: z.string().optional().default(""),
+  segment: z.string().optional().default(""),
   scene: z.string().optional().default(""),
   visualDirection: z.string().optional().default(""),
   voiceover: z.string().optional().default(""),
   textOverlay: z.string().optional().default(""),
   cameraNotes: z.string().optional().default(""),
   imagePrompt: z.string().optional().default(""),
+  videoPrompt: z.string().optional().default(""),
+  shotType: z.string().optional().default(""),
+  cameraMove: z.string().optional().default(""),
+  subject: z.string().optional().default(""),
+  productAction: z.string().optional().default(""),
+  sfx: z.string().optional().default(""),
+  sellingPoint: z.string().optional().default(""),
+  howExpressed: z.string().optional().default(""),
   startSec: z.coerce.number().optional(),
   endSec: z.coerce.number().optional(),
 });
@@ -38,6 +49,11 @@ interface ScriptLike {
   ctaVariants: unknown;
   scenes?: unknown;
   totalDurationSec?: number | null;
+  template?: string | null;
+  videoType?: string | null;
+  hook?: unknown;
+  bodyBeats?: unknown;
+  cta?: unknown;
 }
 
 interface ProjectLike {
@@ -51,25 +67,44 @@ interface CampaignLike {
   totalDurationSec?: number | null;
 }
 
+export interface StoryboardBuildExtras {
+  brandTruth?: string;
+  approvedCtaText?: string;
+  approvedOffer?: string;
+}
+
 /**
- * Generate a 3-second-grid storyboard for one script and return Prisma create
- * data. Frame count, timing, and per-window scene grounding are all derived
- * from the script's duration and scene plan; token budget scales with frames.
+ * Generate a 2-second-grid storyboard for one script and return Prisma create
+ * data. The window plan comes from the script's structured hook/body/CTA, the
+ * segment split from its template's beats, and the token budget scales with
+ * the frame count.
  */
 export async function buildStoryboardCreateData(
   projectId: string,
   script: ScriptLike,
   project: ProjectLike,
-  campaignSel: CampaignLike | null
+  campaignSel: CampaignLike | null,
+  extras: StoryboardBuildExtras = {}
 ): Promise<Prisma.StoryboardUncheckedCreateInput> {
-  const hooks = (script.hookVariants as string[] | null) ?? [];
-  const ctas = (script.ctaVariants as string[] | null) ?? [];
-  const scenes = (Array.isArray(script.scenes) ? script.scenes : []) as SceneLike[];
+  const hooks = (Array.isArray(script.hookVariants) ? script.hookVariants : []) as string[];
+  const ctas = (Array.isArray(script.ctaVariants) ? script.ctaVariants : []) as string[];
 
-  const totalDurationSec =
-    campaignSel?.totalDurationSec || script.totalDurationSec || 30;
+  const totalDurationSec = script.totalDurationSec || campaignSel?.totalDurationSec || 30;
 
-  const windows = computeWindows(totalDurationSec);
+  const template = getScriptTemplate(script.template);
+  const beats = template?.beats ?? DEFAULT_BEATS;
+
+  const scenes = scenesFromScript({
+    scenes: script.scenes,
+    hook: script.hook,
+    bodyBeats: script.bodyBeats,
+    cta: script.cta,
+    totalDurationSec,
+  });
+
+  const structuredCta = (script.cta ?? null) as { text?: string; offer?: string } | null;
+
+  const windows = computeWindows(totalDurationSec, beats);
   const frameCount = windows.length;
 
   const prompt = buildStoryboardPrompt({
@@ -77,15 +112,22 @@ export async function buildStoryboardCreateData(
     productName: project.productPageTitle || project.productName || undefined,
     scriptTitle: script.title,
     scriptBody: script.body,
-    hook: hooks[0] || "",
-    cta: ctas[0] || "",
+    hooks,
+    ctas,
+    approvedCtaText: extras.approvedCtaText || structuredCta?.text || ctas[0] || undefined,
+    approvedOffer: extras.approvedOffer || structuredCta?.offer || undefined,
     platform: campaignSel?.platform || "TikTok",
     totalDurationSec,
+    templateName: template?.name,
+    videoType: script.videoType || template?.videoType,
+    beats,
     scenes,
+    brandTruth: extras.brandTruth,
   });
 
-  // Each rich frame costs ~600-700 tokens; scale with frame count, capped.
-  const maxTokens = Math.min(8000, 2200 + frameCount * 650);
+  // Each rich frame (imagePrompt + videoPrompt + 9 short fields) costs ~750
+  // tokens; a 45-frame board needs headroom well past the old 8k cap.
+  const maxTokens = Math.min(32000, 2500 + frameCount * 780);
 
   const result = await analyzeWithClaude({
     systemPrompt: prompt.system,
@@ -94,7 +136,6 @@ export async function buildStoryboardCreateData(
     maxTokens,
   });
 
-  // Force the exact grid: correct count, timing, and gap-free windows.
   const frames = repairFrames(result.frames, windows, scenes);
 
   return {
@@ -104,5 +145,6 @@ export async function buildStoryboardCreateData(
     frames: frames as unknown as Prisma.InputJsonValue,
     totalDuration: `${totalDurationSec}s`,
     style: result.style,
+    frameSeconds: FRAME_SECONDS,
   };
 }

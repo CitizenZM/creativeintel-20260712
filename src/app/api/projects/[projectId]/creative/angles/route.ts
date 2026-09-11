@@ -12,6 +12,8 @@ const anglesSchema = z.object({
       description: z.string(),
       targetEmotion: z.string(),
       narrativeType: z.string(),
+      videoType: z.string().optional().default(""),
+      templateIds: z.array(z.string()).optional().default([]),
       predictedScore: z.number(),
       rationale: z.string(),
       targetAudience: z.string(),
@@ -72,10 +74,30 @@ export async function POST(
       systemPrompt: prompt.system,
       userPrompt: prompt.user,
       responseSchema: anglesSchema,
-      maxTokens: 4096,
+      maxTokens: 5000,
     });
 
-    return NextResponse.json(result);
+    const platformId = (campaignSel?.platform as string | null) || undefined;
+    const angles = result.angles.map((angle) => {
+      const templates = angle.templateIds
+        .map((id) => getScriptTemplate(id))
+        .filter((t): t is NonNullable<typeof t> => t !== null)
+        .slice(0, 2);
+      const raw = angle.videoType?.toUpperCase() ?? "";
+      const videoType = isVideoType(raw)
+        ? raw
+        : templates[0]?.videoType ?? "PRODUCT_INTRO";
+      const resolved = templates.length
+        ? templates
+        : defaultTemplateBatch(platformId, 2).filter((t) => t.videoType === videoType).slice(0, 2);
+      return {
+        ...angle,
+        videoType,
+        templateIds: (resolved.length ? resolved : defaultTemplateBatch(platformId, 2)).map((t) => t.id),
+      };
+    });
+
+    return NextResponse.json({ angles });
   } catch (err) {
     console.error("Angle generation failed:", err);
     return NextResponse.json(

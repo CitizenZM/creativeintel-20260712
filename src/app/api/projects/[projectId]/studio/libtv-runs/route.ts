@@ -1,0 +1,69 @@
+/**
+ * POST — compile a storyboard into a LibtvRun (status `awaiting_approval`).
+ * GET  — list this project's runs with their node jobs and the model catalogue
+ *        the Studio pickers render.
+ */
+import { NextResponse } from "next/server";
+import { compileRunFromStoryboard, LibtvCompileError } from "@/services/video-gen/libtv-compile";
+import { getRunWithJobs, listRuns } from "@/services/video-gen/libtv-queue";
+import { getBrandKitCompleteness } from "@/services/brand-kit";
+import { modelOptions } from "@/services/video-gen/libtv-pricing";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  const { projectId } = await params;
+  const [runs, completeness] = await Promise.all([
+    listRuns(projectId),
+    getBrandKitCompleteness(projectId),
+  ]);
+  return NextResponse.json({ runs, models: modelOptions(), brandKit: completeness });
+}
+
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  const { projectId } = await params;
+  const body = (await request.json().catch(() => ({}))) as {
+    storyboardId?: string;
+    scriptId?: string;
+    imageModel?: string;
+    videoModel?: string;
+    clipDurationSec?: number;
+    aspectRatio?: string;
+    canvasName?: string;
+  };
+
+  if (!body.storyboardId) {
+    return NextResponse.json({ error: "storyboardId required" }, { status: 400 });
+  }
+
+  try {
+    const result = await compileRunFromStoryboard({
+      projectId,
+      storyboardId: body.storyboardId,
+      scriptId: body.scriptId ?? null,
+      imageModel: body.imageModel,
+      videoModel: body.videoModel,
+      clipDurationSec: body.clipDurationSec,
+      aspectRatio: body.aspectRatio,
+      canvasName: body.canvasName,
+    });
+
+    const run = await getRunWithJobs(result.runId);
+    return NextResponse.json({ run, creditsEstimated: result.creditsEstimated, jobCount: result.jobCount }, { status: 201 });
+  } catch (err) {
+    if (err instanceof LibtvCompileError) {
+      return NextResponse.json({ error: err.message, missing: err.missing }, { status: err.status });
+    }
+    console.error("libtv-runs compile failed:", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to compile LibTV run" },
+      { status: 500 }
+    );
+  }
+}

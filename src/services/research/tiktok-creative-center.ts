@@ -23,6 +23,8 @@ export interface TikTokSearchOptions {
   industry?: string;
   period?: 7 | 30 | 120;
   limit?: number;
+  /** Advertiser or brand keyword. Omit for the brand-agnostic `for_you` feed. */
+  keyword?: string;
 }
 
 const BASE = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en";
@@ -35,12 +37,20 @@ export async function searchTikTokTopAds(
   const period = options.period ?? 30;
   const limit = Math.min(options.limit ?? 20, 50);
 
+  const keyword = options.keyword?.trim() || "";
+
   return cached(
     {
       kind: "tiktok:top_ads",
-      params: { region, period, industry: options.industry ?? null, limit },
+      params: {
+        region,
+        period,
+        industry: options.industry ?? null,
+        limit,
+        keyword: keyword || null,
+      },
       ttlSec: 60 * 60 * 6,
-      schemaVersion: 1,
+      schemaVersion: 2,
     },
     async () => {
       const params = new URLSearchParams({
@@ -48,9 +58,14 @@ export async function searchTikTokTopAds(
         page: "1",
         limit: String(limit),
         country_code: region,
-        order_by: "for_you",
+        // A keyword query must be ordered by relevance, not the personalized feed.
+        order_by: keyword ? "ctr" : "for_you",
       });
       if (options.industry) params.set("industry", options.industry);
+      if (keyword) {
+        params.set("keyword", keyword);
+        params.set("ad_language", "en");
+      }
 
       const url = `${API_BASE}/top_ads/v2/list?${params.toString()}`;
 
@@ -70,7 +85,9 @@ export async function searchTikTokTopAds(
         );
 
         if (!res.ok) {
-          return [];
+          throw new TikTokCreativeCenterError(
+            `Creative Center returned HTTP ${res.status}`
+          );
         }
 
         const json = (await res.json().catch(() => null)) as {
@@ -78,11 +95,23 @@ export async function searchTikTokTopAds(
         } | null;
         const materials = json?.data?.materials ?? [];
         return materials.map(mapRawAd);
-      } catch {
-        return [];
+      } catch (err) {
+        // Surface the failure so callers can record "failed", not "found none".
+        if (err instanceof TikTokCreativeCenterError) throw err;
+        throw new TikTokCreativeCenterError(
+          err instanceof Error ? err.message : "Creative Center request failed"
+        );
       }
     }
   );
+}
+
+/** Distinguishes a Creative Center transport/auth failure from an empty result. */
+export class TikTokCreativeCenterError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TikTokCreativeCenterError";
+  }
 }
 
 interface TikTokRawAd {

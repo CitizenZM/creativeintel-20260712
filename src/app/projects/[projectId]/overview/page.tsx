@@ -18,7 +18,10 @@ import {
 } from "lucide-react";
 import { ProductIntelligence } from "@/components/dashboard/product-intelligence";
 import { ProductDefinition } from "@/components/dashboard/product-definition";
+import { BrandKitPanel } from "@/components/dashboard/brand-kit-panel";
 import { CampaignSelection } from "@/components/dashboard/campaign-selection";
+import { getBrandKitCompleteness } from "@/services/brand-kit";
+import { CheckCircle2, AlertCircle } from "lucide-react";
 
 export default async function OverviewPage({
   params,
@@ -56,6 +59,8 @@ export default async function OverviewPage({
     ]);
 
   if (!project) return <div>Project not found</div>;
+
+  const brandKit = await getBrandKitCompleteness(projectId);
 
   const brand = project.brand;
   const topSignals = (project.topSignals as string[]) || [];

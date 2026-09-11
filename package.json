@@ -18,6 +18,7 @@
     "@google/genai": "^1.50.1",
     "@prisma/adapter-pg": "^7.7.0",
     "@prisma/client": "^7.7.0",
+    "@vercel/blob": "^2.8.0",
     "@vercel/functions": "^3.5.1",
     "cheerio": "^1.2.0",
     "class-variance-authority": "^0.7.1",

@@ -1,3 +1,16 @@
+export interface DeepAnalysisTeardown {
+  hookType: string;
+  hookVisual: string;
+  beats: { startSec?: number; endSec?: number; role?: string; visual?: string; vo?: string; onScreenText?: string }[];
+  sellingPoints: string[];
+  proofDevices: string[];
+  ctaText?: string | null;
+  ctaPlacement?: string | null;
+  offer?: string | null;
+  whyItWorks?: string;
+  evidenceLevel?: string;
+}
+
 export interface DeepAnalysisInput {
   brandName: string;
   category?: string;
@@ -26,7 +39,10 @@ export interface DeepAnalysisInput {
     contentCategory?: string | null;
     thumbnailUrl?: string;
     url?: string;
+    owner?: string;
+    teardown?: DeepAnalysisTeardown;
   }[];
+  competitorSummaries?: { name: string; summary: string }[];
 }
 
 export function buildDeepAnalysisPrompt(input: DeepAnalysisInput) {
@@ -150,13 +166,33 @@ Output ONLY valid JSON with ALL these keys:
   const user = `Deep creative analysis for "${input.brandName}"${input.category ? ` (${input.category})` : ""}${input.productDescription ? `\nProduct: ${input.productDescription.slice(0, 200)}` : ""}${input.productName ? `\nSPECIFIC PRODUCT: ${input.productName}` : ""}${input.campaignGoal ? `\nCAMPAIGN GOAL: ${input.campaignGoal}` : ""}${durationNote}${input.selectedEnvironment ? `\nSELECTED ENVIRONMENT: ${input.selectedEnvironment}` : ""}${input.selectedActorRole ? `\nSELECTED ACTOR ROLE: ${input.selectedActorRole}` : ""}${input.selectedSellingPoints?.length ? `\nPRIORITY SELLING POINTS:\n${input.selectedSellingPoints.map((p, i) => `${i + 1}. ${p}`).join("\n")}` : ""}${input.audienceSummary ? `\nAUDIENCE: ${input.audienceSummary}` : ""}:
 
 SCORED AD CONTENT (${input.topContent.length} pieces):
-${input.topContent.map((c, i) => `[${i+1}] "${c.title}" | ${c.platform} | Score:${c.overallScore} | Views:${c.viewCount.toLocaleString()}
+${input.topContent.map((c, i) => {
+    const t = c.teardown;
+    const teardownBlock = t
+      ? `
+  TEARDOWN (evidence: ${t.evidenceLevel || "unknown"}) — hook type: ${t.hookType}
+    Hook visual: ${t.hookVisual}
+    Beats: ${t.beats
+      .slice(0, 10)
+      .map((b) => `${b.startSec ?? 0}-${b.endSec ?? 0}s [${b.role || "?"}] ${b.visual || ""}${b.onScreenText ? ` | text: "${b.onScreenText}"` : ""}`)
+      .join("\n           ")}
+    Selling points shown: ${t.sellingPoints.join(" | ") || "none"}
+    Proof devices: ${t.proofDevices.join(" | ") || "none"}
+    CTA: ${t.ctaText ? `"${t.ctaText}"` : "none"}${t.ctaPlacement ? ` (${t.ctaPlacement})` : ""}${t.offer ? ` | Offer: ${t.offer}` : ""}${t.whyItWorks ? `\n    Why it works: ${t.whyItWorks}` : ""}`
+      : "";
+    return `[${i + 1}] "${c.title}"${c.owner ? ` — ${c.owner}` : ""} | ${c.platform} | Score:${c.overallScore} | Views:${c.viewCount.toLocaleString()}
   Hook:${c.hookStrength} CTA:${c.ctaQuality} Emotion:${c.emotionalAppeal} Pacing:${c.pacing} Story:${c.storytellingArc}
   Narrative: ${c.narrativeType} | Category: ${c.contentCategory || "N/A"}
   Hook text: "${c.hookText}"
-  Key messages: ${c.keyMessages.slice(0,4).join(" | ")}`).join("\n")}
-
+  Key messages: ${c.keyMessages.slice(0, 4).join(" | ")}${teardownBlock}`;
+  }).join("\n")}
+${
+  input.competitorSummaries?.length
+    ? `\nCOMPETITOR PLAYBOOKS:\n${input.competitorSummaries.map((c) => `- ${c.name}: ${c.summary}`).join("\n")}\n`
+    : ""
+}
 Produce comprehensive analysis across ALL required dimensions. Be specific — name actual shots, environments, hook formulas.
+Where a TEARDOWN block exists, every environment, camera angle and hook formula you report must be traceable to its beats — do not invent visuals for ads with no teardown.
 For cameraAngles, give at least 5 different shot types observed or recommended.
 For hookFormulas, give at least 4 different hook types with complete formulas.
 For environmentAnalysis, name at least 3 specific environments with lighting details.

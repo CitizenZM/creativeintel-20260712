@@ -48,6 +48,37 @@ function getModel(): string {
   return "gpt-4o";
 }
 
+/** The model id this deployment actually calls for text analysis — safe to render in the UI. */
+export function getConfiguredModelLabel(): string {
+  return getModel();
+}
+
+/**
+ * Model used for calls that carry image parts. Text-only fallback models (the
+ * OpenRouter free tier) cannot see images, so vision routes separately.
+ */
+export function getVisionModel(): string {
+  if (process.env.AI_VISION_MODEL) return process.env.AI_VISION_MODEL;
+  if (!process.env.OPENAI_API_KEY && process.env.OPENROUTER_API_KEY) return "openai/gpt-4o";
+  return "gpt-4o";
+}
+
+export type PromptPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; url: string };
+
+/** A user prompt is either plain text or an ordered list of OpenAI chat content parts. */
+export type UserPrompt = string | PromptPart[];
+
+function toUserContent(prompt: UserPrompt): OpenAI.Chat.ChatCompletionUserMessageParam["content"] {
+  if (typeof prompt === "string") return prompt;
+  return prompt.map((part) =>
+    part.type === "text"
+      ? ({ type: "text", text: part.text } as const)
+      : ({ type: "image_url", image_url: { url: part.url } } as const)
+  );
+}
+
 /** Thrown when the AI response could not be parsed into the expected schema, even after retry. */
 export class AIResponseError extends Error {
   readonly rawText: string;
@@ -81,7 +112,7 @@ function parseErrorMessage(err: unknown): string {
 
 export async function analyzeWithClaude<T>(options: {
   systemPrompt: string;
-  userPrompt: string;
+  userPrompt: UserPrompt;
   responseSchema: ZodSchema<T>;
   maxTokens?: number;
   /** Optional per-call model override, e.g. to route heavy tasks to a stronger model. */
@@ -138,10 +169,12 @@ export async function analyzeWithClaude<T>(options: {
     });
   }
 
+  const userContent = toUserContent(userPrompt);
+
   const response = await callModel(
     [
       { role: "system", content: systemWithJson },
-      { role: "user", content: userPrompt },
+      { role: "user", content: userContent },
     ],
     model
   );
@@ -160,7 +193,7 @@ export async function analyzeWithClaude<T>(options: {
     const retryResponse = await callModel(
       [
         { role: "system", content: systemWithJson },
-        { role: "user", content: userPrompt },
+        { role: "user", content: userContent },
         {
           role: "assistant",
           content: failedExcerpt,
