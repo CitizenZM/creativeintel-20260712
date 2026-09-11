@@ -69,6 +69,8 @@ export async function POST(
     const overrideType: VideoType | null = isVideoType(requestedType) ? requestedType : null;
     const totalDurationSec = Number(body.totalDurationSec) || ctx.totalDurationSec;
 
+    const claimsAudit = auditContext(ctx);
+
     const settled = await pMapSettled(
       templates,
       async (template, i) => {
@@ -79,27 +81,53 @@ export async function POST(
           buildScriptInput(ctx, { template, videoType, angle, totalDurationSec })
         );
 
-        const result = await analyzeWithClaude({
+        let generated: ScriptV2 = await analyzeWithClaude({
           systemPrompt: prompt.system,
           userPrompt: prompt.user,
           responseSchema: scriptV2Schema,
           maxTokens: 8000,
         });
 
-        return persistScript(projectId, result, {
+        let audit = auditScriptClaims(generated, claimsAudit);
+
+        if (!audit.ok) {
+          const retryUserPrompt = `${prompt.user}\n\nCOMPLIANCE FAILURE — the previous draft violated brand rules. Fix these lines:\n${formatComplianceViolations(
+            audit.violations
+          )}`;
+          generated = await analyzeWithClaude({
+            systemPrompt: prompt.system,
+            userPrompt: retryUserPrompt,
+            responseSchema: scriptV2Schema,
+            maxTokens: 8000,
+          });
+          audit = auditScriptClaims(generated, claimsAudit);
+        }
+
+        if (!audit.ok) {
+          console.warn(
+            `[scripts-batch] compliance violations persisted for project ${projectId}, template ${template.id}:`,
+            audit.violations
+          );
+          generated = { ...generated, title: `⚠ ${generated.title}` };
+        }
+
+        const script = await persistScript(projectId, generated, {
           template,
           videoType,
           totalDurationSec,
           angleTitle: angle?.title,
         });
+
+        return audit.ok ? script : { ...script, complianceWarnings: audit.violations };
       },
       { concurrency: CONCURRENCY }
     );
 
+    type PersistedScript = Awaited<ReturnType<typeof persistScript>>;
+    type ScriptWithWarnings = PersistedScript & { complianceWarnings?: ScriptClaimsViolation[] };
+
     const scripts = settled
-      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof persistScript>>> =>
-        r.status === "fulfilled"
-      )
+      .filter((r): r is PromiseFulfilledResult<ScriptWithWarnings> => r.status === "fulfilled")
       .map((r) => r.value);
 
     const failures = settled
