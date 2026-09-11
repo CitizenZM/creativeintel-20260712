@@ -271,14 +271,22 @@ export function CampaignSelection({
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, [projectId]);
 
-    // Seed timeline from deep analysis if no custom one set
-    if (deepTimeline?.segments?.length) {
-      setCustomTimeline(deepTimeline.segments);
-      setTotalDuration(deepTimeline.recommendedDurationSec || 30);
-      if (deepTimeline.platform) setPlatform(deepTimeline.platform);
-    }
-  }, [projectId, deepTimeline]);
+  // Seed timeline from deep analysis if no custom one set. This mirrors the
+  // `deepTimeline` prop into local state, so it's derived during render
+  // (React's recommended pattern for syncing state from props) instead of via
+  // a setState-in-effect, matching the previous effect's [projectId, deepTimeline] deps.
+  const [seededTimeline, setSeededTimeline] = useState<{ projectId: string; deepTimeline: VideoTimeline | null | undefined } | null>(null);
+  if (
+    deepTimeline?.segments?.length &&
+    (seededTimeline?.projectId !== projectId || seededTimeline?.deepTimeline !== deepTimeline)
+  ) {
+    setSeededTimeline({ projectId, deepTimeline });
+    setCustomTimeline(deepTimeline.segments);
+    setTotalDuration(deepTimeline.recommendedDurationSec || 30);
+    if (deepTimeline.platform) setPlatform(deepTimeline.platform);
+  }
 
   const save = useCallback(async (updates: Partial<CampaignSelectionData>) => {
     setSaving(true);

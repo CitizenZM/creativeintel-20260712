@@ -34,7 +34,22 @@ export function WorkspaceSwitcher() {
   }
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/workspaces");
+        const data = await res.json().catch(() => null);
+        if (!cancelled && data?.workspaces) {
+          setWorkspaces(data.workspaces);
+          setActiveId(data.activeId);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Close on outside click.
