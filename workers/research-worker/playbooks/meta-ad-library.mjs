@@ -156,13 +156,24 @@ function bodyTitle(text, advertiser) {
         l &&
         !/^Library ID:/.test(l) &&
         !/^资料库编号[:：]/.test(l) &&
-        !/^(Active|Inactive|Sponsored|Open Dropdown|投放中|已停止|赞助内容|打开下拉菜单)$/i.test(l) &&
+        !/^(Active|Inactive|Sponsored|Open Dropdown|Platforms?)$/i.test(l) &&
+        !/^(投放中|已停止|赞助内容|打开下拉菜单|平台)$/.test(l) &&
         !/^Started running on/.test(l) &&
         !/开始投放$/.test(l) &&
         !/^See (ad details|summary details)$/i.test(l) &&
-        !/^(查看广告详情|查看摘要详情)$/.test(l)
+        !/^(查看广告详情|查看摘要详情)$/.test(l) &&
+        // Meta's own "this card collapses several creative variants" notice —
+        // never a real ad body, but long enough (>12 chars) to have been
+        // picked up as the title by the length heuristic below.
+        !/^This ad has multiple versions\.?$/i.test(l) &&
+        !/^(此广告|该广告)(展示了|有)多个版本\.?$/.test(l)
     );
-  return (cleaned.find((l) => l.length > 12) || advertiser || 'Meta ad').slice(0, 160);
+  // Ad body text only — first real content line long enough to be a title,
+  // not a UI label. If the card carries none, fall back to the page/
+  // advertiser name rather than a bare label string.
+  const body = cleaned.find((l) => l.length > 12);
+  if (body) return body.slice(0, 160);
+  return advertiser ? `${advertiser} — video ad`.slice(0, 160) : 'Meta ad';
 }
 
 export async function runMetaAdLibrary(payload) {
@@ -209,7 +220,7 @@ ${SCRAPE}`;
         videoUrl: c.videoSrc || undefined,
         thumbnailUrl: c.poster || '',
         permalink: `https://www.facebook.com/ads/library/?id=${c.libraryId}`,
-        title: bodyTitle(c.body, c.advertiser),
+        title: bodyTitle(c.body, c.advertiser || payload.advertiser),
         description: (c.body || '').slice(0, 500),
         publishedAt: firstSeen,
         channelTitle: c.advertiser || undefined,
