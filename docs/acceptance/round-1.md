@@ -30,3 +30,16 @@ Date: 2026-09-11 · Project `cmtwm1y6x003tt52gblztpz8m` (local DB) · Operator: 
 - Studio storyboard selector is not a button (default selection used); make it keyboard/agent-selectable.
 - YouTube scrape returned 53 candidates but only 1 survived the gates — with no `YOUTUBE_API_KEY` durations are unknown and most get filtered; key needed for Shorts.
 - Teardowns are frames-only (no transcripts: no Groq/OpenAI Whisper key).
+
+## Round-1 result (2026-09-11 00:31 local)
+
+| Version | Template | Run | Credits | Output |
+|---|---|---|---|---|
+| v1 | BEFORE_AFTER "7-Day Transformation" | `cmtwmj8pz006jt52gf55bspa1` | 2 (K) + 24 (V) | `runs/…/final/master.mp4` 1080×1920 · 10.00 s · h264 |
+| v2 | PROBLEM_AGITATE_SOLVE | `cmtwmtfng0071t52gztg3tdjx` | 26 | `runs/…/final/master.mp4` 1080×1920 · 10.00 s · h264 |
+
+LibTV balance: 61 → ~9 credits. Both play in the dashboard (Deliver / Studio) via `/api/local-files`.
+
+Additional defects found and fixed during the render loop: CLI pretty-JSON parsing; `--left "FF K1"` was never a node name; brand-truth URLs (1 MB data URLs) blew argv (E2BIG); worker assembled with zero clips and reported success; runs could not resume; canvas node-name collisions across runs; keyframe prompts carried offer/URL/CTA copy → text baked into the image (v1 hook frame); Meta Ad Library rendered in Chinese for this egress → 0 results (now 27 ads).
+
+Quality verdict: v2 is clean end-to-end; v1's hook clip carries the baked-in text block (mitigated by a bottom crop in re-assembly) and both need the caption/CTA typography pass (in progress, local re-cut, no credits).
