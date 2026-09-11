@@ -347,12 +347,19 @@ function nodeSettings(job) {
   return out;
 }
 
+// Node display names must be unique per canvas and a project reuses one canvas
+// across runs, so every run gets its own suffix (K1 → K1-x7k2q).
+function canvasNodeName(nodeName, runId) {
+  return `${nodeName}-${String(runId).slice(-5)}`;
+}
+
 async function executeJob(job, { cli, runDir, runId }) {
+  const onCanvas = (name) => canvasNodeName(name, runId);
   if (job.kind === 'upload') {
     const ext = extensionForUrl(job.sourceUrl || '', '.png');
     const dest = path.join(runDir, 'refs', `${job.nodeName}${ext}`);
     await downloadToFile(job.sourceUrl, dest);
-    const { nodeId } = await cli.upload(job.nodeName, dest, '图片');
+    const { nodeId } = await cli.upload(onCanvas(job.nodeName), dest, '图片');
     return { nodeId, resultUrl: job.sourceUrl, localPath: dest, creditsSpent: 0 };
   }
 
@@ -363,10 +370,10 @@ async function executeJob(job, { cli, runDir, runId }) {
 
   const outDir = path.join(runDir, job.kind === 'video' ? 'clips' : 'keyframes');
   const { nodeId } = await cli.nodeCreate({
-    nodeName: job.nodeName,
+    nodeName: onCanvas(job.nodeName),
     type: job.kind === 'video' ? 'video' : 'image',
     // Edges reference the upstream node name; an old "FF " (first-frame) prefix is not a node.
-    leftRefs: (job.leftRefs || []).map((r) => String(r).replace(/^FF\s+/, '')),
+    leftRefs: (job.leftRefs || []).map((r) => onCanvas(String(r).replace(/^FF\s+/, ''))),
     prompt: job.prompt,
     modelName: job.modelName,
     settings: nodeSettings(job),
@@ -374,7 +381,7 @@ async function executeJob(job, { cli, runDir, runId }) {
   });
 
   const { filePath } = await cli.download({
-    nodeName: job.nodeName,
+    nodeName: onCanvas(job.nodeName),
     outDir,
     expectedExt: job.kind === 'video' ? '.mp4' : '.png',
   });
