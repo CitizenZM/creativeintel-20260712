@@ -79,14 +79,29 @@ Setup ─▶ Research ─▶ Insights ─▶ Creative ─▶ Studio ─▶ Deliv
 | # | Phase | Status |
 |---|---|---|
 | 0 | Audit, local DB clone, env isolation, safety (`--accept-data-loss` removed) | done |
-| 1 | Foundation: schema (BrandKit/BrandAsset, AdTeardown/CompetitorRollup, LibtvRun/LibtvJob, ContentAsset ad fields, Script v2 fields), template registry, 2 s grid | in progress |
-| 2 | Brand Kit intake + product URL adapters + confirm step + completeness gate | queued |
-| 3 | Research rebuild (adapters, gates, ranking, per-competitor Top-N, worker ad-library playbook) | queued |
-| 4 | Insights rebuild (teardown, rollup, gap, transcript-overwrite fix, competitor page) | queued |
-| 5 | Creative rebuild (templates → scripts → 2 s storyboards, UI badges, template picker) | queued |
-| 6 | Studio → LibTV (runs, jobs, worker endpoint, local worker, studio UI merge, export MP4) | queued |
-| 7 | Dashboard IA (6-stage rail, completeness chip, idempotency, dark mode, mobile nav) | queued |
-| 8 | QC: typecheck, build, browser walk-through, worker dry-run against LibTV | queued |
+| 1 | Foundation: schema (BrandKit/BrandAsset, AdTeardown/CompetitorRollup, LibtvRun/LibtvJob, WorkerTask, ContentAsset ad fields, Script v2 fields), template registry, 2 s grid | done |
+| 2 | Brand Kit intake + storage provider + product URL adapters + confirm step + completeness gate + SSRF guard | done |
+| 3 | Research rebuild (AdCandidate adapters, 5 gates, ranking, per-competitor Top-N, WorkerTask queue, ego-browser research worker for Meta / TikTok / Google ad libraries) | done |
+| 4 | Insights rebuild (multimodal per-ad teardown, competitor rollup, gap insights, resumable pipeline, transcript-overwrite fix, competitor pages) | done |
+| 5 | Creative rebuild (20 templates → structured scripts → 2 s HOOK/BODY/CTA storyboards, template picker, idempotent routes) | done |
+| 6 | Studio → LibTV (LibtvRun/LibtvJob compile + pricing + approval gate, worker endpoint, local libtv-worker with dry-run + local assembly, merged studio page, export) | done |
+| 7 | Dashboard IA (6-stage rail + tabs, brand-kit chip, "Next" CTA, dark mode, project mobile nav, Deliver page) | done |
+| 8 | QC | done — see below |
+
+### QC results (2026-09-11, local DB cloned from production)
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `eslint` | 0 errors (2 pre-existing `set-state-in-effect` errors in untouched `campaign-selection.tsx` / `workspace-switcher.tsx` remain), warnings only |
+| `next build` | passes, all new routes emitted |
+| Browser walk-through (Overview / Content / Insights / Creative / Studio / Deliver) | renders on real project data; console clean after two hydration fixes; dark mode persists across reload |
+| Brand kit write → stage score | 0 % → 65 % (fields) → 100 % (logo + 2 packshots) |
+| Studio compile gate | 409 with `missing[]` until a packshot exists |
+| Live script (template PROBLEM_AGITATE_SOLVE, 15 s) | videoType + template + 3 s hook + 3 body beats (selling point / how / shot / window) + CTA using the approved brand-kit CTA and offer; durations sum to 15 |
+| Live storyboard | 8 frames on the 2 s grid, HOOK ×2 / BODY ×4 / CTA ×2, image + i2v prompts per frame |
+| LibTV run | compiled 17 nodes / 228 credits → approved → `libtv-worker --dry-run` claimed it over the API, bound a canvas, printed every `libtv` command, reported per-node completion → run `completed` in the dashboard. **No credits spent; a real run needs `--dry-run` removed and object storage configured.** |
+| Research adapters | type-checked; Meta Ad Library and Google ATC playbooks probed live once each; TikTok Ad Library unverified (region-gated from this egress) |
 
 ## 需要你做的决策 (Decisions for Barron)
 
