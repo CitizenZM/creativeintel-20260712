@@ -7,7 +7,7 @@ Date: 2026-09-11 · Project `cmtwngv2q009wt52gmg2sbiea` (local DB) · Browser si
 | Step | Result |
 |---|---|
 | New project form (City Lips PDP, 3 competitors) | Shopify adapter OK → research auto-started |
-| Research | brand + competitor crawl; **browser ad-library tasks now enqueue without a saved campaign** (fix verified): Meta 3 tasks → **22 real video ads** (Olay 17, Crepe Erase, Grande); Google ATC 3 tasks → 0 (playbook locale issue, fix in progress); TikTok AL 0 (egress region) |
+| Research | brand + competitor crawl; **browser ad-library tasks now enqueue without a saved campaign** (fix verified): Meta 3 tasks → **22 real video ads** (Olay 17, Crepe Erase, Grande); Google ATC 4 tasks → **43 YouTube ad creatives** after the playbook fix (City Beauty 20, Olay 20, Grande 5; Crepe Erase is not indexed by Google); TikTok AL 0 (egress region) |
 | Brand kit | logo (PNG named .webp now accepted via magic-byte sniff) + 2 packshots + lifestyle; fields → 100 % |
 | Insights | 11 teardowns (frames), 3 competitor rollups, 6 selling points |
 | Creative (UI template picker) | DEMO_HOW_IT_WORKS + STAT_SHOCK, 10 s; claims audit passed (CTA "Shop Now", no invented urgency). New finding: STAT_SHOCK fabricated "84 %" → statistics guard added |
@@ -22,6 +22,5 @@ Date: 2026-09-11 · Project `cmtwngv2q009wt52gmg2sbiea` (local DB) · Browser si
 - UI: Studio radio picker with URL state and test ids; content cards no longer nest anchors; theme bootstrap as a static script.
 
 ## Open
-- Google Ads Transparency playbook returns 0 (agent investigating locale/selectors).
 - TikTok Ad Library is region-gated from this Mac's egress — needs a US egress or a proxy.
 - A third paid render (and a clean re-render of v1's hook clip, 13 credits) needs a LibTV top-up.
