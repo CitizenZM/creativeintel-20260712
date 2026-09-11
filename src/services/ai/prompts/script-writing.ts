@@ -57,6 +57,10 @@ export interface ScriptInput {
   ctaPool?: string[];
   offer?: string;
   landingUrl?: string;
+  /** Brand Kit claimsAllowed — the only claims the script may make (paraphrase ok, never stronger). */
+  claimsAllowed?: string[];
+  /** Brand Kit claimsForbidden — must never appear, even implied. */
+  claimsForbidden?: string[];
   /** Previously orphaned DeepAnalysis fields — injected when present. */
   deepAnalysis?: DeepAnalysisBlocks;
   /** Top competitor ad teardowns — hook + CTA evidence, max 5 lines. */
@@ -195,6 +199,26 @@ OUTPUT JSON (no markdown, no extra keys):
     ? `\nBRAND TRUTH (every frame, claim and CTA must stay inside this — it overrides your instincts):\n${input.brandTruth.trim().slice(0, 2500)}`
     : "";
 
+  const complianceBlock =
+    input.claimsAllowed?.length ||
+    input.claimsForbidden?.length ||
+    input.ctaPool?.length ||
+    input.offer
+      ? `\nCOMPLIANCE (hard constraints — the script fails legal/brand review if any of these are broken):
+- Claims: make ONLY claims drawn from the ALLOWED CLAIMS above. Paraphrasing is fine; making the claim sound stronger, more certain, or more absolute than approved is not.${
+          input.claimsForbidden?.length
+            ? `\n- Never say, or imply through visual/VO/text-overlay, anything on this FORBIDDEN list: ${input.claimsForbidden.join(" | ")}.`
+            : ""
+        }
+- Never use absolute or curative language anywhere in the script (hook, body, proof, CTA): erase/erases/erased, cure/cures, eliminate/eliminates, permanent/permanently, guaranteed, proven, clinically, "instantly reverses", 100%.
+- Never invent an offer, discount, or urgency/deadline device that is not explicitly present in the approved offer text or CTA pool above.${
+          input.ctaPool?.length
+            ? `\n- cta.text and every ctaVariant must be copied verbatim from the APPROVED CTA POOL above — do not edit, combine, or invent CTA copy.`
+            : ""
+        }
+- cta.urgency must be an empty string unless the approved offer text itself states a deadline — never add urgency on your own initiative.`
+      : "";
+
   const ctaBlock =
     input.ctaPool?.length || input.offer || input.landingUrl
       ? `\nAPPROVED CTA POOL (cta.text and every ctaVariant must come from this list — do not invent new CTA copy):\n${(input.ctaPool ?? [])
@@ -289,6 +313,7 @@ ${angleBlock}
 Campaign Goal: ${input.campaignGoal || "Conversion"}
 ${input.audienceSummary ? `\n${input.audienceSummary}` : ""}
 ${brandTruthBlock}
+${complianceBlock}
 
 KEY SELLING POINTS (each body beat must name exactly one of these, verbatim):
 ${input.sellingPoints.map((p, i) => `${i + 1}. ${p}`).join("\n")}

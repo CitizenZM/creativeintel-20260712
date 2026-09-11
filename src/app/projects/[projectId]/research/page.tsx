@@ -22,6 +22,7 @@ interface JobStep {
   status: "pending" | "running" | "complete" | "error";
   progress: number;
   message?: string;
+  subSteps?: JobStep[];
 }
 
 interface SourceStatus {
@@ -225,33 +226,69 @@ export default function ResearchPage() {
               <p className="text-xs text-muted-foreground py-2">Waiting for the job to start…</p>
             ) : (
               steps.map((step) => (
-                <div key={step.name} className="flex items-start gap-3 py-2">
-                  <div className="shrink-0 mt-0.5">
-                    {step.status === "complete" ? (
-                      <CheckCircle2 className="h-4 w-4 text-[var(--status-healthy-fg)]" />
-                    ) : step.status === "running" ? (
-                      <Loader2 className="h-4 w-4 text-[var(--status-ai-fg)] animate-spin" />
-                    ) : step.status === "error" ? (
-                      <XCircle className="h-4 w-4 text-[var(--status-urgent-fg)]" />
-                    ) : (
-                      <Circle className="h-4 w-4 text-muted-foreground/40" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <p
-                      className={cn(
-                        "text-sm font-medium",
-                        step.status === "pending" ? "text-muted-foreground" : "text-foreground"
+                <div key={step.name}>
+                  <div className="flex items-start gap-3 py-2">
+                    <div className="shrink-0 mt-0.5">
+                      {step.status === "complete" ? (
+                        <CheckCircle2 className="h-4 w-4 text-[var(--status-healthy-fg)]" />
+                      ) : step.status === "running" ? (
+                        <Loader2 className="h-4 w-4 text-[var(--status-ai-fg)] animate-spin" />
+                      ) : step.status === "error" ? (
+                        <XCircle className="h-4 w-4 text-[var(--status-urgent-fg)]" />
+                      ) : (
+                        <Circle className="h-4 w-4 text-muted-foreground/40" />
                       )}
-                    >
-                      {step.name}
-                    </p>
-                    {step.message && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5 break-words">
-                        {step.message}
+                    </div>
+                    <div className="min-w-0">
+                      <p
+                        className={cn(
+                          "text-sm font-medium",
+                          step.status === "pending" ? "text-muted-foreground" : "text-foreground"
+                        )}
+                      >
+                        {step.name}
                       </p>
-                    )}
+                      {step.message && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5 break-words">
+                          {step.message}
+                        </p>
+                      )}
+                    </div>
                   </div>
+                  {step.subSteps && step.subSteps.length > 0 && (
+                    <div className="ml-[1.625rem] space-y-1 pb-1">
+                      {step.subSteps.map((sub) => (
+                        <div key={sub.name} className="flex items-start gap-2.5 py-1">
+                          <div className="shrink-0 mt-0.5">
+                            {sub.status === "complete" ? (
+                              <CheckCircle2 className="h-3 w-3 text-[var(--status-healthy-fg)]" />
+                            ) : sub.status === "running" ? (
+                              <Loader2 className="h-3 w-3 text-[var(--status-ai-fg)] animate-spin" />
+                            ) : sub.status === "error" ? (
+                              <XCircle className="h-3 w-3 text-[var(--status-urgent-fg)]" />
+                            ) : (
+                              <Circle className="h-3 w-3 text-muted-foreground/40" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p
+                              className={cn(
+                                "text-xs font-medium",
+                                sub.status === "pending" ? "text-muted-foreground" : "text-foreground/80"
+                              )}
+                            >
+                              {sub.name.split(" · ").slice(1).join(" · ")}
+                            </p>
+                            {sub.message && (
+                              <p className="text-[10px] text-muted-foreground mt-0.5 break-words">
+                                {sub.message}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))
             )}

@@ -211,3 +211,131 @@ export function resolveVideoType(raw: unknown, fallback: VideoType): VideoType {
   const up = typeof raw === "string" ? raw.toUpperCase() : "";
   return isVideoType(up) ? up : fallback;
 }
+
+// ---------------------------------------------------------------------------
+// Compliance audit — deterministic, code-side check that a generated script
+// stays inside the brand kit's approved claims and CTA pool. The prompt
+// (script-writing.ts) already tells the model these rules; this is the
+// backstop for when it doesn't listen.
+
+export interface ScriptClaimsAuditInput {
+  claimsAllowed?: string[];
+  claimsForbidden?: string[];
+  ctaOptions?: string[];
+  offerText?: string;
+}
+
+export interface ScriptClaimsViolation {
+  /** Dotted/indexed path into the script, e.g. "hook.text" or "body[1].voiceover". */
+  path: string;
+  /** The offending substring. */
+  text: string;
+  reason: string;
+}
+
+export interface ScriptClaimsAudit {
+  ok: boolean;
+  violations: ScriptClaimsViolation[];
+}
+
+/** Absolute / curative words that are never allowed, regardless of the brand kit. */
+const ABSOLUTE_CLAIM_PATTERNS: Array<{ regex: RegExp; label: string }> = [
+  { regex: /\berase[sd]?\b/i, label: "erase(d/s)" },
+  { regex: /\bcures?\b/i, label: "cure(s)" },
+  { regex: /\beliminates?\b/i, label: "eliminate(s)" },
+  { regex: /\bpermanent(?:ly)?\b/i, label: "permanent(ly)" },
+  { regex: /\bguaranteed\b/i, label: "guaranteed" },
+  { regex: /\bproven\b/i, label: "proven" },
+  { regex: /\bclinically\b/i, label: "clinically" },
+  { regex: /\binstantly\s+reverses\b/i, label: "instantly reverses" },
+  { regex: /\b100\s?%/i, label: "100%" },
+];
+
+/** Words/phrases that hint at a deadline — used to check cta.urgency against the offer text. */
+const URGENCY_SIGNAL_REGEX =
+  /\b(today|tonight|hours?|days?|weeks?|deadline|expir(?:es|ing)|ending|ends?|until|limited(?:\s+time)?|last chance|midnight|countdown|this\s+week(?:end)?)\b/i;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findForbiddenMatches(text: string, forbiddenPhrases: string[]): string[] {
+  const hits: string[] = [];
+  for (const phrase of forbiddenPhrases) {
+    const trimmed = phrase.trim();
+    if (!trimmed) continue;
+    const pattern = new RegExp(`\\b${escapeRegExp(trimmed).replace(/\s+/g, "\\s+")}\\b`, "i");
+    const match = text.match(pattern);
+    if (match) hits.push(match[0]);
+  }
+  return hits;
+}
+
+function findAbsoluteMatches(text: string): string[] {
+  const hits: string[] = [];
+  for (const { regex } of ABSOLUTE_CLAIM_PATTERNS) {
+    const match = text.match(regex);
+    if (match) hits.push(match[0]);
+  }
+  return hits;
+}
+
+/**
+ * Deterministic post-generation compliance scan. Checks hook/body/cta text
+ * fields plus the fully rendered body for brand-forbidden phrases and a fixed
+ * list of absolute/curative words, confirms the CTA came from the approved
+ * pool verbatim, and flags urgency copy the offer text never authorized.
+ */
+export function auditScriptClaims(script: ScriptV2, opts: ScriptClaimsAuditInput): ScriptClaimsAudit {
+  const claimsForbidden = (opts.claimsForbidden ?? []).filter(
+    (c): c is string => typeof c === "string" && c.trim().length > 0
+  );
+  const ctaOptions = (opts.ctaOptions ?? []).map((c) => c.trim()).filter(Boolean);
+  const offerText = opts.offerText ?? "";
+
+  const violations: ScriptClaimsViolation[] = [];
+
+  const fields: Array<{ path: string; text: string }> = [
+    { path: "hook.text", text: script.hook?.text ?? "" },
+    ...(script.body ?? []).flatMap((beat, i) => [
+      { path: `body[${i}].voiceover`, text: beat.voiceover ?? "" },
+      { path: `body[${i}].textOverlay`, text: beat.textOverlay ?? "" },
+      { path: `body[${i}].proof`, text: beat.proof ?? "" },
+    ]),
+    { path: "cta.text", text: script.cta?.text ?? "" },
+    { path: "cta.offer", text: script.cta?.offer ?? "" },
+    { path: "cta.urgency", text: script.cta?.urgency ?? "" },
+    { path: "body (rendered)", text: renderScriptBody(script) },
+  ];
+
+  for (const field of fields) {
+    if (!field.text) continue;
+
+    for (const hit of findForbiddenMatches(field.text, claimsForbidden)) {
+      violations.push({ path: field.path, text: hit, reason: `forbidden claim: "${hit}"` });
+    }
+    for (const hit of findAbsoluteMatches(field.text)) {
+      violations.push({ path: field.path, text: hit, reason: `absolute/curative claim: "${hit}"` });
+    }
+  }
+
+  const ctaText = (script.cta?.text ?? "").trim();
+  if (ctaOptions.length && ctaText && !ctaOptions.includes(ctaText)) {
+    violations.push({
+      path: "cta.text",
+      text: ctaText,
+      reason: "CTA text is not one of the approved CTA options, verbatim",
+    });
+  }
+
+  const urgency = (script.cta?.urgency ?? "").trim();
+  if (urgency && !URGENCY_SIGNAL_REGEX.test(offerText)) {
+    violations.push({
+      path: "cta.urgency",
+      text: urgency,
+      reason: "urgency/deadline stated but the brand's offer text names no deadline",
+    });
+  }
+
+  return { ok: violations.length === 0, violations };
+}

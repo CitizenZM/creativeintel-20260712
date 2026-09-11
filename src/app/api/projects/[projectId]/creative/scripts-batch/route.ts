@@ -8,13 +8,15 @@ import {
   type ScriptTemplate,
   type VideoType,
 } from "@/services/ai/prompts/script-templates";
-import { scriptV2Schema } from "@/lib/script-schema";
+import { auditScriptClaims, scriptV2Schema, type ScriptClaimsViolation, type ScriptV2 } from "@/lib/script-schema";
 import { withIdempotency } from "@/lib/idempotency";
 import { pMapSettled } from "@/lib/parallel";
 import {
   loadScriptContext,
   buildScriptInput,
   persistScript,
+  auditContext,
+  formatComplianceViolations,
   type ScriptAngle,
 } from "../_script-context";
 

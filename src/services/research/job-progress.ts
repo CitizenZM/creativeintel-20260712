@@ -19,6 +19,9 @@ export interface JobStep {
   startedAt?: string;
   completedAt?: string;
   sources?: JobSourceStatus[];
+  /** Nested sub-stage entries (e.g. "AI analysis · Brand analysis"), attached
+   * under their parent by `nestSteps` for display — never persisted this way. */
+  subSteps?: JobStep[];
 }
 
 const FLUSH_MS = 1000;
@@ -64,20 +67,28 @@ export async function createJob(
   return row.id;
 }
 
+// startStep/completeStep/failStep mark step-status transitions and must never
+// be lost. They write immediately (read-modify-write against the live row)
+// rather than going through scheduleWrite's debounce: scheduleWrite keeps
+// only the single latest pending writer per jobId, so a status transition
+// queued here would be silently discarded the moment the *next* step's call
+// (startStep/updateStep/completeStep, for any step name) reached the same
+// job before the 1s flush timer fired — exactly how "Crawl websites" could
+// stay "pending" forever even after the job completed. Only the frequent,
+// non-authoritative progress ticks from updateStep are still debounced.
 export async function startStep(jobId: string, name: string) {
-  scheduleWrite(jobId, async () => {
-    const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
-    if (!row) return;
-    const steps = (row.steps as unknown as JobStep[] | null) ?? [];
-    const next = steps.map((s) =>
-      s.name === name
-        ? { ...s, status: "running" as const, startedAt: new Date().toISOString() }
-        : s
-    );
-    await prisma.researchJob.update({
-      where: { id: jobId },
-      data: { steps: next as never, currentStep: name },
-    });
+  await flush(jobId);
+  const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
+  if (!row) return;
+  const steps = (row.steps as unknown as JobStep[] | null) ?? [];
+  const next = steps.map((s) =>
+    s.name === name
+      ? { ...s, status: "running" as const, startedAt: new Date().toISOString() }
+      : s
+  );
+  await prisma.researchJob.update({
+    where: { id: jobId },
+    data: { steps: next as never, currentStep: name },
   });
 }
 
@@ -162,26 +173,25 @@ export function collectSources(steps: JobStep[] | null | undefined): JobSourceSt
 }
 
 export async function completeStep(jobId: string, name: string) {
-  scheduleWrite(jobId, async () => {
-    const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
-    if (!row) return;
-    const steps = (row.steps as unknown as JobStep[] | null) ?? [];
-    const next = steps.map((s) =>
-      s.name === name
-        ? {
-            ...s,
-            status: "complete" as const,
-            progress: 100,
-            completedAt: new Date().toISOString(),
-          }
-        : s
-    );
-    const completed = next.filter((s) => s.status === "complete").length;
-    const overall = Math.round((completed / (next.length || 1)) * 100);
-    await prisma.researchJob.update({
-      where: { id: jobId },
-      data: { steps: next as never, progress: overall },
-    });
+  await flush(jobId);
+  const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
+  if (!row) return;
+  const steps = (row.steps as unknown as JobStep[] | null) ?? [];
+  const next = steps.map((s) =>
+    s.name === name
+      ? {
+          ...s,
+          status: "complete" as const,
+          progress: 100,
+          completedAt: new Date().toISOString(),
+        }
+      : s
+  );
+  const completed = next.filter((s) => s.status === "complete").length;
+  const overall = Math.round((completed / (next.length || 1)) * 100);
+  await prisma.researchJob.update({
+    where: { id: jobId },
+    data: { steps: next as never, progress: overall },
   });
 }
 
@@ -206,20 +216,78 @@ export async function failStep(jobId: string, name: string, error: string) {
   });
 }
 
+/** Any step (including AI-analysis sub-stages) still pending/running when the
+ * job ends never got its own terminal transition — finalize it here so the
+ * status API never reports a "pending"/"running" step next to a finished job. */
+function finalizeDanglingSteps(
+  steps: JobStep[],
+  terminal: "complete" | "error",
+  error?: string
+): JobStep[] {
+  const completedAt = new Date().toISOString();
+  return steps.map((s) =>
+    s.status === "pending" || s.status === "running"
+      ? {
+          ...s,
+          status: terminal,
+          progress: terminal === "complete" ? 100 : s.progress,
+          ...(terminal === "error" && error ? { message: error } : {}),
+          completedAt: s.completedAt ?? completedAt,
+        }
+      : s
+  );
+}
+
 export async function completeJob(jobId: string) {
   await flush(jobId);
+  const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
+  const steps = (row?.steps as unknown as JobStep[] | null) ?? [];
+  const next = finalizeDanglingSteps(steps, "complete");
   await prisma.researchJob.update({
     where: { id: jobId },
-    data: { status: "complete", progress: 100, completedAt: new Date() },
+    data: { steps: next as never, status: "complete", progress: 100, completedAt: new Date() },
   });
 }
 
 export async function failJob(jobId: string, error: string) {
   await flush(jobId);
+  const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
+  const steps = (row?.steps as unknown as JobStep[] | null) ?? [];
+  const next = finalizeDanglingSteps(steps, "error", error);
   await prisma.researchJob.update({
     where: { id: jobId },
-    data: { status: "error", error, completedAt: new Date() },
+    data: { steps: next as never, status: "error", error, completedAt: new Date() },
   });
+}
+
+/** Group flat "Parent · Child" sub-stage entries (written by the AI analysis
+ * pipeline as separate array elements) under their parent step for display,
+ * without changing what's persisted to the DB. Orphaned sub-steps (no
+ * matching parent name) are kept visible at the top level. */
+export function nestSteps(steps: JobStep[]): JobStep[] {
+  const top: JobStep[] = [];
+  const bySimpleName = new Map<string, JobStep>();
+
+  for (const s of steps) {
+    if (s.name.includes(" · ")) continue;
+    const clone: JobStep = { ...s };
+    bySimpleName.set(s.name, clone);
+    top.push(clone);
+  }
+
+  for (const s of steps) {
+    const sepIdx = s.name.indexOf(" · ");
+    if (sepIdx === -1) continue;
+    const parentName = s.name.slice(0, sepIdx);
+    const parent = bySimpleName.get(parentName);
+    if (parent) {
+      parent.subSteps = [...(parent.subSteps ?? []), s];
+    } else {
+      top.push(s);
+    }
+  }
+
+  return top;
 }
 
 export async function getActiveJobForProject(projectId: string) {

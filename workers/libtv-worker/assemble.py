@@ -78,6 +78,8 @@ FINE_PCT = 0.024
 BUTTON_PCT = 0.038
 TEXT_MAX_PCT = 0.84  # wrap by measured width to 84% of the frame
 MAX_LINES = 2
+# A long line steps the headline down before it is ever clipped with an ellipsis.
+HEADLINE_STEPS = (HEADLINE_PCT, 0.048, 0.044, 0.041, 0.038)
 TRACKING = -0.014  # tight letter-spacing, as a share of the font size
 
 DIMENSIONS = {
@@ -338,6 +340,13 @@ def split_cta(frame):
 # ─── Type ────────────────────────────────────────────────────────────────────
 
 
+def _notdef_box(font):
+    try:
+        return font.getbbox(NOTDEF_PROBE)
+    except Exception:
+        return None
+
+
 class FontSet:
     """A face plus per-character fallbacks, measured and drawn on one baseline."""
 
@@ -345,10 +354,7 @@ class FontSet:
         self.font = load_truetype(candidates, size)
         self.size = getattr(self.font, "size", size) or size
         self._fallbacks = None
-        try:
-            self._missing = self.font.getbbox("")
-        except Exception:
-            self._missing = None
+        self._missing = _notdef_box(self.font)
 
     @property
     def fallbacks(self):
@@ -380,7 +386,7 @@ class FontSet:
             return self.font
         for fallback in self.fallbacks:
             try:
-                if fallback.getbbox(ch) != fallback.getbbox(""):
+                if fallback.getbbox(ch) != _notdef_box(fallback):
                     return fallback
             except Exception:
                 continue
@@ -525,12 +531,15 @@ def extract(clip: Path, out_dir: Path, width: int, height: int, crop_bottom_pct=
 class Compositor:
     def __init__(self, width, height, packshot: Path, logo: Path, brand=None):
         self.W, self.H = width, height
-        brand = brand if isinstance(brand, dict) else {"primary": parse_color(brand, NAVY)}
+        if not isinstance(brand, dict):
+            legacy = brand if isinstance(brand, (tuple, list)) else parse_color(brand, NAVY)
+            brand = {"primary": tuple(legacy)[:3], "background": SAND}
         self.brand = brand.get("primary", NAVY)
         self.bg = brand.get("background", SAND)
         self.ink = brand.get("ink", self.brand)
-        headline_fonts = brand.get("headline_fonts") or SERIF_FONTS
-        body_fonts = brand.get("body_fonts") or SANS_FONTS
+        self.headline_fonts = brand.get("headline_fonts") or SERIF_FONTS
+        self.body_fonts = brand.get("body_fonts") or SANS_FONTS
+        headline_fonts, body_fonts = self.headline_fonts, self.body_fonts
 
         try:
             self.packshot = Image.open(packshot).convert("RGBA") if packshot else None
@@ -549,6 +558,7 @@ class Compositor:
         self.button = FontSet(headline_fonts, int(self.H * BUTTON_PCT))
 
         self.text_max = int(self.W * TEXT_MAX_PCT)
+        self._fontsets = {("headline", self.headline.size): self.headline}
         self._plate = None
         self._caption_cache = {}
         self._card_cache = {}
@@ -559,7 +569,7 @@ class Compositor:
     def plate(self):
         """Soft background→primary gradient: light enough for a primary button."""
         if self._plate is None:
-            deep = mix(self.bg, self.brand, 0.30)
+            deep = mix(self.bg, self.brand, 0.45)
             bg = Image.new("RGB", (self.W, self.H))
             draw = ImageDraw.Draw(bg)
             for y in range(self.H):
@@ -568,13 +578,32 @@ class Compositor:
             glow = Image.new("RGB", (self.W, self.H), (0, 0, 0))
             gd = ImageDraw.Draw(glow)
             gd.ellipse(
-                (-self.W * 0.25, -self.H * 0.06, self.W * 1.25, self.H * 0.52),
-                fill=mix(self.brand, (255, 255, 255), 0.90),
+                (-self.W * 0.25, -self.H * 0.06, self.W * 1.25, self.H * 0.48),
+                fill=mix(self.brand, (255, 255, 255), 0.93),
             )
             self._plate = ImageChops.screen(
                 bg, glow.filter(ImageFilter.GaussianBlur(int(self.W * 0.18)))
             )
         return self._plate
+
+    def _fontset(self, kind, size):
+        key = (kind, max(8, int(size)))
+        if key not in self._fontsets:
+            candidates = self.headline_fonts if kind == "headline" else self.body_fonts
+            self._fontsets[key] = FontSet(candidates, key[1])
+        return self._fontsets[key]
+
+    def _fit_headline(self, text, max_width):
+        """Step the serif down before clipping copy — a truncated claim is worse."""
+        for pct in HEADLINE_STEPS:
+            fontset = self._fontset("headline", self.H * pct)
+            tracking = fontset.size * TRACKING
+            lines = wrap_measured(fontset, text, max_width, tracking, max_lines=None)
+            if len(lines) <= MAX_LINES:
+                return fontset, tracking, lines
+        fontset = self._fontset("headline", self.H * HEADLINE_STEPS[-1])
+        tracking = fontset.size * TRACKING
+        return fontset, tracking, wrap_measured(fontset, text, max_width, tracking)
 
     # -- primitives ---------------------------------------------------------
 
@@ -621,8 +650,8 @@ class Compositor:
             for i, line in enumerate(lines):
                 fontset.draw(md, (self.W - widths[i]) / 2, top + ascent + i * line_h, line,
                              255, tracking)
-            layer = self._shadow(layer, mask, opacity=0.55, blur=int(self.W * 0.008),
-                                 offset=(0, int(self.H * 0.002)))
+            layer = self._shadow(layer, mask, opacity=0.72, blur=int(self.W * 0.009),
+                                 offset=(0, int(self.H * 0.0022)))
 
         text_layer = Image.new("RGBA", layer.size, (0, 0, 0, 0))
         td = ImageDraw.Draw(text_layer)
@@ -638,10 +667,10 @@ class Compositor:
         if not label:
             return layer, int(y_bottom)
         fontset = self.button if scale >= 0.95 else FontSet(
-            self.button and SERIF_FONTS, int(self.H * BUTTON_PCT * scale)
+            self.headline_fonts, int(self.H * BUTTON_PCT * scale)
         )
         tracking = fontset.size * TRACKING * 0.5
-        max_label = int(self.W * TEXT_MAX_PCT) - int(self.W * 0.16 * scale)
+        max_label = max(int(self.W * 0.30), int(self.W * TEXT_MAX_PCT) - int(self.W * 0.16 * scale))
         line = wrap_measured(fontset, label, max_label, tracking, max_lines=1)[0]
         width = fontset.width(line, tracking)
         ascent, descent = fontset.metrics()
@@ -668,9 +697,9 @@ class Compositor:
         return Image.alpha_composite(layer, text_layer), top
 
     def _product(self, frame, top, max_h_pct=0.36, max_w_pct=0.78):
-        """Packshot with a contact shadow and a soft reflection. Returns bottom y."""
+        """Packshot with a contact shadow and a soft reflection -> (frame, bottom)."""
         if not self.packshot:
-            return top
+            return frame, top
         product = self.packshot
         fit = min(
             (self.W * max_w_pct) / max(1, product.width),
@@ -703,7 +732,7 @@ class Compositor:
         )
         frame.paste(reflection, (x, bottom + int(self.H * 0.004)), reflection)
         frame.paste(product, (x, top), product)
-        return bottom
+        return frame, bottom
 
     # -- cards --------------------------------------------------------------
 
@@ -718,18 +747,15 @@ class Compositor:
         if disclaimer:
             tracking = self.fine.size * TRACKING * 0.4
             lines = wrap_measured(self.fine, disclaimer, self.text_max, tracking)
-            bottom = self._block(layer, lines, self.fine, bottom, (255, 255, 255, 236),
+            bottom = self._block(layer, lines, self.fine, bottom, (255, 255, 255, 242),
                                  tracking) - int(self.H * 0.016)
             layer = self._last_layer
 
         if headline:
-            tracking = self.headline.size * TRACKING
             pad_x = int(self.W * 0.042)
-            lines = wrap_measured(
-                self.headline, headline, self.text_max - 2 * pad_x, tracking
-            )
+            fontset, tracking, lines = self._fit_headline(headline, self.text_max - 2 * pad_x)
             pill = (self.bg + (229,), pad_x, int(self.H * 0.016), int(self.H * 0.019))
-            self._block(layer, lines, self.headline, bottom, self.ink + (255,), tracking, pill)
+            self._block(layer, lines, fontset, bottom, self.ink + (255,), tracking, pill)
             layer = self._last_layer
 
         self._caption_cache[key] = layer
@@ -750,16 +776,14 @@ class Compositor:
         if cached is not None:
             return cached.copy()
 
-        frame = self.plate.copy()
-        self._product(frame, int(self.H * 0.145))
+        frame, _ = self._product(self.plate.copy(), int(self.H * 0.145))
         layer = Image.new("RGBA", (self.W, self.H), (0, 0, 0, 0))
 
         button_bottom = int(self.H * 0.778)
         layer, button_top = self._button(layer, cta, button_bottom)
         if offer:
-            tracking = self.headline.size * TRACKING
-            lines = wrap_measured(self.headline, offer, self.text_max, tracking)
-            self._block(layer, lines, self.headline, button_top - int(self.H * 0.030),
+            fontset, tracking, lines = self._fit_headline(offer, self.text_max)
+            self._block(layer, lines, fontset, button_top - int(self.H * 0.030),
                         self.ink + (255,), tracking, pill=None, text_shadow=False)
             layer = self._last_layer
 
@@ -796,8 +820,7 @@ class Compositor:
 
     def poster_card(self, text: str = ""):
         """Fallback for a window with neither clip nor keyframe."""
-        frame = self.plate.copy()
-        self._product(frame, int(self.H * 0.20), max_h_pct=0.40)
+        frame, _ = self._product(self.plate.copy(), int(self.H * 0.20), max_h_pct=0.40)
         return self.overlay(frame, text)
 
     def product_card(self, headline: str, caption: str = ""):
@@ -1108,7 +1131,7 @@ def render_window(window, t, extracted, compositor, width, height, captions=True
         offset = window["clipOffset"] + (t - window["start"])
         index = min(max(int(round(offset * FPS)), 0), len(frames) - 1)
         image = Image.open(frames[index]).convert("RGB")
-        return compositor.overlay(image, window["headline"] and raw_caption(window)) if captions else image
+        return compositor.overlay(image, raw_caption(window)) if captions else image
 
     if window["compositeLocally"]:
         span = window["end"] - window["start"]

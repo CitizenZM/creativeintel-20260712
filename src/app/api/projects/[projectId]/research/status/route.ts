@@ -4,6 +4,7 @@ import {
   getActiveJobForProject,
   getJob,
   collectSources,
+  nestSteps,
   type JobStep,
 } from "@/services/research/job-progress";
 import { getTaskStatusCounts } from "@/services/worker-tasks";
@@ -28,8 +29,8 @@ export async function GET(
     return NextResponse.json({ status: "idle", sources: [] });
   }
 
-  const steps = (job.steps as unknown as JobStep[] | null) ?? [];
-  const sources = collectSources(steps);
+  const rawSteps = (job.steps as unknown as JobStep[] | null) ?? [];
+  const sources = collectSources(rawSteps);
   const workerCounts = await getTaskStatusCounts(projectId, "ad_library_fetch").catch(
     () => ({}) as Record<string, number>
   );
@@ -39,7 +40,7 @@ export async function GET(
     status: job.status,
     progress: job.progress,
     currentStep: job.currentStep,
-    steps,
+    steps: nestSteps(rawSteps),
     sources,
     workerTasks: workerCounts,
     error: job.error,

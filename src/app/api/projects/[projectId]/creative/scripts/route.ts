@@ -7,12 +7,14 @@ import {
   isVideoType,
   defaultTemplateBatch,
 } from "@/services/ai/prompts/script-templates";
-import { scriptV2Schema } from "@/lib/script-schema";
+import { auditScriptClaims, scriptV2Schema, type ScriptV2 } from "@/lib/script-schema";
 import { withIdempotency } from "@/lib/idempotency";
 import {
   loadScriptContext,
   buildScriptInput,
   persistScript,
+  auditContext,
+  formatComplianceViolations,
   type ScriptAngle,
 } from "../_script-context";
 
@@ -76,22 +78,48 @@ export async function POST(
       buildScriptInput(ctx, { template, videoType, angle, totalDurationSec })
     );
 
-    const result = await analyzeWithClaude({
+    let generated: ScriptV2 = await analyzeWithClaude({
       systemPrompt: prompt.system,
       userPrompt: prompt.user,
       responseSchema: scriptV2Schema,
       maxTokens: 8000,
     });
 
-    const script = await persistScript(projectId, result, {
+    const claimsAudit = auditContext(ctx);
+    let audit = auditScriptClaims(generated, claimsAudit);
+
+    if (!audit.ok) {
+      const retryUserPrompt = `${prompt.user}\n\nCOMPLIANCE FAILURE — the previous draft violated brand rules. Fix these lines:\n${formatComplianceViolations(
+        audit.violations
+      )}`;
+      generated = await analyzeWithClaude({
+        systemPrompt: prompt.system,
+        userPrompt: retryUserPrompt,
+        responseSchema: scriptV2Schema,
+        maxTokens: 8000,
+      });
+      audit = auditScriptClaims(generated, claimsAudit);
+    }
+
+    if (!audit.ok) {
+      console.warn(
+        `[scripts] compliance violations persisted for project ${projectId}, template ${template.id}:`,
+        audit.violations
+      );
+      generated = { ...generated, title: `⚠ ${generated.title}` };
+    }
+
+    const script = await persistScript(projectId, generated, {
       template,
       videoType,
       totalDurationSec,
       angleTitle: angle?.title,
     });
 
-    await idem.commit?.(script, 200);
-    return NextResponse.json(script);
+    const payload = audit.ok ? script : { ...script, complianceWarnings: audit.violations };
+
+    await idem.commit?.(payload, 200);
+    return NextResponse.json(payload);
   } catch (err) {
     console.error("Script generation failed:", err);
     return NextResponse.json(

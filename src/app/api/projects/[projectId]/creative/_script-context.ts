@@ -10,6 +10,8 @@ import {
   renderScriptBody,
   resolveVideoType,
   validateAndRepairDurations,
+  type ScriptClaimsAuditInput,
+  type ScriptClaimsViolation,
   type ScriptV2,
 } from "@/lib/script-schema";
 import { NarrativeType } from "@/generated/prisma/enums";
@@ -68,6 +70,8 @@ export interface ScriptContext {
   ctaPool?: string[];
   offer?: string;
   landingUrl?: string;
+  claimsAllowed?: string[];
+  claimsForbidden?: string[];
   deepAnalysis: DeepAnalysisBlocks;
   teardowns: TeardownHighlight[];
 }
@@ -128,6 +132,13 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     .map((c) => c?.text)
     .filter((t): t is string => Boolean(t));
 
+  const claimsAllowed = (
+    Array.isArray(brandKit?.claimsAllowed) ? (brandKit.claimsAllowed as unknown[]) : []
+  ).filter((c): c is string => typeof c === "string" && c.trim().length > 0);
+  const claimsForbidden = (
+    Array.isArray(brandKit?.claimsForbidden) ? (brandKit.claimsForbidden as unknown[]) : []
+  ).filter((c): c is string => typeof c === "string" && c.trim().length > 0);
+
   return {
     project: {
       id: project.id,
@@ -165,6 +176,8 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     ctaPool: ctaPool.length ? ctaPool : undefined,
     offer: brandKit?.offerText || undefined,
     landingUrl: brandKit?.landingUrl || undefined,
+    claimsAllowed: claimsAllowed.length ? claimsAllowed : undefined,
+    claimsForbidden: claimsForbidden.length ? claimsForbidden : undefined,
     deepAnalysis: {
       sellingPointVisuals: deepAnal?.sellingPointVisuals ?? undefined,
       ctaAnalysis: deepAnal?.ctaAnalysis ?? undefined,
@@ -233,9 +246,26 @@ export function buildScriptInput(
     ctaPool: ctx.ctaPool,
     offer: ctx.offer,
     landingUrl: ctx.landingUrl,
+    claimsAllowed: ctx.claimsAllowed,
+    claimsForbidden: ctx.claimsForbidden,
     deepAnalysis: ctx.deepAnalysis,
     teardowns: ctx.teardowns,
   };
+}
+
+/** Brand-kit fields `auditScriptClaims` needs, pulled from the loaded context. */
+export function auditContext(ctx: ScriptContext): ScriptClaimsAuditInput {
+  return {
+    claimsAllowed: ctx.claimsAllowed,
+    claimsForbidden: ctx.claimsForbidden,
+    ctaOptions: ctx.ctaPool,
+    offerText: ctx.offer,
+  };
+}
+
+/** Render a violation list as the "fix these lines" addendum for a regeneration pass. */
+export function formatComplianceViolations(violations: ScriptClaimsViolation[]): string {
+  return violations.map((v) => `- [${v.path}] "${v.text}" — ${v.reason}`).join("\n");
 }
 
 /**
