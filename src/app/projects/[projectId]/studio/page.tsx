@@ -9,8 +9,10 @@ import { LibtvRunPanel } from "@/components/studio/libtv-run-panel";
 import { LegacyApiRender } from "@/components/studio/legacy-api-render";
 import type {
   BrandKitReadiness,
+  BudgetMode,
   LibtvRunView,
   ModelOptionView,
+  RunLimits,
   StoryboardFrameView,
   StoryboardView,
 } from "@/components/studio/types";
@@ -50,6 +52,11 @@ export default function StudioPage() {
     video: [],
   });
   const [brandKit, setBrandKit] = useState<BrandKitReadiness | null>(null);
+  const [limits, setLimits] = useState<RunLimits | null>(null);
+  const [plan, setPlan] = useState<{ budgetMode: BudgetMode; clipDurationSec: number }>({
+    budgetMode: "economy",
+    clipDurationSec: 6,
+  });
   const [selectedFrame, setSelectedFrame] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -74,6 +81,10 @@ export default function StudioPage() {
         setActiveRunId((current) => current ?? loadedRuns[0]?.id ?? null);
         if (runData.models) setModels(runData.models);
         if (runData.brandKit) setBrandKit(runData.brandKit);
+        if (runData.limits) {
+          setLimits(runData.limits as RunLimits);
+          setPlan((current) => ({ ...current, budgetMode: runData.limits.defaultBudgetMode ?? current.budgetMode }));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -158,6 +169,8 @@ export default function StudioPage() {
             storyboard={runStoryboard}
             run={activeRun}
             selectedFrame={selectedFrame}
+            budgetMode={plan.budgetMode}
+            clipDurationSec={plan.clipDurationSec}
             onSelectFrame={(n) => setSelectedFrame((prev) => (prev === n ? null : n))}
           />
 
@@ -172,8 +185,10 @@ export default function StudioPage() {
             brandKit={brandKit}
             runs={runs}
             activeRun={activeRun}
+            limits={limits}
             onSelectRun={setActiveRunId}
             onRunsChanged={handleRunChanged}
+            onPlanChange={setPlan}
           />
         </>
       )}

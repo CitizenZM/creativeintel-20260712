@@ -326,10 +326,22 @@ async function bindCanvas(payload, cli, runDir) {
   return uuid;
 }
 
+// Compiler bookkeeping that drives assembly, not LibTV node settings — passing
+// these as -s pairs makes the CLI reject the node (or silently mangle it).
+const LOCAL_SETTING_KEYS = new Set([
+  'compositeLocally',
+  'frameNumber',
+  'segment',
+  'coversFrames',
+  'frameOffsetsSec',
+  'frameSeconds',
+  'budgetMode',
+]);
+
 function nodeSettings(job) {
   const out = {};
   for (const [key, value] of Object.entries(job.settings || {})) {
-    if (key === 'compositeLocally' || key === 'frameNumber' || key === 'segment') continue;
+    if (LOCAL_SETTING_KEYS.has(key)) continue;
     out[key] = value;
   }
   return out;

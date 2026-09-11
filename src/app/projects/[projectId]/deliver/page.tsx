@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { isPlayable } from "@/components/studio/types";
 import { Download, ExternalLink, Film, FileText, Clapperboard } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -62,19 +63,29 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
             {runs.map((run) => {
               const script = run.scriptId ? scriptById.get(run.scriptId) : null;
               const done = run.jobs.filter((j) => j.status === "completed").length;
+              const playable = isPlayable(run.previewMp4Url)
+                ? run.previewMp4Url
+                : isPlayable(run.masterMp4Url)
+                  ? run.masterMp4Url
+                  : null;
               return (
                 <div key={run.id} className="rounded-lg border border-border bg-card overflow-hidden">
                   <div className="aspect-[9/16] max-h-64 bg-muted/50 flex items-center justify-center">
-                    {run.previewMp4Url || run.masterMp4Url ? (
+                    {playable ? (
                       <video
-                        src={run.previewMp4Url || run.masterMp4Url || undefined}
+                        src={playable}
                         controls
                         playsInline
+                        preload="metadata"
                         className="h-full w-full object-contain bg-black"
                       />
                     ) : (
-                      <span className="text-xs text-muted-foreground">
-                        {run.status === "failed" ? "Failed" : `${run.status} · ${done}/${run.jobs.length} nodes`}
+                      <span className="px-3 text-center text-xs text-muted-foreground">
+                        {run.masterMp4Url
+                          ? "Master is on a file:// path — set LOCAL_FILES_ROOT or a storage provider"
+                          : run.status === "failed"
+                            ? "Failed"
+                            : `${run.status} · ${done}/${run.jobs.length} nodes`}
                       </span>
                     )}
                   </div>

@@ -16,15 +16,23 @@ import {
   ShieldCheck,
   Ban,
 } from "lucide-react";
+import { estimateBoard } from "@/services/video-gen/libtv-pricing";
 import type {
   BrandKitReadiness,
+  BudgetMode,
   LibtvRunView,
   ModelOptionView,
+  RunLimits,
   StoryboardView,
 } from "./types";
-import { isRunActive } from "./types";
+import { isPlayable, isRunActive } from "./types";
 
 const POLL_MS = 5000;
+
+const BUDGET_MODES: Array<{ value: BudgetMode; label: string; hint: string }> = [
+  { value: "economy", label: "Economy", hint: "one clip covers up to 3 frames — cuts made locally" },
+  { value: "full", label: "Full", hint: "one clip per frame — 3x the credits" },
+];
 
 const STATUS_TONE: Record<string, string> = {
   awaiting_approval: "bg-amber-100 text-amber-800 border-amber-300",
@@ -57,8 +65,10 @@ export function LibtvRunPanel({
   brandKit,
   runs,
   activeRun,
+  limits,
   onSelectRun,
   onRunsChanged,
+  onPlanChange,
 }: {
   projectId: string;
   storyboard: StoryboardView | null;
@@ -66,12 +76,16 @@ export function LibtvRunPanel({
   brandKit: BrandKitReadiness | null;
   runs: LibtvRunView[];
   activeRun: LibtvRunView | null;
+  limits: RunLimits | null;
   onSelectRun: (runId: string) => void;
   onRunsChanged: (run?: LibtvRunView) => void;
+  onPlanChange?: (plan: { budgetMode: BudgetMode; clipDurationSec: number }) => void;
 }) {
   const [imageModel, setImageModel] = useState("Seedream 5.0 Pro");
   const [videoModel, setVideoModel] = useState("Hailuo 2.3 Fast");
   const [clipDurationSec, setClipDurationSec] = useState(6);
+  const [budgetMode, setBudgetMode] = useState<BudgetMode>("economy");
+  const [allowOverBudget, setAllowOverBudget] = useState(false);
   const [creditCap, setCreditCap] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,11 +106,30 @@ export function LibtvRunPanel({
   const effectiveDuration = durations.includes(clipDurationSec) ? clipDurationSec : durations[0];
 
   const frameCount = storyboard?.frames.length ?? 0;
-  const ctaFrames = storyboard?.frames.filter((f) => (f.segment || "").toUpperCase() === "CTA").length ?? 0;
-  const estimate =
-    frameCount > 0 && imageOption && videoOption
-      ? (frameCount - ctaFrames) * imageOption.credits + (frameCount - ctaFrames) * videoOption.credits
-      : 0;
+  const maxCredits = limits?.maxRunCredits ?? 120;
+
+  const board = useMemo(() => {
+    if (!storyboard || !storyboard.frames.length) return null;
+    return estimateBoard({
+      frames: storyboard.frames.map((frame, i) => ({
+        frameNumber: frame.frameNumber ?? i + 1,
+        isCta: (frame.segment || "").toUpperCase() === "CTA",
+      })),
+      mode: budgetMode,
+      clipDurationSec: effectiveDuration,
+      frameSeconds: storyboard.frameSeconds || 2,
+      imageModel,
+      videoModel,
+    });
+  }, [storyboard, budgetMode, effectiveDuration, imageModel, videoModel]);
+
+  const estimate = board?.total ?? 0;
+  const ctaFrames = board?.ctaCount ?? 0;
+  const overBudget = estimate > maxCredits;
+
+  useEffect(() => {
+    onPlanChange?.({ budgetMode, clipDurationSec: effectiveDuration });
+  }, [budgetMode, effectiveDuration, onPlanChange]);
 
   const refreshRun = useCallback(
     async (runId: string) => {
@@ -157,6 +190,8 @@ export function LibtvRunPanel({
         videoModel,
         clipDurationSec: effectiveDuration,
         aspectRatio: "9:16",
+        budgetMode,
+        allowOverBudget,
       });
       onRunsChanged(data.run as LibtvRunView);
       if (data.run?.id) onSelectRun(data.run.id);
@@ -204,6 +239,7 @@ export function LibtvRunPanel({
   }
 
   const needsLogin = !!activeRun?.error?.startsWith("needs libtv login");
+  const unplayableMaster = !!activeRun?.masterMp4Url && !isPlayable(activeRun.masterMp4Url);
   const failedJobs = (activeRun?.jobs ?? []).filter((j) => j.status === "failed" && j.error);
   const done = (activeRun?.jobs ?? []).filter((j) => j.status === "completed" || j.status === "skipped").length;
   const total = activeRun?.jobs.length ?? 0;
@@ -310,20 +346,61 @@ export function LibtvRunPanel({
       {imageOption?.note && <p className="text-[10px] text-muted-foreground">{imageOption.note}</p>}
       {videoOption?.note && <p className="text-[10px] text-muted-foreground">{videoOption.note}</p>}
 
+      {/* Budget mode */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Budget mode</span>
+        <div className="inline-flex overflow-hidden rounded-md border border-border">
+          {BUDGET_MODES.map((mode) => (
+            <button
+              key={mode.value}
+              type="button"
+              onClick={() => setBudgetMode(mode.value)}
+              title={mode.hint}
+              className={cn(
+                "px-2.5 py-1 text-[11px] font-medium transition-colors",
+                budgetMode === mode.value
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-[10px] text-muted-foreground">
+          {BUDGET_MODES.find((m) => m.value === budgetMode)?.hint}
+          {board ? ` · ${board.perClip} frame${board.perClip === 1 ? "" : "s"} per clip` : ""}
+        </span>
+      </div>
+
       {/* Estimate + compile */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/30 p-3">
         <div className="text-xs">
           <p className="font-semibold">
-            {frameCount} frames · {frameCount - ctaFrames} keyframes + {frameCount - ctaFrames} clips
+            {frameCount} frames · {board?.keyframeCount ?? 0} keyframes + {board?.clipCount ?? 0} clips
           </p>
           <p className="text-muted-foreground">
             {ctaFrames} CTA frame{ctaFrames === 1 ? "" : "s"} composited locally · estimate{" "}
-            <span className="font-semibold text-foreground">{estimate} credits</span>
+            <span className={cn("font-semibold", overBudget ? "text-red-700" : "text-foreground")}>
+              {estimate} credits
+            </span>{" "}
+            of {maxCredits} allowed
           </p>
+          {overBudget && (
+            <label className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-red-700">
+              <input
+                type="checkbox"
+                checked={allowOverBudget}
+                onChange={(e) => setAllowOverBudget(e.target.checked)}
+                className="h-3 w-3"
+              />
+              Over the {maxCredits}-credit ceiling — compile anyway
+            </label>
+          )}
         </div>
         <Button
           onClick={compile}
-          disabled={!storyboard || busy === "compile"}
+          disabled={!storyboard || busy === "compile" || (overBudget && !allowOverBudget)}
           size="sm"
           className="h-9 rounded-md bg-foreground text-xs font-medium text-background hover:bg-foreground/90"
         >
@@ -508,13 +585,23 @@ export function LibtvRunPanel({
             )}
           </div>
 
-          {activeRun.masterMp4Url?.startsWith("http") && (
+          {(isPlayable(activeRun.previewMp4Url) || isPlayable(activeRun.masterMp4Url)) && (
             <video
-              src={activeRun.masterMp4Url}
+              src={isPlayable(activeRun.previewMp4Url) ? activeRun.previewMp4Url : activeRun.masterMp4Url!}
               controls
               playsInline
+              preload="metadata"
               className="max-h-96 w-full rounded-md border border-border bg-black object-contain"
             />
+          )}
+
+          {unplayableMaster && (
+            <p className="text-[11px] text-amber-700">
+              The worker reported a <code className="rounded bg-muted px-1">file://</code> path, which the browser
+              cannot load. Configure <code className="rounded bg-muted px-1">CLOUDINARY_URL</code> /{" "}
+              <code className="rounded bg-muted px-1">BLOB_READ_WRITE_TOKEN</code>, or point{" "}
+              <code className="rounded bg-muted px-1">LOCAL_FILES_ROOT</code> at the worker&apos;s runs directory.
+            </p>
           )}
         </div>
       )}

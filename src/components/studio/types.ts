@@ -1,3 +1,7 @@
+import { framesPerClip, groupFrames, type BudgetMode } from "@/services/video-gen/libtv-pricing";
+
+export type { BudgetMode };
+
 export interface LibtvJobView {
   id: string;
   runId: string;
@@ -74,6 +78,16 @@ export interface StoryboardView {
   frames: StoryboardFrameView[];
 }
 
+export interface RunLimits {
+  maxRunCredits: number;
+  defaultBudgetMode: BudgetMode;
+}
+
+export interface ClipGroupView {
+  nodeName: string;
+  frameNumbers: number[];
+}
+
 export interface ModelOptionView {
   name: string;
   modality: "image" | "video";
@@ -100,4 +114,47 @@ export function jobsByNode(run: LibtvRunView | null): Map<string, LibtvJobView> 
   const map = new Map<string, LibtvJobView>();
   for (const job of run?.jobs ?? []) map.set(job.nodeName, job);
   return map;
+}
+
+function coversFramesOf(job: LibtvJobView): number[] {
+  const raw = job.settings?.coversFrames;
+  if (Array.isArray(raw)) return raw.map(Number).filter(Number.isFinite);
+  return [];
+}
+
+/**
+ * Which frames each clip covers: read off a compiled run's V jobs, or predicted
+ * from the board when nothing is compiled yet, so the timeline shows the same
+ * grouping before and after Compile.
+ */
+export function clipGroupsFor(
+  run: LibtvRunView | null,
+  storyboard: StoryboardView | null,
+  budgetMode: BudgetMode,
+  clipDurationSec: number
+): ClipGroupView[] {
+  const fromRun = (run?.jobs ?? [])
+    .filter((job) => job.kind === "video")
+    .map((job) => ({ nodeName: job.nodeName, frameNumbers: coversFramesOf(job) }))
+    .filter((group) => group.frameNumbers.length > 0);
+  if (fromRun.length) {
+    return fromRun.sort((a, b) => a.frameNumbers[0] - b.frameNumbers[0]);
+  }
+
+  if (!storyboard) return [];
+  const frameSeconds = storyboard.frameSeconds || 2;
+  const groups = groupFrames(
+    storyboard.frames.map((frame, i) => ({
+      frameNumber: frame.frameNumber ?? i + 1,
+      isCta: (frame.segment || "").toUpperCase() === "CTA",
+    })),
+    framesPerClip(clipDurationSec, frameSeconds),
+    budgetMode
+  );
+  return groups.map((group) => ({ nodeName: `V${group.startFrame}`, frameNumbers: group.frameNumbers }));
+}
+
+/** file:// results from a storage-less worker cannot be loaded by the browser. */
+export function isPlayable(url: string | null | undefined): url is string {
+  return typeof url === "string" && /^https?:\/\//.test(url);
 }
