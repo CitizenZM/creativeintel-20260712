@@ -4,8 +4,13 @@
  *
  *   PROD-n / LOGO   uploaded packshots and logo — the only source of truth
  *                   for packaging
- *   K<n>            keyframe, image2image off PROD-1, one per storyboard frame
- *   V<n>            clip, singleImage2video off "FF K<n>", one per non-CTA frame
+ *   K<start>        keyframe, image2image off PROD-1, one per clip group
+ *   V<start>        clip, singleImage2video off "FF K<start>", one per clip group
+ *
+ * In `economy` mode a clip group is up to `floor(clipDurationSec / frameSeconds)`
+ * consecutive non-CTA frames, so one 6 s clip supplies three 2 s windows — the
+ * cut-density rule from `reference/shot-design.md` ("a 15s ad needs ~14 cuts but
+ * only 8–12 generated clips"). `full` mode is the old one-group-per-frame graph.
  *
  * CTA frames never touch LibTV: text, logo and end cards are composited locally
  * by the worker's assemble.py, because video models garble type and drift on
@@ -13,17 +18,24 @@
  */
 import { prisma } from "@/lib/db";
 import { getBrandTruthForPrompts, type SkuDimensionsCm } from "@/services/brand-kit";
-import type { GridFrame } from "@/lib/storyboard-grid";
+import { FRAME_SECONDS, type GridFrame } from "@/lib/storyboard-grid";
 import {
+  DEFAULT_BUDGET_MODE,
   DEFAULT_IMAGE_MODEL,
+  DEFAULT_MAX_RUN_CREDITS,
   DEFAULT_VIDEO_MODEL,
   estimateRun,
   findVideoModel,
+  framesPerClip,
+  groupFrames,
   imageCredits,
   imageSettings,
+  isBudgetMode,
+  MAX_CLIP_PROMPT_WORDS,
   resolveVideoPrice,
   videoCredits,
   videoSettings,
+  type BudgetMode,
 } from "./libtv-pricing";
 
 export const PRODUCT_LOCK_CLAUSE =
@@ -50,6 +62,14 @@ export interface CompileRunInput {
   clipDurationSec?: number;
   aspectRatio?: string;
   canvasName?: string;
+  budgetMode?: BudgetMode;
+  allowOverBudget?: boolean;
+}
+
+export interface FrameOffset {
+  frameNumber: number;
+  clipStartSec: number;
+  clipEndSec: number;
 }
 
 export interface CompiledJobDraft {
@@ -59,9 +79,15 @@ export interface CompiledJobDraft {
   leftRefs: string[];
   prompt: string;
   modelName: string | null;
-  settings: Record<string, string | number | boolean>;
+  settings: Record<string, unknown>;
   sourceUrl: string | null;
   creditsEstimated: number;
+}
+
+/** Ceiling for a single compiled run; a board over it needs `allowOverBudget`. */
+export function maxRunCredits(): number {
+  const raw = Number(process.env.LIBTV_MAX_RUN_CREDITS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_MAX_RUN_CREDITS;
 }
 
 function asFrames(value: unknown): GridFrame[] {
@@ -119,6 +145,60 @@ function videoPromptFor(frame: GridFrame, brandTruth: string): string {
   if (frame.sfx) parts.push(`Sound design cue: ${clean(frame.sfx)}`);
   if (brandTruth) parts.push(brandTruth);
   return parts.join("\n\n");
+}
+
+function wordsOf(text: string): string[] {
+  return text.split(/\s+/).filter(Boolean);
+}
+
+function truncateWords(text: string, max: number): string {
+  const words = wordsOf(text);
+  if (words.length <= max) return text;
+  return words.slice(0, max).join(" ").replace(/[,;:–—-]+$/, "");
+}
+
+/** One frame's motion, stripped to the clause a beat phrase can absorb. */
+function beatFor(frame: GridFrame): string {
+  const base = clean(frame.videoPrompt || "");
+  if (base) return base.replace(/\.\s*$/, "");
+  const move = clean(frame.cameraMove || frame.cameraNotes || "camera holds steady");
+  const action = clean(frame.productAction || frame.subject || frame.scene || "the action completes");
+  return `${move}, ${action}`;
+}
+
+const CONTINUOUS_TAKE = "One continuous take, no cut between beats.";
+
+/**
+ * A grouped clip must read as a single uninterrupted move: the 2 s windows are
+ * cut out of it afterwards, so a prompt listing three separate shots produces
+ * three jump cuts inside one clip. Each beat gets an equal share of the word
+ * budget rather than the tail being chopped, so the last window still has
+ * direction.
+ */
+function groupVideoPrompt(group: GridFrame[]): string {
+  const reserved = wordsOf(PRODUCT_LOCK_CLAUSE).length + wordsOf(CONTINUOUS_TAKE).length;
+  const budget = Math.max(group.length * 8, MAX_CLIP_PROMPT_WORDS - reserved);
+  const perBeat = Math.max(6, Math.floor(budget / group.length) - 2);
+
+  const beats = group.map((frame, i) => `Beat ${i + 1}: ${truncateWords(beatFor(frame), perBeat)}`);
+  const phrase = truncateWords(`${beats.join(". ")}. ${CONTINUOUS_TAKE}`, budget + reserved - wordsOf(PRODUCT_LOCK_CLAUSE).length);
+  return `${phrase}\n\n${PRODUCT_LOCK_CLAUSE}`;
+}
+
+/** Frame i of a group is cut from clip time [i·frameSeconds, +window length]. */
+function frameOffsets(group: GridFrame[], frameSeconds: number, clipDurationSec: number): FrameOffset[] {
+  return group.map((frame, i) => {
+    const windowLength =
+      Number.isFinite(frame.endSec) && Number.isFinite(frame.startSec) && frame.endSec > frame.startSec
+        ? frame.endSec - frame.startSec
+        : frameSeconds;
+    const clipStartSec = Math.min(i * frameSeconds, clipDurationSec);
+    return {
+      frameNumber: frame.frameNumber,
+      clipStartSec,
+      clipEndSec: Math.min(clipStartSec + windowLength, clipDurationSec),
+    };
+  });
 }
 
 export interface CompileResult {

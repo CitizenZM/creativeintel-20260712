@@ -231,30 +231,154 @@ export function videoSettings(
   return settings;
 }
 
+// ─── Budget modes and clip grouping ──────────────────────────────────────────
+
+/**
+ * `economy` spends one generated clip on several storyboard frames, which is
+ * how the shot-design reference gets 14 visible cuts out of 8–12 clips: a 6 s
+ * Hailuo clip is cut into three 2 s windows instead of being thrown away after
+ * the first two seconds. `full` is the old one-clip-per-frame graph.
+ */
+export type BudgetMode = "economy" | "full";
+
+export const DEFAULT_BUDGET_MODE: BudgetMode = "economy";
+export const DEFAULT_MAX_RUN_CREDITS = 120;
+export const MAX_CLIP_PROMPT_WORDS = 90;
+
+export function isBudgetMode(value: unknown): value is BudgetMode {
+  return value === "economy" || value === "full";
+}
+
+/** How many storyboard frames one generated clip can cover. */
+export function framesPerClip(clipDurationSec: number, frameSeconds: number): number {
+  const span = Number(clipDurationSec) || 0;
+  const grid = Number(frameSeconds) || 2;
+  if (grid <= 0) return 1;
+  return Math.max(1, Math.floor(span / grid));
+}
+
+export interface GroupableFrame {
+  frameNumber: number;
+  isCta: boolean;
+}
+
+export interface ClipGroup {
+  startFrame: number;
+  startIndex: number;
+  frameNumbers: number[];
+  frameIndexes: number[];
+}
+
+/**
+ * Consecutive non-CTA frames, chunked at `perClip`. A CTA frame closes the
+ * current group: CTA cards are composited locally and never share a clip.
+ */
+export function groupFrames(
+  frames: GroupableFrame[],
+  perClip: number,
+  mode: BudgetMode = DEFAULT_BUDGET_MODE
+): ClipGroup[] {
+  const size = mode === "economy" ? Math.max(1, Math.floor(perClip)) : 1;
+  const groups: ClipGroup[] = [];
+  let current: ClipGroup | null = null;
+
+  frames.forEach((frame, index) => {
+    if (frame.isCta) {
+      current = null;
+      return;
+    }
+    if (!current || current.frameNumbers.length >= size) {
+      current = { startFrame: frame.frameNumber, startIndex: index, frameNumbers: [], frameIndexes: [] };
+      groups.push(current);
+    }
+    current.frameNumbers.push(frame.frameNumber);
+    current.frameIndexes.push(index);
+  });
+
+  return groups;
+}
+
+export interface BoardEstimateInput {
+  frames: GroupableFrame[];
+  mode: BudgetMode;
+  clipDurationSec: number;
+  frameSeconds: number;
+  imageModel: string;
+  videoModel: string;
+  clipResolution?: string | null;
+}
+
+export interface BoardEstimate {
+  total: number;
+  keyframeCount: number;
+  clipCount: number;
+  ctaCount: number;
+  groups: ClipGroup[];
+  perClip: number;
+}
+
+/** The same arithmetic the compiler runs, so Studio can price a board before compiling. */
+export function estimateBoard(input: BoardEstimateInput): BoardEstimate {
+  const perClip = framesPerClip(input.clipDurationSec, input.frameSeconds);
+  const groups = groupFrames(input.frames, perClip, input.mode);
+  const ctaCount = input.frames.filter((f) => f.isCta).length;
+  const perImage = imageCredits(input.imageModel);
+  const perVideo = videoCredits(input.videoModel, input.clipDurationSec, input.clipResolution);
+  return {
+    total: groups.length * (perImage + perVideo),
+    keyframeCount: groups.length,
+    clipCount: groups.length,
+    ctaCount,
+    groups,
+    perClip,
+  };
+}
+
 // ─── Run estimation ──────────────────────────────────────────────────────────
 
 export interface EstimatableJob {
   kind: string;
+  nodeName?: string;
   creditsEstimated?: number | null;
+  settings?: Record<string, unknown> | null;
 }
 
 export interface RunEstimate {
   total: number;
   byKind: Record<string, number>;
   countByKind: Record<string, number>;
+  clipGroups: Array<{ nodeName: string; frameNumbers: number[] }>;
+  framesCovered: number;
+}
+
+function coversFramesOf(job: EstimatableJob): number[] {
+  const raw = job.settings?.coversFrames;
+  if (Array.isArray(raw)) return raw.map(Number).filter(Number.isFinite);
+  const single = Number(job.settings?.frameNumber);
+  return Number.isFinite(single) ? [single] : [];
 }
 
 export function estimateRun(jobs: EstimatableJob[]): RunEstimate {
   const byKind: Record<string, number> = {};
   const countByKind: Record<string, number> = {};
+  const clipGroups: Array<{ nodeName: string; frameNumbers: number[] }> = [];
+  const covered = new Set<number>();
   let total = 0;
+
   for (const job of jobs) {
     const credits = job.creditsEstimated ?? 0;
     byKind[job.kind] = (byKind[job.kind] ?? 0) + credits;
     countByKind[job.kind] = (countByKind[job.kind] ?? 0) + 1;
     total += credits;
+
+    if (job.kind === "video") {
+      const frameNumbers = coversFramesOf(job);
+      clipGroups.push({ nodeName: job.nodeName ?? "", frameNumbers });
+      for (const n of frameNumbers) covered.add(n);
+    }
   }
-  return { total, byKind, countByKind };
+
+  return { total, byKind, countByKind, clipGroups, framesCovered: covered.size };
 }
 
 /** Shape the Studio model pickers render. */
