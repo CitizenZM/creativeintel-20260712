@@ -4,10 +4,14 @@
  *        the Studio pickers render.
  */
 import { NextResponse } from "next/server";
-import { compileRunFromStoryboard, LibtvCompileError } from "@/services/video-gen/libtv-compile";
+import {
+  compileRunFromStoryboard,
+  LibtvCompileError,
+  maxRunCredits,
+} from "@/services/video-gen/libtv-compile";
 import { getRunWithJobs, listRuns } from "@/services/video-gen/libtv-queue";
 import { getBrandKitCompleteness } from "@/services/brand-kit";
-import { modelOptions } from "@/services/video-gen/libtv-pricing";
+import { DEFAULT_BUDGET_MODE, modelOptions, type BudgetMode } from "@/services/video-gen/libtv-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +24,12 @@ export async function GET(
     listRuns(projectId),
     getBrandKitCompleteness(projectId),
   ]);
-  return NextResponse.json({ runs, models: modelOptions(), brandKit: completeness });
+  return NextResponse.json({
+    runs,
+    models: modelOptions(),
+    brandKit: completeness,
+    limits: { maxRunCredits: maxRunCredits(), defaultBudgetMode: DEFAULT_BUDGET_MODE },
+  });
 }
 
 export async function POST(
@@ -36,6 +45,8 @@ export async function POST(
     clipDurationSec?: number;
     aspectRatio?: string;
     canvasName?: string;
+    budgetMode?: BudgetMode;
+    allowOverBudget?: boolean;
   };
 
   if (!body.storyboardId) {
@@ -52,10 +63,22 @@ export async function POST(
       clipDurationSec: body.clipDurationSec,
       aspectRatio: body.aspectRatio,
       canvasName: body.canvasName,
+      budgetMode: body.budgetMode,
+      allowOverBudget: body.allowOverBudget === true,
     });
 
     const run = await getRunWithJobs(result.runId);
-    return NextResponse.json({ run, creditsEstimated: result.creditsEstimated, jobCount: result.jobCount }, { status: 201 });
+    return NextResponse.json(
+      {
+        run,
+        creditsEstimated: result.creditsEstimated,
+        jobCount: result.jobCount,
+        budgetMode: result.budgetMode,
+        clipGroups: result.clipGroups,
+        maxRunCredits: result.maxRunCredits,
+      },
+      { status: 201 }
+    );
   } catch (err) {
     if (err instanceof LibtvCompileError) {
       return NextResponse.json({ error: err.message, missing: err.missing }, { status: err.status });

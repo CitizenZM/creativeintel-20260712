@@ -11,11 +11,11 @@
     "videoModel": "Hailuo 2.3 Fast",
     "aspectRatio": "9:16",
     "clipDurationSec": 6,
-    "creditsEstimated": 128,
-    "creditCap": 300
+    "creditsEstimated": 76,
+    "creditCap": 120
   },
   "project": { "brandName": "Fixture Brand", "libtvCanvasUuid": null },
-  "scriptTitle": "Hydra Cream — 8s bright cut",
+  "scriptTitle": "Hydra Cream — 15s bright cut (economy)",
   "storyboardTitle": "Hydra Cream 2s grid",
   "frames": [
     {
@@ -34,11 +34,11 @@
       "startSec": 2,
       "endSec": 4,
       "duration": "2s-4s",
-      "segment": "BODY",
-      "scene": "Hands pump the cream, camera pushes in",
-      "textOverlay": "ceramide NP + squalane",
+      "segment": "HOOK",
+      "scene": "Pull back into a hip-pop move",
+      "textOverlay": "",
       "voiceover": "Two drops, ten seconds.",
-      "productAction": "pump dispenses cream"
+      "productAction": "bottle held at the shoulder"
     },
     {
       "frameNumber": 3,
@@ -46,21 +46,65 @@
       "endSec": 6,
       "duration": "4s-6s",
       "segment": "BODY",
-      "scene": "Close-up of skin catching the light",
-      "textOverlay": "12-hour hydration",
+      "scene": "Hero close-up, slogan lands",
+      "textOverlay": "ceramide NP + squalane",
       "voiceover": "Glass skin, all day.",
-      "productAction": "bottle rests in frame"
+      "productAction": "pump dispenses cream"
     },
     {
       "frameNumber": 4,
       "startSec": 6,
       "endSec": 8,
       "duration": "6s-8s",
+      "segment": "BODY",
+      "scene": "Cream smoothed across the cheek",
+      "textOverlay": "12-hour hydration",
+      "voiceover": "It absorbs in seconds.",
+      "productAction": "hands press the cream in"
+    },
+    {
+      "frameNumber": 5,
+      "startSec": 8,
+      "endSec": 10,
+      "duration": "8s-10s",
+      "segment": "BODY",
+      "scene": "Macro drift across skin catching the light",
+      "textOverlay": "",
+      "voiceover": "No shine, just glow.",
+      "productAction": "bottle rests in frame"
+    },
+    {
+      "frameNumber": 6,
+      "startSec": 10,
+      "endSec": 12,
+      "duration": "10s-12s",
+      "segment": "BODY",
+      "scene": "Turn to camera, bottle to the cheek",
+      "textOverlay": "dermatologist tested",
+      "voiceover": "Tested where it matters.",
+      "productAction": "bottle lifted to the cheek"
+    },
+    {
+      "frameNumber": 7,
+      "startSec": 12,
+      "endSec": 14,
+      "duration": "12s-14s",
       "segment": "CTA",
-      "scene": "End card with the offer",
+      "scene": "Offer card with the packshot",
       "textOverlay": "buy it now",
       "voiceover": "20% off this week only.",
       "productAction": "hero packshot"
+    },
+    {
+      "frameNumber": 8,
+      "startSec": 14,
+      "endSec": 15,
+      "duration": "14s-15s",
+      "segment": "CTA",
+      "scene": "Logo end card",
+      "textOverlay": "",
+      "voiceover": "Hydra Cream.",
+      "productAction": "logo lands"
     }
   ],
   "jobs": [
@@ -96,35 +140,18 @@
       "shotIndex": 0,
       "nodeName": "K1",
       "leftRefs": ["PROD-1"],
-      "prompt": "Product pushed at the lens on a high-key white set\n\nVertical 9:16 composition, product in frame.\n\nFirst frame of the ad: high-key bright set, the product pushed toward the lens, no dark build-up.",
+      "prompt": "Product pushed at the lens on a high-key white set\n\nVertical 9:16 composition, product in frame.\n\nThe bottle is SMALL — about 12 cm tall in real life; keep it at that scale relative to hands and faces and do not enlarge it. Match the uploaded packshot exactly: same silhouette, cap, colour and wordmark.\n\nFirst frame of the ad: high-key bright set, the product pushed toward the lens, no dark build-up.\n\nCapture the action mid-motion, never a static pose — this still becomes a clip's first frame.",
       "modelName": "Seedream 5.0 Pro",
-      "settings": { "modeType": "image2image", "ratio": "9:16", "quality": "2K", "count": 1, "frameNumber": 1, "segment": "HOOK" },
-      "sourceUrl": null,
-      "creditsEstimated": 14,
-      "status": "queued"
-    },
-    {
-      "id": "fixture-job-k2",
-      "kind": "image",
-      "shotIndex": 1,
-      "nodeName": "K2",
-      "leftRefs": ["PROD-1"],
-      "prompt": "Hands pump the cream, camera pushes in\n\nVertical 9:16 composition, product in frame.",
-      "modelName": "Seedream 5.0 Pro",
-      "settings": { "modeType": "image2image", "ratio": "9:16", "quality": "2K", "count": 1, "frameNumber": 2, "segment": "BODY" },
-      "sourceUrl": null,
-      "creditsEstimated": 14,
-      "status": "queued"
-    },
-    {
-      "id": "fixture-job-k3",
-      "kind": "image",
-      "shotIndex": 2,
-      "nodeName": "K3",
-      "leftRefs": ["PROD-1"],
-      "prompt": "Close-up of skin catching the light\n\nVertical 9:16 composition, product in frame.",
-      "modelName": "Seedream 5.0 Pro",
-      "settings": { "modeType": "image2image", "ratio": "9:16", "quality": "2K", "count": 1, "frameNumber": 3, "segment": "BODY" },
+      "settings": {
+        "modeType": "image2image",
+        "ratio": "9:16",
+        "quality": "2K",
+        "count": 1,
+        "frameNumber": 1,
+        "segment": "HOOK",
+        "coversFrames": [1, 2, 3],
+        "budgetMode": "economy"
+      },
       "sourceUrl": null,
       "creditsEstimated": 14,
       "status": "queued"
@@ -135,9 +162,56 @@
       "shotIndex": 3,
       "nodeName": "K4",
       "leftRefs": ["PROD-1"],
-      "prompt": "End card with the offer",
+      "prompt": "Cream smoothed across the cheek\n\nVertical 9:16 composition, product in frame.\n\nThe bottle is SMALL — about 12 cm tall in real life; keep it at that scale relative to hands and faces and do not enlarge it. Match the uploaded packshot exactly: same silhouette, cap, colour and wordmark.\n\nCapture the action mid-motion, never a static pose — this still becomes a clip's first frame.",
+      "modelName": "Seedream 5.0 Pro",
+      "settings": {
+        "modeType": "image2image",
+        "ratio": "9:16",
+        "quality": "2K",
+        "count": 1,
+        "frameNumber": 4,
+        "segment": "BODY",
+        "coversFrames": [4, 5, 6],
+        "budgetMode": "economy"
+      },
+      "sourceUrl": null,
+      "creditsEstimated": 14,
+      "status": "queued"
+    },
+    {
+      "id": "fixture-job-k7",
+      "kind": "image",
+      "shotIndex": 6,
+      "nodeName": "K7",
+      "leftRefs": ["PROD-1"],
+      "prompt": "Offer card with the packshot",
       "modelName": null,
-      "settings": { "compositeLocally": true, "frameNumber": 4, "segment": "CTA" },
+      "settings": {
+        "compositeLocally": true,
+        "frameNumber": 7,
+        "segment": "CTA",
+        "coversFrames": [7],
+        "budgetMode": "economy"
+      },
+      "sourceUrl": null,
+      "creditsEstimated": 0,
+      "status": "queued"
+    },
+    {
+      "id": "fixture-job-k8",
+      "kind": "image",
+      "shotIndex": 7,
+      "nodeName": "K8",
+      "leftRefs": ["PROD-1"],
+      "prompt": "Logo end card",
+      "modelName": null,
+      "settings": {
+        "compositeLocally": true,
+        "frameNumber": 8,
+        "segment": "CTA",
+        "coversFrames": [8],
+        "budgetMode": "economy"
+      },
       "sourceUrl": null,
       "creditsEstimated": 0,
       "status": "queued"
@@ -148,35 +222,50 @@
       "shotIndex": 0,
       "nodeName": "V1",
       "leftRefs": ["FF K1"],
-      "prompt": "Beat 1: camera pushes in. Beat 2: bottle thrust toward camera — one complete action inside the shot.\n\nproduct stays exactly the same size, shape and label throughout — it must not grow, warp or re-letter",
+      "prompt": "Beat 1: the bottle is thrust toward the lens as the camera pushes in. Beat 2: she pulls back into a hip pop, bottle held at the shoulder. Beat 3: snap to a hero close-up as the pump dispenses cream. One continuous take, no cut between beats.\n\nproduct stays exactly the same size, shape and label throughout — it must not grow, warp or re-letter",
       "modelName": "Hailuo 2.3 Fast",
-      "settings": { "modeType": "singleImage2video", "duration": 6, "resolution": "1080P", "frameNumber": 1, "segment": "HOOK" },
+      "settings": {
+        "modeType": "singleImage2video",
+        "duration": 6,
+        "resolution": "1080P",
+        "frameNumber": 1,
+        "segment": "HOOK",
+        "coversFrames": [1, 2, 3],
+        "frameOffsetsSec": [
+          { "frameNumber": 1, "clipStartSec": 0, "clipEndSec": 2 },
+          { "frameNumber": 2, "clipStartSec": 2, "clipEndSec": 4 },
+          { "frameNumber": 3, "clipStartSec": 4, "clipEndSec": 6 }
+        ],
+        "frameSeconds": 2,
+        "budgetMode": "economy"
+      },
       "sourceUrl": null,
       "creditsEstimated": 24,
       "status": "queued"
     },
     {
-      "id": "fixture-job-v2",
+      "id": "fixture-job-v4",
       "kind": "video",
-      "shotIndex": 1,
-      "nodeName": "V2",
-      "leftRefs": ["FF K2"],
-      "prompt": "Beat 1: slow push in. Beat 2: pump dispenses cream — one complete action inside the shot.\n\nproduct stays exactly the same size, shape and label throughout — it must not grow, warp or re-letter",
+      "shotIndex": 3,
+      "nodeName": "V4",
+      "leftRefs": ["FF K4"],
+      "prompt": "Beat 1: hands press the cream into the cheek as the camera drifts closer. Beat 2: macro drift across skin catching the light, the bottle resting in frame. Beat 3: she turns to camera and lifts the bottle to her cheek. One continuous take, no cut between beats.\n\nproduct stays exactly the same size, shape and label throughout — it must not grow, warp or re-letter",
       "modelName": "Hailuo 2.3 Fast",
-      "settings": { "modeType": "singleImage2video", "duration": 6, "resolution": "1080P", "frameNumber": 2, "segment": "BODY" },
-      "sourceUrl": null,
-      "creditsEstimated": 24,
-      "status": "queued"
-    },
-    {
-      "id": "fixture-job-v3",
-      "kind": "video",
-      "shotIndex": 2,
-      "nodeName": "V3",
-      "leftRefs": ["FF K3"],
-      "prompt": "Beat 1: macro drift across the cheek. Beat 2: bottle rests in frame — one complete action inside the shot.\n\nproduct stays exactly the same size, shape and label throughout — it must not grow, warp or re-letter",
-      "modelName": "Hailuo 2.3 Fast",
-      "settings": { "modeType": "singleImage2video", "duration": 6, "resolution": "1080P", "frameNumber": 3, "segment": "BODY" },
+      "settings": {
+        "modeType": "singleImage2video",
+        "duration": 6,
+        "resolution": "1080P",
+        "frameNumber": 4,
+        "segment": "BODY",
+        "coversFrames": [4, 5, 6],
+        "frameOffsetsSec": [
+          { "frameNumber": 4, "clipStartSec": 0, "clipEndSec": 2 },
+          { "frameNumber": 5, "clipStartSec": 2, "clipEndSec": 4 },
+          { "frameNumber": 6, "clipStartSec": 4, "clipEndSec": 6 }
+        ],
+        "frameSeconds": 2,
+        "budgetMode": "economy"
+      },
       "sourceUrl": null,
       "creditsEstimated": 24,
       "status": "queued"

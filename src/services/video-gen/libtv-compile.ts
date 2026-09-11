@@ -205,6 +205,9 @@ export interface CompileResult {
   runId: string;
   creditsEstimated: number;
   jobCount: number;
+  budgetMode: BudgetMode;
+  clipGroups: Array<{ nodeName: string; frameNumbers: number[] }>;
+  maxRunCredits: number;
 }
 
 export async function compileRunFromStoryboard(input: CompileRunInput): Promise<CompileResult> {
@@ -215,6 +218,7 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
     videoModel = DEFAULT_VIDEO_MODEL,
     aspectRatio = "9:16",
   } = input;
+  const budgetMode: BudgetMode = isBudgetMode(input.budgetMode) ? input.budgetMode : DEFAULT_BUDGET_MODE;
 
   const [project, storyboard, kit] = await Promise.all([
     prisma.project.findUnique({
@@ -293,9 +297,51 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
     resolution: clipResolution,
   });
 
-  frames.forEach((frame, index) => {
-    const n = frame.frameNumber ?? index + 1;
-    const isCta = frame.segment === "CTA";
+  const frameSeconds = storyboard.frameSeconds || FRAME_SECONDS;
+  const normalized = frames.map((frame, index) => ({
+    ...frame,
+    frameNumber: frame.frameNumber ?? index + 1,
+    startSec: Number.isFinite(frame.startSec) ? frame.startSec : index * frameSeconds,
+    endSec: Number.isFinite(frame.endSec) ? frame.endSec : (index + 1) * frameSeconds,
+  }));
+
+  const perClip = framesPerClip(clipDurationSec, frameSeconds);
+  const groups = groupFrames(
+    normalized.map((frame) => ({ frameNumber: frame.frameNumber, isCta: frame.segment === "CTA" })),
+    perClip,
+    budgetMode
+  );
+  const groupByStartIndex = new Map(groups.map((g) => [g.startIndex, g]));
+  const coveredIndexes = new Set(groups.flatMap((g) => g.frameIndexes));
+
+  normalized.forEach((frame, index) => {
+    const n = frame.frameNumber;
+
+    if (frame.segment === "CTA") {
+      drafts.push({
+        shotIndex: index,
+        kind: "image",
+        nodeName: `K${n}`,
+        leftRefs: ["PROD-1"],
+        prompt: imagePromptFor(frame, { scale, aspectRatio, brandTruth }),
+        modelName: null,
+        settings: { compositeLocally: true, frameNumber: n, segment: frame.segment, coversFrames: [n], budgetMode },
+        sourceUrl: null,
+        creditsEstimated: 0,
+      });
+      return;
+    }
+
+    const group = groupByStartIndex.get(index);
+    if (!group) {
+      if (!coveredIndexes.has(index)) {
+        throw new LibtvCompileError(`Frame ${n} was not assigned to a clip group`, 500);
+      }
+      return;
+    }
+
+    const groupFramesList = group.frameIndexes.map((i) => normalized[i]);
+    const offsets = frameOffsets(groupFramesList, frameSeconds, clipDurationSec);
 
     drafts.push({
       shotIndex: index,
@@ -303,30 +349,54 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
       nodeName: `K${n}`,
       leftRefs: ["PROD-1"],
       prompt: imagePromptFor(frame, { scale, aspectRatio, brandTruth }),
-      modelName: isCta ? null : imageModel,
-      settings: isCta
-        ? { compositeLocally: true, frameNumber: n, segment: frame.segment }
-        : { ...imgSettings, frameNumber: n, segment: frame.segment },
+      modelName: imageModel,
+      settings: {
+        ...imgSettings,
+        frameNumber: n,
+        segment: frame.segment,
+        coversFrames: group.frameNumbers,
+        budgetMode,
+      },
       sourceUrl: null,
-      creditsEstimated: isCta ? 0 : imageCredits(imageModel),
+      creditsEstimated: imageCredits(imageModel),
     });
-
-    if (isCta) return;
 
     drafts.push({
       shotIndex: index,
       kind: "video",
       nodeName: `V${n}`,
       leftRefs: [`FF K${n}`],
-      prompt: videoPromptFor(frame, brandTruth),
+      prompt:
+        groupFramesList.length > 1 ? groupVideoPrompt(groupFramesList) : videoPromptFor(frame, brandTruth),
       modelName: videoModel,
-      settings: { ...vidSettings, frameNumber: n, segment: frame.segment },
+      settings: {
+        ...vidSettings,
+        frameNumber: n,
+        segment: frame.segment,
+        coversFrames: group.frameNumbers,
+        frameOffsetsSec: offsets,
+        frameSeconds,
+        budgetMode,
+      },
       sourceUrl: null,
       creditsEstimated: videoCredits(videoModel, clipDurationSec, clipResolution),
     });
   });
 
   const estimate = estimateRun(drafts);
+  const creditCeiling = maxRunCredits();
+  if (!input.allowOverBudget && estimate.total > creditCeiling) {
+    throw new LibtvCompileError(
+      `This board compiles to ${estimate.total} credits, over the ${creditCeiling}-credit ceiling (LIBTV_MAX_RUN_CREDITS). ` +
+        `Economy mode, a shorter board or a cheaper clip model brings it down; re-send with allowOverBudget to compile anyway.`,
+      409,
+      [
+        `Estimate ${estimate.total} credits vs cap ${creditCeiling}`,
+        `${estimate.countByKind.image ?? 0} keyframes + ${estimate.countByKind.video ?? 0} clips in ${budgetMode} mode`,
+      ]
+    );
+  }
+
   const canvasName =
     input.canvasName ||
     clean(`CI ${project.brandName} ${storyboard.title}`).slice(0, 60);
@@ -363,7 +433,14 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
     select: { id: true },
   });
 
-  return { runId: run.id, creditsEstimated: estimate.total, jobCount: drafts.length };
+  return {
+    runId: run.id,
+    creditsEstimated: estimate.total,
+    jobCount: drafts.length,
+    budgetMode,
+    clipGroups: estimate.clipGroups,
+    maxRunCredits: creditCeiling,
+  };
 }
 
 /**

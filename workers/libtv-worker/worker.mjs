@@ -181,14 +181,26 @@ function contentTypeFor(filePath) {
   return 'application/octet-stream';
 }
 
-/** Falls back to file:// so a credential-less operator still gets a working run. */
+/**
+ * `${APP_URL}/api/local-files/<runId>/<relative path>` — the app's local-files
+ * route streams the run directory, so a credential-less operator still gets URLs
+ * the dashboard can play. Returns null for anything outside the run directory.
+ */
+function localFilesUrl(runId, filePath) {
+  const relative = path.relative(path.join(RUNS_DIR, runId), path.resolve(filePath));
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  const encoded = relative.split(path.sep).map(encodeURIComponent).join('/');
+  return `${APP_URL}/api/local-files/${encodeURIComponent(runId)}/${encoded}`;
+}
+
+/** Falls back to a local-files URL so a credential-less operator still gets a playable run. */
 async function publishFile(filePath, { runId, nodeName, kind }) {
   const folder = `creativeintel/libtv/${runId}`;
   const resourceType = kind === 'video' ? 'video' : 'image';
 
   if (DRY_RUN) {
     log(`[dry-run] would publish ${filePath} as ${folder}/${nodeName}`);
-    return { url: `file://${filePath}`, provider: 'dry-run' };
+    return { url: localFilesUrl(runId, filePath) ?? `file://${filePath}`, provider: 'dry-run' };
   }
 
   if (cloudinaryConfigured()) {
@@ -210,8 +222,17 @@ async function publishFile(filePath, { runId, nodeName, kind }) {
     }
   }
 
+  const served = localFilesUrl(runId, filePath);
+  if (served) {
+    log(
+      `no storage provider configured (CLOUDINARY_URL / BLOB_READ_WRITE_TOKEN) — ` +
+        `serving ${nodeName} from ${APP_URL}/api/local-files (LOCAL_FILES_ROOT must point at ${RUNS_DIR})`
+    );
+    return { url: served, provider: 'local-files' };
+  }
+
   logError(
-    `WARNING: no storage provider configured (CLOUDINARY_URL / BLOB_READ_WRITE_TOKEN). ` +
+    `WARNING: no storage provider configured and ${filePath} is outside ${RUNS_DIR}. ` +
       `Reporting a local file:// path for ${nodeName}; the dashboard will not be able to show it.`
   );
   return { url: `file://${filePath}`, provider: 'local' };
@@ -354,8 +375,36 @@ async function executeJob(job, { cli, runDir, runId }) {
   };
 }
 
+/**
+ * Which storyboard windows a clip supplies, and where in the clip each one
+ * starts. In economy mode the compiler puts this on the V job's settings; in
+ * full mode a clip covers only its own frame.
+ */
+function clipCoverage(job, result) {
+  const settings = job.settings || {};
+  const coversFrames = Array.isArray(settings.coversFrames)
+    ? settings.coversFrames.map(Number).filter(Number.isFinite)
+    : settings.frameNumber != null
+      ? [Number(settings.frameNumber)]
+      : [];
+  const frameOffsetsSec = Array.isArray(settings.frameOffsetsSec) ? settings.frameOffsetsSec : null;
+
+  return {
+    nodeName: job.nodeName,
+    coversFrames,
+    frameOffsetsSec,
+    frameSeconds: settings.frameSeconds ?? null,
+    localPath: result?.localPath ?? null,
+    resultUrl: result?.resultUrl ?? null,
+  };
+}
+
 async function assemble(payload, runDir) {
   const script = path.join(HERE, 'assemble.py');
+  const frameSeconds =
+    (payload.clips || []).find((c) => c.frameSeconds)?.frameSeconds ??
+    payload.jobs?.find((j) => j.settings?.frameSeconds)?.settings?.frameSeconds ??
+    2;
   const args = [
     script,
     '--run-dir',
@@ -363,7 +412,7 @@ async function assemble(payload, runDir) {
     '--aspect',
     payload.run.aspectRatio || '9:16',
     '--frame-seconds',
-    '2',
+    String(frameSeconds),
   ];
   if (process.env.LIBTV_MUSIC_FILE) args.push('--music', process.env.LIBTV_MUSIC_FILE);
   if (DRY_RUN) args.push('--dry-run');
@@ -391,23 +440,29 @@ async function processRun(payload) {
   try {
     await bindCanvas(payload, cli, runDir);
 
-    const manifest = { runId, frames: payload.frames, nodes: [] };
+    const manifest = { runId, frames: payload.frames, clips: [], nodes: [] };
 
     for (const job of payload.jobs) {
       await api.jobStarted(job.id);
       try {
         const result = await executeJob(job, { cli, runDir, runId });
         creditsSpent += result.creditsSpent ?? 0;
+        const coverage = job.kind === 'video' ? clipCoverage(job, result) : null;
+        if (coverage) manifest.clips.push(coverage);
         manifest.nodes.push({
           nodeName: job.nodeName,
           kind: job.kind,
           shotIndex: job.shotIndex,
           segment: job.settings?.segment ?? null,
           frameNumber: job.settings?.frameNumber ?? null,
+          coversFrames: coverage?.coversFrames ?? null,
+          frameOffsetsSec: coverage?.frameOffsetsSec ?? null,
           localPath: result.localPath ?? null,
           resultUrl: result.resultUrl ?? null,
           skipped: !!result.skipped,
         });
+        job.localPath = result.localPath ?? null;
+        job.resultUrl = result.resultUrl ?? null;
         await api.jobDone({
           jobId: job.id,
           nodeId: result.nodeId,
@@ -424,6 +479,9 @@ async function processRun(payload) {
     }
 
     await writeFile(path.join(runDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    // assemble.py cuts each storyboard window out of its clip from this mapping.
+    payload.clips = manifest.clips;
+    await writeFile(path.join(runDir, 'run.json'), JSON.stringify(payload, null, 2));
 
     await api.runAssembling(runId);
     const outputs = await assemble(payload, runDir);
