@@ -151,10 +151,23 @@ function wordsOf(text: string): string[] {
   return text.split(/\s+/).filter(Boolean);
 }
 
+/**
+ * Cuts to a clause boundary rather than mid-phrase: a beat ending "…reveal the
+ * electronic." reads as a mistake to the model and to whoever reviews the run.
+ */
 function truncateWords(text: string, max: number): string {
   const words = wordsOf(text);
   if (words.length <= max) return text;
-  return words.slice(0, max).join(" ").replace(/[,;:–—-]+$/, "");
+
+  const kept = words.slice(0, max).join(" ");
+  const sentence = kept.lastIndexOf(". ");
+  const trailing = sentence > 0 ? wordsOf(kept.slice(sentence + 1)).length : Infinity;
+  const whole = trailing < 4 ? kept.slice(0, sentence) : kept;
+
+  const boundary = Math.max(whole.lastIndexOf(","), whole.lastIndexOf(";"), whole.lastIndexOf(" — "));
+  const clause = boundary > 0 ? whole.slice(0, boundary) : whole;
+  const usable = wordsOf(clause).length >= Math.ceil(max * 0.6) ? clause : whole;
+  return usable.replace(/[\s,;:.–—-]+$/, "");
 }
 
 /** One frame's motion, stripped to the clause a beat phrase can absorb. */

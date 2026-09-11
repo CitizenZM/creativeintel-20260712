@@ -68,13 +68,18 @@ function CoverageBrackets({
 
   if (!spans.length) return null;
 
-  let cursor = 0;
+  const laid = spans.reduce<{ cursor: number; items: Array<{ span: (typeof spans)[number]; gap: number }> }>(
+    (acc, span) => {
+      acc.items.push({ span, gap: Math.max(0, span.start - acc.cursor) });
+      acc.cursor = span.start + span.length;
+      return acc;
+    },
+    { cursor: 0, items: [] }
+  ).items;
+
   return (
-    <div className="mt-1.5 flex min-w-max items-center">
-      {spans.map((span) => {
-        const lead = span.start - cursor;
-        cursor = span.start + span.length;
-        const width = span.length * CARD_WIDTH + (span.length - 1) * CARD_GAP;
+    <div className="mt-1.5 flex min-w-max items-start">
+      {laid.map(({ span, gap }) => {
         const label =
           span.frames.length > 1
             ? `${span.nodeName} covers F${span.frames[0]}–F${span.frames[span.frames.length - 1]}`
@@ -83,8 +88,8 @@ function CoverageBrackets({
           <div
             key={span.nodeName}
             style={{
-              width,
-              marginLeft: lead > 0 ? lead * (CARD_WIDTH + CARD_GAP) + (lead > 0 ? CARD_GAP : 0) : 0,
+              width: span.length * CARD_WIDTH + (span.length - 1) * CARD_GAP,
+              marginLeft: gap > 0 ? gap * (CARD_WIDTH + CARD_GAP) : 0,
               marginRight: CARD_GAP,
             }}
             className="shrink-0"

@@ -35,8 +35,17 @@ export LIBTV_MUSIC_FILE="$HOME/Music/track-15s.m4a"     # enables the aubio beat
 ```
 
 With neither `CLOUDINARY_URL` nor `BLOB_READ_WRITE_TOKEN` set the worker still
-finishes the run, but reports `file://` paths and logs a warning — the dashboard
-cannot render those.
+finishes the run and publishes results as
+`${APP_URL}/api/local-files/<runId>/<relative path>` (keeping `localPath`
+alongside), so the dashboard can still play the cut. The app serves those from
+`LOCAL_FILES_ROOT`, which must point at the same directory as `LIBTV_RUNS_DIR`:
+
+```bash
+export LOCAL_FILES_ROOT="$LIBTV_RUNS_DIR"   # app side, local dev only
+```
+
+That route is disabled in production unless `LOCAL_FILES_ROOT` is set, so a
+deployed worker still wants a real storage provider.
 
 ## Running
 
@@ -47,12 +56,22 @@ npm run worker:libtv
 # rehearse the whole graph without spending a credit or touching the network
 node workers/libtv-worker/worker.mjs --dry-run --fixture
 
+# prove the assembly timeline against synthetic clips (no network, no credits)
+bash workers/libtv-worker/test-assemble.sh
+
 # one run, then exit (useful under launchd with a short interval)
 node workers/libtv-worker/worker.mjs --once
 ```
 
 `--fixture` reads `fixtures/run.json` (or `--fixture=/path/to/run.json`) instead
-of claiming, and prints what it *would* report rather than calling the API.
+of claiming, and prints what it *would* report rather than calling the API. The
+bundled fixture is an economy-mode 15 s board: 8 frames, two clip groups, 76
+credits.
+
+`test-assemble.sh` builds a throwaway run directory with two 6-second
+`testsrc2` clips and a generated packshot, runs `assemble.py` over it, and
+asserts with `ffprobe` that the master is 15.00 s ±0.1 s at 1080×1920 and the
+preview 720×1280. `KEEP=1` leaves the directory behind for inspection.
 
 ## Where files land
 
@@ -60,7 +79,8 @@ of claiming, and prints what it *would* report rather than calling the API.
 $LIBTV_RUNS_DIR/<runId>/
   run.json            the claimed payload
   canvas.json         { uuid, name } when the worker created the canvas
-  manifest.json       one entry per executed node, with local paths
+  manifest.json       one entry per executed node, plus clips[] (coversFrames,
+                      frameOffsetsSec, localPath) — the map assemble.py cuts from
   refs/               PROD-1…, LOGO — downloaded brand assets
   keyframes/          K<n> images from LibTV
   clips/              V<n> clips from LibTV
@@ -122,7 +142,8 @@ expiry exit; remove it if you would rather re-login by hand.
 
 ## Node graph
 
-Nodes execute uploads → every `K<n>` → every `V<n>`:
+Nodes execute uploads → every `K<n>` → every `V<n>`, where `<n>` is the first
+frame of a clip group (in economy mode one group is up to three 2-second frames):
 
 ```
 PROD-1      libtv upload "PROD-1" --file refs/PROD-1.png
@@ -139,3 +160,8 @@ V<n>        libtv node create "V<n>" -t video --left "FF K<n>" --prompt "…" \
 a timeout shorter than the model's own runtime. CTA frames carry
 `settings.compositeLocally` and never reach LibTV — their cards come out of
 `assemble.py`, because video models garble type and drift on packaging.
+
+`coversFrames`, `frameOffsetsSec`, `frameSeconds`, `budgetMode`, `frameNumber`,
+`segment` and `compositeLocally` are compiler bookkeeping for assembly: the
+worker strips them before building the `-s` pairs, since the CLI rejects
+settings the model does not declare.

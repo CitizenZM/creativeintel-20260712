@@ -116,10 +116,12 @@ export function jobsByNode(run: LibtvRunView | null): Map<string, LibtvJobView> 
   return map;
 }
 
+/** Runs compiled before economy mode carry only `frameNumber` — one frame per clip. */
 function coversFramesOf(job: LibtvJobView): number[] {
   const raw = job.settings?.coversFrames;
   if (Array.isArray(raw)) return raw.map(Number).filter(Number.isFinite);
-  return [];
+  const single = Number(job.settings?.frameNumber);
+  return Number.isFinite(single) ? [single] : [];
 }
 
 /**

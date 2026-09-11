@@ -46,6 +46,18 @@ export type LibtvModel = LibtvImageModel | LibtvVideoModel;
 
 export const IMAGE_MODELS: LibtvImageModel[] = [
   {
+    name: "Seedream 4.0",
+    modality: "image",
+    modeType: "image2image",
+    creditsPerImage: 1,
+    quality: "2K",
+    qualityKey: "quality",
+    ratios: ["1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "21:9"],
+    settingsKeys: ["modeType", "ratio", "quality", "count"],
+    verified: true,
+    note: "1 credit per 2K image2image keyframe (measured 2026-09-11). Default while the balance is low.",
+  },
+  {
     name: "Seedream 5.0 Pro",
     modality: "image",
     modeType: "image2image",
@@ -76,12 +88,15 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     name: "Hailuo 2.3 Fast",
     modality: "video",
     modeType: "singleImage2video",
-    prices: [{ durationSec: 6, resolution: "1080P", credits: 24 }],
+    prices: [
+      { durationSec: 6, resolution: "768P", credits: 12 },
+      { durationSec: 6, resolution: "1080P", credits: 24 },
+    ],
     defaultDurationSec: 6,
-    defaultResolution: "1080P",
+    defaultResolution: "768P",
     settingsKeys: ["modeType", "duration", "resolution"],
     verified: true,
-    note: "Best value for image-to-video with people. 1080P forbids the 10s option.",
+    note: "Best value for image-to-video with people. 768P is half the price of 1080P; 1080P forbids the 10s option.",
   },
   {
     name: "Kling O3",
@@ -159,7 +174,7 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
   },
 ];
 
-export const DEFAULT_IMAGE_MODEL = "Seedream 5.0 Pro";
+export const DEFAULT_IMAGE_MODEL = "Seedream 4.0";
 export const DEFAULT_VIDEO_MODEL = "Hailuo 2.3 Fast";
 
 export function findImageModel(name: string): LibtvImageModel | null {

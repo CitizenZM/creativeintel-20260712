@@ -81,7 +81,7 @@ export function LibtvRunPanel({
   onRunsChanged: (run?: LibtvRunView) => void;
   onPlanChange?: (plan: { budgetMode: BudgetMode; clipDurationSec: number }) => void;
 }) {
-  const [imageModel, setImageModel] = useState("Seedream 5.0 Pro");
+  const [imageModel, setImageModel] = useState("Seedream 4.0");
   const [videoModel, setVideoModel] = useState("Hailuo 2.3 Fast");
   const [clipDurationSec, setClipDurationSec] = useState(6);
   const [budgetMode, setBudgetMode] = useState<BudgetMode>("economy");

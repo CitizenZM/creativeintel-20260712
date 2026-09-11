@@ -578,7 +578,7 @@ model LibtvRun {
   canvasUuid       String?
   canvasUrl        String?
   canvasName       String?
-  imageModel       String    @default("Seedream 5.0 Pro")
+  imageModel       String    @default("Seedream 4.0")
   videoModel       String    @default("Hailuo 2.3 Fast")
   aspectRatio      String    @default("9:16")
   clipDurationSec  Int       @default(6)
