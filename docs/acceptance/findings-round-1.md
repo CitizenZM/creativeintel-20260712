@@ -3,3 +3,4 @@ FINDING: research status steps[] show 'Crawl websites:pending' and 'Ad discovery
 FINDING: script hook 'Before and after: crepey skin erased.' overstates vs claimsAllowed — script prompt should hard-enforce claimsForbidden/claimsAllowed and a post-check should flag absolute words (erased/cures/proven)
 FINDING: studio storyboard selector (label) did not switch selection on click via JS — compiled the already-selected board; make the selector a real radio/select with agent-addressable inputs
 FINDING: Meta playbook uses 'This ad has multiple versions' as the title for multi-version ads — fall back to the ad body text / page name
+FINDING: STAT_SHOCK template invented '84% of women over forty' — numeric statistics must come from brand kit/briefing (add claimsAllowed stats or flag any % / 'x in y' not present in brand truth in auditScriptClaims)
