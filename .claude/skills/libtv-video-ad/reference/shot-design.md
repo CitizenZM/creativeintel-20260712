@@ -1,5 +1,9 @@
 # Shot design for 10–15s vertical ads
 
+> Rhythm, motion floor, transitions, hooks and CTA styles now live in
+> `motion-and-rhythm.md`; the thresholds that judge them live in `qc-gate.md`. Read both
+> before writing a build script. This file covers composition, poses, VFX and typography.
+
 ## Beat grid first
 1. Pick a track whose licence allows paid social ads (Mixkit's free music licence lists "Online
    marketing ads"; it **forbids remixing**, so you cannot splice sections — pick one continuous
