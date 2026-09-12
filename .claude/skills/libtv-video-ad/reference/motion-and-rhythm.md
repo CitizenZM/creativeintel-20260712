@@ -70,9 +70,22 @@ Never cut hard out of the hook. Assign a transition to every segment boundary:
 | Hook → body | `whip` (blur ±3 frames) | carries energy, hides a subject change |
 | Body → body, same subject | `dissolve` (±2) | keeps continuity while the product changes |
 | Into a price / offer reveal | `zoom` punch (±3) | reads as emphasis, not as a new scene |
-| Into a product insert | `flash` (±2) | matches the drop, covers a hard material change |
+| The track's measured drop | `flash` (±2) | the loudest musical event gets the loudest visual one |
 
-Rotate them — three identical whips in 15 s reads as a template.
+Rotate them — three identical whips in 15 s reads as a template. Find the drop by taking the
+largest positive jump in the RMS envelope of the music window, then give the boundary nearest it
+the flash.
+
+**Two implementation traps, both found by the QC gate, both now fixed in `motion_engine`:**
+
+* A zoom punch must not swap content itself — the segment function already switched at the beat
+  frame. Swapping again at the end of the window adds a second change ~100 ms late.
+* A whip's blur envelope must be **asymmetric**: build over the frames before the beat, clear
+  within 2 frames after it. A symmetric envelope buries the change under maximum blur exactly
+  where it should be sharpest, and the cut reads ~2 frames late.
+
+**Clamp synthetic motion.** A push of 9 %/s is right for a 2 s plate and absurd for a 20 s still;
+cap the motion age (2.5 s) so nothing ever grows out of frame.
 
 ---
 
@@ -115,5 +128,10 @@ legal line at 26 px bottom, product small and low so nothing overlaps.
   the 15 s window.
 - If the licence forbids remixing (Mixkit free), the window must already contain the build and
   the drop — you cannot splice one together.
-- SFX layer (whoosh on whips, impact on downbeats, UI click on the CTA) is the cheapest
-  remaining upgrade; confirm the sound library's licence before adding it.
+- **SFX are synthesised, not sampled** (`scripts/sfx.py`): swept-noise whoosh on whip/dissolve
+  boundaries, sine-thump impact on zoom/flash boundaries and the drop, a short blip when the CTA
+  lands. Generating them from noise and sine primitives removes the licence question entirely and
+  costs nothing. Mix the bed at about −17 dBFS under the music with ffmpeg `amix`, then let
+  `loudnorm` normalise the sum.
+- **Derive SFX timings from the rendered boundaries, not from the plan** — pass the same snapped
+  frame indices the picture used, so the sound cannot drift from the cut.

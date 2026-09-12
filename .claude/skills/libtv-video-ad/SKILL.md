@@ -60,6 +60,8 @@ and cannot hit a beat.
 - **Never hard-cut out of the hook**; name a transition for every boundary and rotate the kinds.
 - **Frame one is bright and contains the product or subject.** No dark 2–3 s build-up.
 - **Always `-af loudnorm=I=-14:TP=-1.5:LRA=7`.** v1 shipped clipping at +1.5 dBFS.
+- **Synthesise the SFX** (`scripts/sfx.py`) instead of waiting for a sound-library decision, and
+  take their timings from the rendered boundary frames.
 - **A 10 s cutdown gets its own music window**, with its own build→drop.
 - **Product consistency is non-negotiable.** Any frame where the label is readable uses the
   official photo composited locally (`reference/product-consistency.md`).
@@ -119,6 +121,7 @@ python3 scripts/av_sync.py out/ad.mp4 assets/music/track_15s.m4a     # once per 
 |---|---|
 | `motion_engine.py` | `snap`, `Timeline`, `apply_transition`, `apply_accent`, `ken_burns`, `light_sweep`, `plate_motion`, `motion_blur` |
 | `qc_gate.py` | the ship gate (exits non-zero on failure) |
+| `sfx.py` | synthesised whoosh / impact / click bed — no sound library, no licence question |
 | `diagnose_cut.py` | cuts, static share, motion, beat offsets for any video |
 | `av_sync.py` | audio lag between a render and its source music |
 | `screens.py` | composite original content into device panels |

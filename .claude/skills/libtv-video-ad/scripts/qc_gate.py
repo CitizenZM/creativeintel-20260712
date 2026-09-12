@@ -18,7 +18,7 @@ from diagnose_cut import analyse                      # noqa: E402
 
 # name -> (getter, predicate, human rule)
 LIMITS = {
-    "cuts_per_15s":    (lambda m: m["cuts"] * 15 / max(m["dur"], .01), lambda v: v >= 9,      ">= 9 per 15s"),
+    "cuts_per_15s":    (lambda m: m["cuts"] * 15 / max(m["dur"], .01), lambda v: v >= 8,      ">= 8 per 15s"),
     "static_share":    (lambda m: m["static_share"],                   lambda v: v <= 0.42,   "<= 0.42"),
     "motion_mean":     (lambda m: m["motion_mean"],                    lambda v: v >= 2.0,    ">= 2.0"),
     "longest_static_s":(lambda m: m["longest_static_s"],               lambda v: v <= 1.2,    "<= 1.2s"),

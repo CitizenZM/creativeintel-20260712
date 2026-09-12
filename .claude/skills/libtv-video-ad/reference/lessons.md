@@ -64,4 +64,7 @@ now has a `qc_gate.py` check so it cannot ship again.
 | 33 | 10 s cutdown lost the drop | — | reused the 15 s window's first 10 s | cut a separate 10 s window with its own build→drop |
 | 34 | mux offset suspected, never verified | lag 0 ms, corr 0.998 | assumption | `av_sync.py` once per project before blaming the edit |
 | 35 | no SFX on cuts | — | never planned | SFX layer (whoosh/impact/click) — needs a licensed library, ask first |
-| 36 | v2 still has one boundary 80 ms off the beat | beat_max_ms 80 | one transition's half-window differs | open; chase the outlier boundary, keep reporting the failing check |
+| 36 | v2 still had one boundary 80 ms off the beat | beat_max_ms 80 | (a) zoom punch swapped content a second time at the end of its window; (b) whip blur peaked ON the beat, hiding the change | both fixed in `motion_engine`; v3 measures bias +1.9 ms, max 23 ms |
+| 37 | `diagnose_cut` counted every transition twice | benchmarks read 21–34 cuts/15s | in/out spikes 0.13 s apart, merge window was 0.12 s | merge inside 0.20 s and keep the strongest frame; benchmark table re-measured (7.9–12.1) |
+| 38 | a still rendered at t=20 s zoomed the product out of frame | push 2.0× | `plate_motion` age was unbounded | clamp motion age to 2.5 s |
+| 39 | SFX blocked on "which sound library?" | — | assumed sounds must be sampled | synthesise them (`sfx.py`) — no licence, no cost, timings taken from the rendered boundaries |

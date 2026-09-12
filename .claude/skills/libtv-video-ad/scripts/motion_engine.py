@@ -85,19 +85,22 @@ def apply_transition(img, i, fi, kind, prev_fn, next_fn, t):
     if kind == "dissolve":
         return Image.blend(img, other, (0.5 - abs(k - 0.5)) * 0.9)
     if kind == "whip":
-        amt = max(int(2 + 40 * env), 1)
+        # Asymmetric envelope: the blur builds over the frames BEFORE the beat and clears fast
+        # after it, so the sharpest visible change is the beat frame itself. A symmetric
+        # envelope hides the change under blur and pushes the detected cut ~2 frames late.
+        wenv = (i - (fi - half)) / half if i < fi else max(1 - (i - fi) / 2.0, 0.0)
+        amt = max(int(2 + 40 * wenv), 1)
         img = img.filter(ImageFilter.BoxBlur(amt))
-        if abs(i - fi) <= 1:
+        if i == fi - 1:
             img = Image.blend(img, other.filter(ImageFilter.BoxBlur(amt)), 0.35)
         return img
     if kind == "flash":
         img = Image.blend(img, other, 1.0 if i >= fi else 0.0)
         return Image.blend(img, Image.new("RGB", (W, H), (255, 255, 255)), 0.75 * env)
-    z = 1 + 0.22 * env                          # zoom punch
-    cw, ch = int(W / z), int(H / z)
-    img = img.crop(((W - cw) // 2, (H - ch) // 2, (W - cw) // 2 + cw, (H - ch) // 2 + ch)) \
-             .resize((W, H), Image.BILINEAR)
-    return Image.blend(img, other, 1.0) if i > fi + half - 1 else img
+    z = 1 + 0.22 * env                          # zoom punch — the segment function has already
+    cw, ch = int(W / z), int(H / z)             # swapped content at fi; never swap it again here,
+    return img.crop(((W - cw) // 2, (H - ch) // 2,   # or the window ends with a second, late change
+                     (W - cw) // 2 + cw, (H - ch) // 2 + ch)).resize((W, H), Image.BILINEAR)
 
 
 def motion_blur(img, prev, amount=0.45):

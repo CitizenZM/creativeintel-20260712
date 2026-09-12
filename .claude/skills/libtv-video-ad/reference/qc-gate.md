@@ -14,16 +14,20 @@ Benchmarks measured 2026-09-11 with `diagnose_cut.py` on official brand ads:
 
 | Reference ad | cuts/15s | static_share | motion_mean |
 |---|---|---|---|
-| TCL EU Black Friday | 26 | 0.25 | 4.70 |
-| TCL USA 98" | 21 | 0.28 | 3.10 |
-| Hisense Black Friday | 34 | 0.34 | 2.69 |
-| Walmart TV promo | 9 | 0.42 | 2.02 |
+| TCL EU Black Friday | 12.1 | 0.25 | 4.70 |
+| TCL USA 98" | 12.0 | 0.28 | 3.10 |
+| Hisense Black Friday | 7.9 | 0.34 | 2.69 |
+| Walmart TV promo | 8.9 | 0.42 | 2.02 |
 
-Walmart is the floor (a slower retail read), the TCL ads are the target.
+Hisense/Walmart are the floor (a slower retail read), the TCL ads are the target.
+
+> These numbers were re-measured after `diagnose_cut.py` learned to merge the two spikes a single
+> transition produces (an earlier pass double-counted them and reported 21–34 cuts/15 s). If you
+> see an old table quoting 13–19 or 26–34 cuts per 15 s, it is the pre-fix measurement.
 
 | Check | Rule | What fails it |
 |---|---|---|
-| `cuts_per_15s` | ≥ 9 | too few segments; add cuts inside long clips |
+| `cuts_per_15s` | ≥ 8 | too few segments; add cuts inside long clips |
 | `static_share` | ≤ 0.42 | still plates — apply the motion floor (motion-and-rhythm §1) |
 | `motion_mean` | ≥ 2.0 | everything moves too slowly |
 | `longest_static_s` | ≤ 1.2 | one frozen section, usually an end card |
@@ -36,18 +40,27 @@ Walmart is the floor (a slower retail read), the TCL ads are the target.
 
 ## Measured record (same 15 s ad, `game`)
 
-| Metric | v1 | v2 | Verdict |
-|---|---|---|---|
-| cuts | 6 | 11 | pass |
-| static_share | 0.609 | 0.314 | pass |
-| motion_mean | 1.48 | 2.91 | pass |
-| longest_static_s | 2.70 | 0.90 | pass |
-| beat_bias_ms | +21 | −11 | pass |
-| beat_max_ms | 27 | 80 | **still failing** — one boundary outlier to chase |
-| true_peak | +1.53 | −2.77 | pass |
-| loudness | −10.0 | −14.2 | pass |
+| Metric | v1 | v2 | v3 | Verdict |
+|---|---|---|---|---|
+| cuts | 6 | 11 | 13 | pass |
+| static_share | 0.609 | 0.314 | 0.240 | pass |
+| motion_mean | 1.48 | 2.91 | 3.30 | pass |
+| longest_static_s | 2.70 | 0.90 | 0.37 | pass |
+| avg_shot_s | 2.14 | 1.25 | 1.07 | pass |
+| beat_bias_ms | +21 | +13 | **+1.9** | pass |
+| beat_max_ms | 27 | 50 | **23** | pass |
+| beat_accent_pct | 18.8 | 34.4 | 40.6 | pass |
+| true_peak | +1.53 | −2.77 | −2.76 | pass |
+| loudness | −10.0 | −14.2 | −14.3 | pass |
 
-v1 failed 9 of 10 checks; v2 fails 1. Report the failing check rather than hiding it.
+v1 failed 9 of 10 checks; v3 passes all 10. Report a failing check rather than hiding it.
+
+Two code defects were found only because the gate kept failing after the obvious fixes:
+
+* **zoom punch swapped content twice** — the transition blended back to the outgoing segment on
+  the last frames of its window, adding a second change ~100 ms after the beat.
+* **symmetric whip blur hid the cut** — the blur peaked on the beat frame, so the largest visible
+  change happened 2 frames later. The envelope now builds before the beat and clears fast after.
 
 ## Other gates that are not in the script (check by eye, once per campaign)
 

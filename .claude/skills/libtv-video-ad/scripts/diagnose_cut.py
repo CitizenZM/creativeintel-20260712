@@ -21,11 +21,19 @@ def analyse(video, beats=None, fps=30):
     n = len(fr)
     diff = np.array([np.abs(fr[i]-fr[i-1]).mean() for i in range(1,n)])   # motion per frame
     t = np.arange(1,n)/fps
-    cut_idx = [i for i in range(len(diff)) if diff[i] > 18 and diff[i] > 3*np.median(diff)]
-    # merge adjacent detections
-    cuts=[]
+    # Ignore the first 0.15 s: a bright opening or a downbeat flash on frame 0 spikes the diff,
+    # but an ad cannot contain a cut before its first shot has been seen.
+    cut_idx = [i for i in range(len(diff)) if diff[i] > 18 and diff[i] > 3*np.median(diff)
+               and t[i] >= 0.15]
+    # Merge detections that belong to ONE transition: a dissolve/whip/zoom spans up to 7 frames
+    # and spikes on the way in and on the way out, so anything inside 0.2 s is the same event.
+    # The frame with the largest change is the cut -- for a centred transition that is the beat
+    # frame. (Benchmarks peak at 34 cuts/15 s = 0.44 s apart, so 0.2 s never merges real cuts.)
+    groups=[]
     for i in cut_idx:
-        if not cuts or t[i]-cuts[-1] > 0.12: cuts.append(round(float(t[i]),3))
+        if groups and t[i]-t[groups[-1][-1]] <= 0.20: groups[-1].append(i)
+        else: groups.append([i])
+    cuts=[round(float(t[max(g,key=lambda j:diff[j])]),3) for g in groups]
     motion = diff.copy()
     for i in cut_idx: motion[i] = np.nan                                   # ignore cut spikes
     m = motion[~np.isnan(motion)]
