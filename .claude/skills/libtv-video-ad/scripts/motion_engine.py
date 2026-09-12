@@ -75,7 +75,7 @@ def apply_transition(img, i, fi, kind, prev_fn, next_fn, t):
     prev_fn/next_fn: render callables taking t (seconds) — the outgoing / incoming segment.
     Returns img unchanged when i is outside the window, so it is safe to call unconditionally.
     """
-    half = 2 if kind in ("dissolve", "flash") else 3
+    half = 1 if kind == "flash" else (2 if kind == "dissolve" else 3)
     if not (fi - half <= i <= fi + half):
         return img
     W, H = img.size
@@ -98,7 +98,10 @@ def apply_transition(img, i, fi, kind, prev_fn, next_fn, t):
         # Same trap as the zoom punch: the segment function already swapped content at fi, so
         # this must only add light. Blending toward `other` here would restore the OUTGOING
         # segment for the rest of the window and move the visible change ~3 frames late.
-        return Image.blend(img, Image.new("RGB", (W, H), (255, 255, 255)), 0.75 * env)
+        # Keep the flash SHORT (half=1) and moderate: a long white decay makes the frame after
+        # the beat change more than the beat frame itself, and the cut detector -- and the eye --
+        # then read the cut 2 frames late.
+        return Image.blend(img, Image.new("RGB", (W, H), (255, 255, 255)), 0.60 * env)
     z = 1 + 0.22 * env                          # zoom punch — the segment function has already
     cw, ch = int(W / z), int(H / z)             # swapped content at fi; never swap it again here,
     return img.crop(((W - cw) // 2, (H - ch) // 2,   # or the window ends with a second, late change
