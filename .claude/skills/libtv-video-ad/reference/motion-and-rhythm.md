@@ -78,8 +78,11 @@ the flash.
 
 **Two implementation traps, both found by the QC gate, both now fixed in `motion_engine`:**
 
-* A zoom punch must not swap content itself — the segment function already switched at the beat
-  frame. Swapping again at the end of the window adds a second change ~100 ms late.
+* **A transition must never swap content itself.** The segment function already switched at the
+  beat frame; a transition that also blends toward `other` after `fi` restores the OUTGOING
+  segment for the rest of the window and moves the visible change ~100 ms late. This bit both
+  the zoom punch and the flash, and only showed up on the two ads whose drop landed on a flash
+  boundary — which is why the gate has to run on every file, not on one sample.
 * A whip's blur envelope must be **asymmetric**: build over the frames before the beat, clear
   within 2 frames after it. A symmetric envelope buries the change under maximum blur exactly
   where it should be sharpest, and the cut reads ~2 frames late.

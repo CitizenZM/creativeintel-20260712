@@ -95,7 +95,9 @@ def apply_transition(img, i, fi, kind, prev_fn, next_fn, t):
             img = Image.blend(img, other.filter(ImageFilter.BoxBlur(amt)), 0.35)
         return img
     if kind == "flash":
-        img = Image.blend(img, other, 1.0 if i >= fi else 0.0)
+        # Same trap as the zoom punch: the segment function already swapped content at fi, so
+        # this must only add light. Blending toward `other` here would restore the OUTGOING
+        # segment for the rest of the window and move the visible change ~3 frames late.
         return Image.blend(img, Image.new("RGB", (W, H), (255, 255, 255)), 0.75 * env)
     z = 1 + 0.22 * env                          # zoom punch — the segment function has already
     cw, ch = int(W / z), int(H / z)             # swapped content at fi; never swap it again here,
