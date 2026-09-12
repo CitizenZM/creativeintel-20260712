@@ -70,3 +70,6 @@ now has a `qc_gate.py` check so it cannot ship again.
 | 39 | SFX blocked on "which sound library?" | — | assumed sounds must be sampled | synthesise them (`sfx.py`) — no licence, no cost, timings taken from the rendered boundaries |
 | 40 | 10 of 18 v3 files failed the gate after the game ad passed | beat_max_ms 97–107 on race/tablet | the flash transition swapped content back after the beat (same class as #36a); only ads whose drop sat on a flash boundary showed it | transitions add light/blur/zoom only, never content; **gate every file, never one sample** |
 | 41 | game 10 s static_share 0.435, tablet 10 s accent 23.8 % | too few boundaries in the 10 s cut | the 10 s timeline reused one long price plate | split it into plate → full-bleed content → clip; one extra boundary fixes both metrics |
+| 42 | 6 of 18 files still failed at the flash boundary (63–73 ms late) even after the content-swap fix | the white decay ran 2 frames past the beat, so the frame AFTER the beat changed more than the beat frame | shorten the flash to ±1 frame and drop its strength to 0.6 — the beat frame must hold the largest change |
+| 43 | the 10 s cut failed static_share where the 15 s passed | plates take a larger share of a shorter cut | per-duration motion boost (×1.35 on push, pan and light sweep for 10 s) |
+

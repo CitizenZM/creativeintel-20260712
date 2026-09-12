@@ -55,6 +55,13 @@ Hisense/Walmart are the floor (a slower retail read), the TCL ads are the target
 
 v1 failed 9 of 10 checks; v3 passes all 10. Report a failing check rather than hiding it.
 
+**Full delivery, 2026-09-12**: 18 files (3 ads x 2 durations x 3 ratios) all pass. Ranges across
+the set — cuts/15s 10.5–14, static 0.11–0.42, motion 3.07–3.77, beat bias within ±2.2 ms, worst
+single boundary 40 ms, true peak ≤ −2.51 dBFS, loudness −14.7…−13.9 LUFS.
+
+Getting there took three gate rounds (8/18 → 12/18 → 18/18), each exposing a defect that a single
+sample file had hidden. **Gate every file.**
+
 Two code defects were found only because the gate kept failing after the obvious fixes:
 
 * **zoom punch swapped content twice** — the transition blended back to the outgoing segment on
