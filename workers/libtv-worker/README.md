@@ -34,11 +34,24 @@ export CLOUDINARY_URL="cloudinary://key:secret@cloud"   # or BLOB_READ_WRITE_TOK
 export LIBTV_MUSIC_FILE="$HOME/Music/track-15s.m4a"     # enables the aubio beat grid
 ```
 
-With neither `CLOUDINARY_URL` nor `BLOB_READ_WRITE_TOKEN` set the worker still
-finishes the run and publishes results as
-`${APP_URL}/api/local-files/<runId>/<relative path>` (keeping `localPath`
-alongside), so the dashboard can still play the cut. The app serves those from
-`LOCAL_FILES_ROOT`, which must point at the same directory as `LIBTV_RUNS_DIR`:
+Neither `CLOUDINARY_URL` nor `BLOB_READ_WRITE_TOKEN` needs to be set. Vercel
+Blob's read-write token is write-only once the store is connected to the
+project — it cannot be read back from the dashboard, `vercel env pull`, or a
+credential rotation — so this Mac was never meant to hold it. Instead the
+worker calls `${APP_URL}/api/worker/blob-upload` (same `WORKER_TOKEN` +
+`VERCEL_AUTOMATION_BYPASS_SECRET` auth as every other worker call) to get a
+short-lived, path-scoped client token, then uploads the file straight to
+Vercel Blob's storage endpoint with it. This is automatic — no extra env var
+— and is the default path in production. `CLOUDINARY_URL` still wins if set
+(useful for local dev without touching the deployed app), and
+`BLOB_READ_WRITE_TOKEN` still works directly if you ever do have it (e.g.
+local Postgres + local Blob dev store).
+
+If even the token route is unreachable, the worker falls back to publishing
+results as `${APP_URL}/api/local-files/<runId>/<relative path>` (keeping
+`localPath` alongside), so the dashboard can still play the cut. The app
+serves those from `LOCAL_FILES_ROOT`, which must point at the same directory
+as `LIBTV_RUNS_DIR`:
 
 ```bash
 export LOCAL_FILES_ROOT="$LIBTV_RUNS_DIR"   # app side, local dev only

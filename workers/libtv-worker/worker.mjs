@@ -14,7 +14,10 @@
 //   LIBTV_RUNS_DIR          default "~/Projects/libtv-ad-studio/runs"
 //   POLL_INTERVAL_MS        default 20000
 //   CLOUDINARY_URL          (or CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET)
-//   BLOB_READ_WRITE_TOKEN   fallback storage
+//   BLOB_READ_WRITE_TOKEN   only if you happen to have it directly (dev);
+//                           otherwise the worker auto-fetches a scoped
+//                           client upload token from
+//                           APP_URL/api/worker/blob-upload using WORKER_TOKEN
 //   LIBTV_MUSIC_FILE        optional music bed; enables the aubio beat grid
 //
 // Flags:
@@ -172,6 +175,32 @@ async function uploadToBlob(filePath, { folder, publicId, contentType }) {
   return res.url;
 }
 
+/**
+ * Uploads via a short-lived client token issued by /api/worker/blob-upload,
+ * for the normal case where this Mac never holds a raw BLOB_READ_WRITE_TOKEN
+ * (Vercel does not allow that token to be read back once the store is
+ * connected — see the route's own doc comment). File bytes go straight from
+ * this process to Vercel Blob's storage endpoint; only the tiny token
+ * request passes through our app, and it needs the same worker auth +
+ * Deployment Protection bypass headers as every other worker API call.
+ */
+async function uploadToBlobViaClientToken(filePath, { folder, publicId, contentType }) {
+  if (!WORKER_TOKEN) {
+    throw new Error('WORKER_TOKEN is not set — cannot request a blob client token');
+  }
+  const { upload } = await import('@vercel/blob/client');
+  const buffer = await readFile(filePath);
+  const headers = { 'x-worker-token': WORKER_TOKEN };
+  if (VERCEL_BYPASS) headers['x-vercel-protection-bypass'] = VERCEL_BYPASS;
+  const res = await upload(`${folder}/${publicId}${path.extname(filePath)}`, buffer, {
+    access: 'public',
+    contentType,
+    handleUploadUrl: `${APP_URL}/api/worker/blob-upload`,
+    headers,
+  });
+  return res.url;
+}
+
 function contentTypeFor(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.mp4' || ext === '.mov') return 'video/mp4';
@@ -222,10 +251,25 @@ async function publishFile(filePath, { runId, nodeName, kind }) {
     }
   }
 
+  if (!FIXTURE_PATH && WORKER_TOKEN) {
+    try {
+      return {
+        url: await uploadToBlobViaClientToken(filePath, {
+          folder,
+          publicId: nodeName,
+          contentType: contentTypeFor(filePath),
+        }),
+        provider: 'vercel-blob-client-token',
+      };
+    } catch (err) {
+      logError('vercel blob client-token upload failed, falling back:', err.message || err);
+    }
+  }
+
   const served = localFilesUrl(runId, filePath);
   if (served) {
     log(
-      `no storage provider configured (CLOUDINARY_URL / BLOB_READ_WRITE_TOKEN) — ` +
+      `no storage provider configured (CLOUDINARY_URL / BLOB_READ_WRITE_TOKEN / blob-upload token route) — ` +
         `serving ${nodeName} from ${APP_URL}/api/local-files (LOCAL_FILES_ROOT must point at ${RUNS_DIR})`
     );
     return { url: served, provider: 'local-files' };
