@@ -49,8 +49,18 @@ export async function runEgoScript(body, { timeoutMs = 180_000 } = {}) {
   const script = `const SPACE_ID = ${spaceId === null ? 'null' : spaceId};
 const RESULT_MARKER = ${JSON.stringify(RESULT_MARKER)};
 async function openSpace(name) {
-  const task = SPACE_ID === null ? await taskSpace(name) : await taskSpace(SPACE_ID);
-  return task;
+  // The cached space id goes stale whenever ego lite restarts or the space is
+  // closed, and taskSpace() then throws "task space not found: <id>" for every
+  // task forever — the worker looked alive but could not run a single
+  // playbook. Fall back to a fresh space and let the caller persist the new id.
+  if (SPACE_ID !== null) {
+    try {
+      return await taskSpace(SPACE_ID);
+    } catch (err) {
+      if (!/not found/i.test(err && err.message ? err.message : String(err))) throw err;
+    }
+  }
+  return await taskSpace(name);
 }
 function emit(value) { console.log(RESULT_MARKER + JSON.stringify(value)); }
 ${body}
