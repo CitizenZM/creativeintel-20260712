@@ -39,7 +39,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { createLibtvCli, LibtvAuthError } from './libtv-cli.mjs';
+import { createLibtvCli, LibtvAuthError, LibtvOutOfCreditsError } from './libtv-cli.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -557,6 +557,13 @@ async function processRun(payload) {
         });
       } catch (err) {
         if (err instanceof LibtvAuthError) throw err;
+        // Out of credits is terminal for the whole run — every remaining node
+        // would fail the same way, so stop instead of marking 10 nodes failed
+        // and burying the one reason that matters.
+        if (err instanceof LibtvOutOfCreditsError) {
+          await api.jobFailed(job.id, err.message).catch(() => {});
+          throw err;
+        }
         logError(`node ${job.nodeName} failed:`, err.message || err);
         failedNodes.add(job.nodeName);
         await api.jobFailed(job.id, err.message || err);
@@ -602,7 +609,11 @@ async function processRun(payload) {
     return { ok: true };
   } catch (err) {
     const needsLogin = err instanceof LibtvAuthError;
-    logError(`run ${runId} failed${needsLogin ? ' (needs libtv login web)' : ''}:`, err.message || err);
+    const outOfCredits = err instanceof LibtvOutOfCreditsError;
+    logError(
+      `run ${runId} failed${needsLogin ? ' (needs libtv login web)' : ''}${outOfCredits ? ' (LibTV out of credits)' : ''}:`,
+      err.message || err
+    );
     await api.runFailed(runId, err.message || String(err), needsLogin).catch((e) => logError('report failed:', e));
     return { ok: false, needsLogin };
   } finally {

@@ -32,8 +32,26 @@ export class LibtvCommandError extends Error {
   }
 }
 
+/**
+ * LibTV is out of credits (创建生成任务失败 [1200000136]: 算力不足). Nothing the
+ * worker retries can fix it, and it otherwise surfaces to the dashboard as an
+ * anonymous "4 node(s) failed" — so it gets its own error with a message that
+ * names the actual problem.
+ */
+export class LibtvOutOfCreditsError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'LibtvOutOfCreditsError';
+    this.outOfCredits = true;
+  }
+}
+
 function looksLikeAuthFailure(text) {
   return /用户未授权/.test(text) || /\[10001\]/.test(text);
+}
+
+function looksLikeOutOfCredits(text) {
+  return /算力不足/.test(text) || /1200000136/.test(text);
 }
 
 // The CLI pretty-prints its JSON across many lines and may interleave progress
@@ -167,6 +185,16 @@ export function createLibtvCli({ cwd, bin = process.env.LIBTV_BIN || DEFAULT_LIB
         const combined = `${stdout}\n${stderr}`;
         if (looksLikeAuthFailure(combined)) {
           reject(new LibtvAuthError(`libtv token expired (10001 用户未授权) while running: ${printable}`));
+          return;
+        }
+        if (looksLikeOutOfCredits(combined)) {
+          reject(
+            new LibtvOutOfCreditsError(
+              `LibTV rejected the job for insufficient credits (算力不足 / 1200000136). ` +
+                `Top up the LibTV balance at liblib.tv, then re-approve this run — ` +
+                `keyframes already generated are kept and will not be paid for twice.`
+            )
+          );
           return;
         }
         const json = parseJsonLines(stdout);
