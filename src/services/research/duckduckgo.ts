@@ -78,7 +78,13 @@ export async function searchDuckDuckGo(
 
   if (opts.viaWorkerOnBlock) {
     const { fetchViaWorker } = await import("./browser-fetch");
-    const page = await fetchViaWorker(url, { projectId: opts.projectId, waitMs: 2500 });
+    const page = await fetchViaWorker(url, {
+      projectId: opts.projectId,
+      waitMs: 2500,
+      // DuckDuckGo answers a burst with a short interstitial that fetches
+      // perfectly well and contains no results — never cache or accept it.
+      accept: (r) => parseResultsHtml(r.html, 1).length > 0,
+    });
     if (page?.html) {
       const viaBrowser = parseResultsHtml(page.html, maxResults);
       if (viaBrowser.length > 0) return viaBrowser;

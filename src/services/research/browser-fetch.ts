@@ -39,15 +39,26 @@ function asResult(value: unknown): BrowserFetchResult | null {
 
 export async function fetchViaWorker(
   url: string,
-  opts: { projectId?: string | null; waitMs?: number; timeoutMs?: number } = {}
+  opts: {
+    projectId?: string | null;
+    waitMs?: number;
+    timeoutMs?: number;
+    /**
+     * Decides whether a page is worth keeping. A fetch can "succeed" and still
+     * return an anti-bot interstitial; without this the useless page is cached
+     * and replayed for the whole reuse window.
+     */
+    accept?: (result: BrowserFetchResult) => boolean;
+  } = {}
 ): Promise<BrowserFetchResult | null> {
   const payload = { url, waitMs: opts.waitMs };
   const hash = payloadHash(payload);
+  const accept = opts.accept ?? (() => true);
 
   const reusable = await findRecentCompletedTask("browser_fetch", hash, REUSE_WINDOW_MS);
   if (reusable) {
     const hit = asResult(reusable.result);
-    if (hit) return hit;
+    if (hit && accept(hit)) return hit;
   }
 
   const { taskId } = await enqueueWorkerTask({
