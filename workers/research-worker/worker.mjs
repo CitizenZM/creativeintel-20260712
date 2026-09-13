@@ -209,7 +209,10 @@ async function mainLoop() {
 
     // One task at a time: the browser is a single shared resource.
     await processTask(task);
-    await sleep(COOLDOWN_MS);
+    // The cooldown exists so a queue burst against an ad library does not read
+    // as a crawl. A browser_fetch is a single ordinary page load and a research
+    // run is blocked waiting on it, so it does not serve its purpose there.
+    if (task.kind !== 'browser_fetch') await sleep(COOLDOWN_MS);
   }
 
   log('main loop exited, shutdown complete.');

@@ -15,34 +15,34 @@ const MAX_CHARS = 600_000;
 
 const SCRAPE = `
 const task = await openSpace("creativeintel research worker");
-// task.page(label) only resolves a label that already exists in the space, so
-// the first fetch in a fresh space has to create the page.
-let page;
-try {
-  page = task.page("fetch");
-  await page.evaluate(() => 1);
-} catch {
-  page = await task.newPage();
-}
+// newPage() assigns its own label, so there is no stable one to re-resolve —
+// the page is closed again at the end of every fetch. Leaving it open hit
+// "PageBudgetError: Page budget reached (8/8)" after eight fetches and then
+// failed every subsequent task in the space.
+const page = await task.newPage();
 let status = 0;
 try {
-  const res = await page.goto(URL);
-  if (res && typeof res.status === "number") status = res.status;
-} catch (err) {
-  emit({ spaceId: task.spaceId, error: "goto failed: " + (err && err.message ? err.message : String(err)) });
-  throw err;
+  try {
+    const res = await page.goto(URL);
+    if (res && typeof res.status === "number") status = res.status;
+  } catch (err) {
+    emit({ spaceId: task.spaceId, error: "goto failed: " + (err && err.message ? err.message : String(err)) });
+    throw err;
+  }
+
+  await page.waitForTimeout(WAIT_MS);
+
+  const out = await page.evaluate((max) => ({
+    finalUrl: location.href,
+    title: document.title || "",
+    html: (document.documentElement ? document.documentElement.outerHTML : "").slice(0, max),
+    text: ((document.body && document.body.innerText) || "").slice(0, max),
+  }), MAX_CHARS);
+
+  emit({ spaceId: task.spaceId, status, ...out });
+} finally {
+  try { await page.close(); } catch {}
 }
-
-await page.waitForTimeout(WAIT_MS);
-
-const out = await page.evaluate((max) => ({
-  finalUrl: location.href,
-  title: document.title || "",
-  html: (document.documentElement ? document.documentElement.outerHTML : "").slice(0, max),
-  text: ((document.body && document.body.innerText) || "").slice(0, max),
-}), MAX_CHARS);
-
-emit({ spaceId: task.spaceId, status, ...out });
 `;
 
 export async function runBrowserFetch({ url, waitMs }) {
