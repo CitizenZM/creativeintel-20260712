@@ -350,13 +350,24 @@ export default function ResearchPage() {
       </div>
 
       {status === "complete" && (
-        <Button
-          onClick={() => router.push(`/projects/${projectId}/overview`)}
-          className="w-full mt-4 h-10 rounded-md bg-foreground text-background hover:bg-foreground/90"
-        >
-          View dashboard
-          <ArrowRight className="ml-2 h-4 w-4" />
-        </Button>
+        <div className="mt-4 flex gap-2">
+          <Button
+            onClick={() => router.push(`/projects/${projectId}/overview`)}
+            className="flex-1 h-10 rounded-md bg-foreground text-background hover:bg-foreground/90"
+          >
+            View dashboard
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
+          <Button
+            onClick={startResearch}
+            variant="outline"
+            className="h-10 rounded-md"
+            title="Discard this report and collect fresh data from every source"
+          >
+            <Play className="mr-2 h-4 w-4" />
+            Re-run research
+          </Button>
+        </div>
       )}
 
       {status === "error" && (
