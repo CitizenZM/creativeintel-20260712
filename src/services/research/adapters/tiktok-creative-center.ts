@@ -14,6 +14,7 @@ import {
   type TikTokAd,
 } from "../tiktok-creative-center";
 import { deriveFormat, type AdCandidate } from "../ad-candidate";
+import { blockedResult } from "./types";
 import type { Adapter, AdapterContext, AdapterResult } from "./types";
 
 const NAME = "tiktok_cc";
@@ -91,18 +92,16 @@ export const tiktokCreativeCenterAdapter: Adapter = async (
       },
     };
   } catch (err) {
+    if (err instanceof TikTokCreativeCenterError) {
+      return blockedResult(NAME, "TikTok Creative Center requires a logged-in TikTok Ads account: the API answers HTTP 200 with 'no permission' to any unauthenticated call, and the Top Ads gallery renders nothing for a signed-out browser either. Verified 2026-09-13.");
+    }
     return {
       candidates: [],
       report: {
         name: NAME,
         status: "failed",
         count: 0,
-        note:
-          err instanceof TikTokCreativeCenterError
-            ? err.message
-            : err instanceof Error
-              ? err.message
-              : "Creative Center request failed",
+        note: err instanceof Error ? err.message : "Creative Center request failed",
       },
     };
   }
@@ -147,6 +146,9 @@ export async function fetchTikTokForYouFeed(params: {
       },
     };
   } catch (err) {
+    if (err instanceof TikTokCreativeCenterError) {
+      return blockedResult(name, "TikTok Creative Center requires a logged-in TikTok Ads account: the API answers HTTP 200 with 'no permission' to any unauthenticated call, and the Top Ads gallery renders nothing for a signed-out browser either. Verified 2026-09-13.");
+    }
     return {
       candidates: [],
       report: {
