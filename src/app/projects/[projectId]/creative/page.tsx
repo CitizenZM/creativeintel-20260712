@@ -67,6 +67,13 @@ interface TestVariant {
 
 const STUDIO_CTA = "Send to Studio";
 
+// Requests to the custom domain pass through Cloudflare, which drops the
+// connection at ~100s regardless of Vercel's own maxDuration. Both batch
+// generators fan out N AI calls, so they are sent in chunks that comfortably
+// finish inside that window.
+const SCRIPT_CHUNK = 4;
+const BOARD_CHUNK = 3;
+
 export default function CreativePage() {
   const params = useParams();
   const router = useRouter();
@@ -195,21 +202,33 @@ export default function CreativePage() {
         .slice()
         .sort((a, b) => b.predictedScore - a.predictedScore);
 
-      const res = await fetch(`/api/projects/${projectId}/creative/scripts-batch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          templateIds: selectedTemplateIds.length > 0 ? selectedTemplateIds : undefined,
-          count: scriptCount,
-          angles: sourceAngles.length ? sourceAngles : undefined,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Script generation failed (${res.status})`);
+      // Chunked for the same reason as generateStoryboards — 10 scripts in one
+      // call runs ~100s, which is exactly Cloudflare's origin timeout.
+      const explicit = selectedTemplateIds.length > 0 ? selectedTemplateIds : null;
+      const total = explicit ? explicit.length : scriptCount;
+      const newScripts: ScriptData[] = [];
 
-      noteFailures("Script", data.failures);
-      const newScripts: ScriptData[] = data.scripts || [];
-      setScripts((prev) => [...newScripts, ...prev]);
+      for (let i = 0; i < total; i += SCRIPT_CHUNK) {
+        const chunkTemplates = explicit ? explicit.slice(i, i + SCRIPT_CHUNK) : undefined;
+        const chunkCount = explicit ? chunkTemplates!.length : Math.min(SCRIPT_CHUNK, total - i);
+
+        const res = await fetch(`/api/projects/${projectId}/creative/scripts-batch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            templateIds: chunkTemplates,
+            count: chunkCount,
+            angles: sourceAngles.length ? sourceAngles : undefined,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Script generation failed (${res.status})`);
+
+        noteFailures("Script", data.failures);
+        const chunkScripts: ScriptData[] = data.scripts || [];
+        newScripts.push(...chunkScripts);
+        setScripts((prev) => [...chunkScripts, ...prev]);
+      }
       setSelectedScriptIds((prev) => {
         const next = new Set(prev);
         newScripts.forEach((s) => next.add(s.id));
@@ -229,22 +248,31 @@ export default function CreativePage() {
     if (scriptIds.length === 0) return [];
     setLoadingStoryboards(true);
     setError(null);
+    const all: Storyboard[] = [];
     try {
-      const res = await fetch(`/api/projects/${projectId}/creative/storyboards-batch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scriptIds }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Storyboard generation failed (${res.status})`);
+      // One request per chunk. Boarding 15 scripts in a single call took >100s
+      // and was killed by Cloudflare (524) before Vercel's own limit — and the
+      // custom domain sits behind Cloudflare, so the request budget is theirs,
+      // not ours. Chunks also mean a mid-run failure keeps what already landed.
+      for (let i = 0; i < scriptIds.length; i += BOARD_CHUNK) {
+        const slice = scriptIds.slice(i, i + BOARD_CHUNK);
+        const res = await fetch(`/api/projects/${projectId}/creative/storyboards-batch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scriptIds: slice }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Storyboard generation failed (${res.status})`);
 
-      noteFailures("Storyboard", data.failures);
-      const newBoards: Storyboard[] = data.storyboards || [];
-      setStoryboards((prev) => [...newBoards, ...prev]);
-      return newBoards;
+        noteFailures("Storyboard", data.failures);
+        const newBoards: Storyboard[] = data.storyboards || [];
+        all.push(...newBoards);
+        setStoryboards((prev) => [...newBoards, ...prev]);
+      }
+      return all;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Storyboard generation failed");
-      return [];
+      return all;
     } finally {
       setLoadingStoryboards(false);
     }
