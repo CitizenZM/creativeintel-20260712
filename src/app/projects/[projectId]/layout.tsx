@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { TabNav } from "@/components/layout/tab-nav";
 import { getProjectStages } from "@/services/project-stages";
+import { ProjectUrlSync } from "@/components/projects/project-url-sync";
 
 export default async function ProjectLayout({
   children,
@@ -19,6 +20,7 @@ export default async function ProjectLayout({
 
   return (
     <div>
+      <ProjectUrlSync projectId={projectId} brandName={project.brandName} />
       <Header
         title={project.brandName}
         status={project.status}

@@ -66,7 +66,7 @@ if (apiAds.length > 0) {
   }
 
   const scraped = await page.evaluate((limit) => {
-    const total = (document.body.innerText.match(/Total ads:?\\s*([\\d,]+)/i) || [])[1] || "";
+    const total = ((document.body && document.body.innerText) || "").match(/Total ads:?\\s*([\\d,]+)/i)?.[1] || "";
     const anchors = [...document.querySelectorAll('a[href*="/ads/detail"]')];
     const out = [];
     for (const a of anchors) {

@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CATEGORIES, CAMPAIGN_GOALS } from "@/lib/constants";
+import { projectPath } from "@/lib/project-slug";
 import { Plus, Trash2, Loader2, ArrowRight, Link, Package, AlertCircle } from "lucide-react";
 
 interface CompetitorField {
@@ -66,6 +67,12 @@ export function ProjectForm() {
     const validCompetitors = competitors.filter((c) => c.name.trim());
     if (validCompetitors.length === 0) {
       setError("Add at least one competitor.");
+      setLoading(false);
+      return;
+    }
+
+    if (/^https?:\/\/|^www\./i.test(brandName.trim())) {
+      setError('Brand name looks like a URL — enter the actual brand name (e.g. "Segway"), and put the URL in Brand Website URL instead.');
       setLoading(false);
       return;
     }
@@ -125,7 +132,7 @@ export function ProjectForm() {
         return;
       }
 
-      router.push(`/projects/${project.id}/research`);
+      router.push(projectPath(project.id, brandName.trim(), "/research"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {

@@ -91,8 +91,22 @@ export async function searchTikTokTopAds(
         }
 
         const json = (await res.json().catch(() => null)) as {
+          code?: number;
+          msg?: string;
           data?: { materials?: TikTokRawAd[] };
         } | null;
+
+        // This endpoint answers HTTP 200 even when it refuses the request —
+        // an unauthenticated server-to-server fetch reliably gets back
+        // `{"code":40101,"msg":"no permission"}` (confirmed against
+        // production, 2026-09-13). Treat any non-zero `code` as a failure,
+        // not "ran, found nothing" — the two are not the same thing.
+        if (json && typeof json.code === "number" && json.code !== 0) {
+          throw new TikTokCreativeCenterError(
+            `Creative Center refused the request: ${json.msg || `code ${json.code}`} — this endpoint requires a logged-in session and cannot be called directly from a server; route it through the local browser worker instead.`
+          );
+        }
+
         const materials = json?.data?.materials ?? [];
         return materials.map(mapRawAd);
       } catch (err) {

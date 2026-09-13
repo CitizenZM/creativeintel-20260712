@@ -49,8 +49,12 @@ const ID_TEXT_RE = /(?:Library ID|\\u8d44\\u6599\\u5e93\\u7f16\\u53f7)[:\\uff1a]
 async function waitForIdText(budgetMs) {
   const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
+    // document.body can be transiently null right after goto(), between
+    // navigations (Meta sometimes bounces through a cookie-consent redirect
+    // before settling on the ads library page) — reproduced live 2026-09-13,
+    // crashed the whole evaluate and burned a worker attempt.
     const found = await page.evaluate(
-      (re) => new RegExp(re[0], re[1]).test(document.body.innerText || ""),
+      (re) => new RegExp(re[0], re[1]).test((document.body && document.body.innerText) || ""),
       [ID_TEXT_RE.source, ID_TEXT_RE.flags]
     );
     if (found) return true;

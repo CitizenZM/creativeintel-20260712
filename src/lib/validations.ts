@@ -41,7 +41,13 @@ export const productUrlSchema = z
 export const optionalProductUrlSchema = productUrlSchema.optional().or(z.literal(""));
 
 export const createProjectSchema = z.object({
-  brandName: z.string().min(1, "Brand name is required"),
+  brandName: z
+    .string()
+    .min(1, "Brand name is required")
+    .refine(
+      (v) => !/^https?:\/\/|^www\./i.test(v.trim()),
+      "Brand name looks like a URL — enter the actual brand name (e.g. \"Segway\"), and put the URL in Brand Website URL instead"
+    ),
   brandUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")),
   productUrl: optionalProductUrlSchema,
   productName: z.string().optional(),
