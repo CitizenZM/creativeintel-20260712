@@ -10,6 +10,7 @@ import {
   scrapeProductPageDetailed,
   type AdapterAttempt,
 } from "@/services/research/product-page-scraper";
+import { refreshCompleteness } from "@/services/brand-kit";
 
 export const maxDuration = 30;
 
@@ -144,6 +145,11 @@ export async function POST(request: Request) {
         competitors: true,
       },
     });
+
+    // completenessScore is a cache the studio/overview UI reads directly —
+    // seeding brandKit above without this leaves a new project showing a
+    // stale "0%" even when landingUrl/productSummary just got populated.
+    await refreshCompleteness(project.id).catch(() => null);
 
     return NextResponse.json({ ...project, scrapeResult }, { status: 201 });
   } catch (err) {
