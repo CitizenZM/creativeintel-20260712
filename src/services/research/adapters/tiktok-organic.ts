@@ -3,12 +3,12 @@
  * path, now returning AdCandidates with `adEvidence: "none"` so the LLM ad
  * classifier (not the adapter) decides whether each one is a brand-paid ad.
  */
-import { searchDuckDuckGo } from "../duckduckgo";
+import { searchDuckDuckGo, DuckDuckGoBlockedError } from "../duckduckgo";
 import { scrapeTikTokVideo } from "../tiktok-scraper";
 import { deriveFormat, type AdCandidate } from "../ad-candidate";
 import { pMap } from "@/lib/parallel";
 import type { Adapter, AdapterContext, AdapterResult } from "./types";
-import { failedResult } from "./types";
+import { blockedResult, failedResult } from "./types";
 
 const NAME = "tiktok_organic";
 
@@ -85,6 +85,9 @@ export const tiktokOrganicAdapter: Adapter = async (
       },
     };
   } catch (err) {
+    if (err instanceof DuckDuckGoBlockedError) {
+      return blockedResult(NAME, 'DuckDuckGo now answers this query with a CAPTCHA from both this server and the local browser, and TikTok/Instagram search require a login — organic discovery for this platform is not available without credentials. Paid ads for the same advertisers still come from the ad-library sources below.'.replace(/^'|'$/g, ""));
+    }
     return failedResult(NAME, err);
   }
 };

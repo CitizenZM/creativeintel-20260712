@@ -27,7 +27,7 @@ interface JobStep {
 
 interface SourceStatus {
   name: string;
-  status: "ran" | "skipped_no_key" | "failed" | "pending_worker";
+  status: "ran" | "skipped_no_key" | "failed" | "pending_worker" | "blocked";
   count: number;
   note?: string;
 }
@@ -51,6 +51,7 @@ const SOURCE_STATUS_STYLE: Record<SourceStatus["status"], string> = {
   skipped_no_key: "bg-muted text-muted-foreground",
   failed: "bg-[var(--status-urgent-bg)] text-[var(--status-urgent-fg)]",
   pending_worker: "bg-[var(--status-ai-bg)] text-[var(--status-ai-fg)]",
+  blocked: "bg-muted text-muted-foreground",
 };
 
 const SOURCE_STATUS_LABEL: Record<SourceStatus["status"], string> = {
@@ -58,6 +59,7 @@ const SOURCE_STATUS_LABEL: Record<SourceStatus["status"], string> = {
   skipped_no_key: "skipped — no key",
   failed: "failed",
   pending_worker: "pending local worker",
+  blocked: "blocked — login/CAPTCHA",
 };
 
 export default function ResearchPage() {

@@ -6,7 +6,9 @@ export type SourceStatus =
   | "ran"
   | "skipped_no_key"
   | "failed"
-  | "pending_worker";
+  | "pending_worker"
+  /** Reachable only by defeating a login or CAPTCHA — not a bug, and not fixable here. */
+  | "blocked";
 
 export interface SourceReport {
   name: string;
@@ -40,6 +42,10 @@ export type Adapter = (ctx: AdapterContext) => Promise<AdapterResult>;
 
 export function emptyResult(name: string, note?: string): AdapterResult {
   return { candidates: [], report: { name, status: "ran", count: 0, note } };
+}
+
+export function blockedResult(name: string, note: string): AdapterResult {
+  return { candidates: [], report: { name, status: "blocked", count: 0, note } };
 }
 
 export function failedResult(name: string, err: unknown): AdapterResult {

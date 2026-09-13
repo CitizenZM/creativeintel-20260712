@@ -4,11 +4,11 @@
  * than being faked as zeros that the ranking would then read as real.
  * Paid attribution for Instagram comes from the Meta Ad Library adapter.
  */
-import { searchDuckDuckGo } from "../duckduckgo";
+import { searchDuckDuckGo, DuckDuckGoBlockedError } from "../duckduckgo";
 import { createHash } from "node:crypto";
 import { deriveFormat, type AdCandidate } from "../ad-candidate";
 import type { Adapter, AdapterContext, AdapterResult } from "./types";
-import { failedResult } from "./types";
+import { blockedResult, failedResult } from "./types";
 
 const NAME = "ig_reels";
 
@@ -70,6 +70,9 @@ export const instagramAdapter: Adapter = async (
       },
     };
   } catch (err) {
+    if (err instanceof DuckDuckGoBlockedError) {
+      return blockedResult(NAME, 'DuckDuckGo now answers this query with a CAPTCHA from both this server and the local browser, and TikTok/Instagram search require a login — organic discovery for this platform is not available without credentials. Paid ads for the same advertisers still come from the ad-library sources below.'.replace(/^'|'$/g, ""));
+    }
     return failedResult(NAME, err);
   }
 };

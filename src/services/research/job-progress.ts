@@ -6,7 +6,7 @@ export type JobStepStatus = "pending" | "running" | "complete" | "error";
  * missing key, failed, or are waiting on the local browser worker. */
 export interface JobSourceStatus {
   name: string;
-  status: "ran" | "skipped_no_key" | "failed" | "pending_worker";
+  status: "ran" | "skipped_no_key" | "failed" | "pending_worker" | "blocked";
   count: number;
   note?: string;
 }
