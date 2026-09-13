@@ -290,7 +290,33 @@ export function nestSteps(steps: JobStep[]): JobStep[] {
   return top;
 }
 
+/**
+ * A run executes inside one serverless invocation, which Vercel caps at
+ * maxDuration (300s). Anything still "running" well past that had its function
+ * killed and will never progress — but it kept satisfying
+ * getActiveJobForProject, so every subsequent "Re-run research" silently
+ * attached to the corpse and sat at 0% forever. Bury them first.
+ */
+const JOB_STALE_AFTER_MS = 6 * 60 * 1000;
+
+export async function failStaleJobs(projectId: string) {
+  const { count } = await prisma.researchJob.updateMany({
+    where: {
+      projectId,
+      status: { in: ["pending", "running"] },
+      createdAt: { lt: new Date(Date.now() - JOB_STALE_AFTER_MS) },
+    },
+    data: {
+      status: "error",
+      error: "Run stopped before it finished (server time limit). Start a new run.",
+      completedAt: new Date(),
+    },
+  });
+  return count;
+}
+
 export async function getActiveJobForProject(projectId: string) {
+  await failStaleJobs(projectId).catch(() => 0);
   return prisma.researchJob.findFirst({
     where: { projectId, status: { in: ["pending", "running"] } },
     orderBy: { createdAt: "desc" },
