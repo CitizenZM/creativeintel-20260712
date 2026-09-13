@@ -16,10 +16,9 @@ export const tiktokOrganicAdapter: Adapter = async (
   ctx: AdapterContext
 ): Promise<AdapterResult> => {
   const disambig = ctx.keywords.brandContext?.disambiguationKeywords?.[0] || "";
-  const queries = [
-    `"${ctx.ownerName}" ${disambig} tiktok ad`.trim(),
-    `site:tiktok.com "${ctx.ownerName}" ${disambig}`.trim(),
-  ];
+  // One query per owner, not two: each one is a separate paced browser fetch
+  // when this server's IP is challenged, and site: is the precise form.
+  const queries = [`site:tiktok.com "${ctx.ownerName}" ${disambig}`.trim()];
 
   try {
     const perQuery = await pMap(

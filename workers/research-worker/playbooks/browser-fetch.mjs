@@ -13,6 +13,28 @@ import { runEgoScript } from './_ego.mjs';
 
 const MAX_CHARS = 600_000;
 
+/**
+ * Minimum spacing between fetches of the same host. A research run queues one
+ * search per owner per adapter, and six DuckDuckGo fetches inside 18s came
+ * back as a 205-character challenge page instead of results — the block this
+ * whole path exists to get around, re-earned by hammering.
+ */
+const HOST_INTERVAL_MS = Number(process.env.BROWSER_FETCH_HOST_INTERVAL_MS || 7000);
+const lastFetchByHost = new Map();
+
+async function paceHost(url) {
+  let host;
+  try {
+    host = new URL(url).host;
+  } catch {
+    return;
+  }
+  const last = lastFetchByHost.get(host) ?? 0;
+  const waitFor = last + HOST_INTERVAL_MS - Date.now();
+  if (waitFor > 0) await new Promise((r) => setTimeout(r, waitFor));
+  lastFetchByHost.set(host, Date.now());
+}
+
 const SCRAPE = `
 const task = await openSpace("creativeintel research worker");
 // newPage() assigns its own label, so there is no stable one to re-resolve —
@@ -59,6 +81,8 @@ export async function runBrowserFetch({ url, waitMs }) {
   if (!url || !/^https?:\/\//i.test(String(url))) {
     return { result: null, note: `refusing to fetch a non-http(s) url: ${url}` };
   }
+
+  await paceHost(url);
 
   const body = `const URL = ${JSON.stringify(url)};
 const WAIT_MS = ${Number.isFinite(waitMs) ? Math.min(Math.max(waitMs, 0), 15000) : 2500};

@@ -19,7 +19,8 @@ import {
   type BrowserFetchResult,
 } from "@/services/worker-tasks";
 
-const DEFAULT_TIMEOUT_MS = 75_000;
+// Fetches of one host are paced by the worker, so a run's queries queue up.
+const DEFAULT_TIMEOUT_MS = 150_000;
 const POLL_INTERVAL_MS = 2_000;
 /** A page fetched this recently is reused rather than re-queued. */
 const REUSE_WINDOW_MS = 30 * 60 * 1000;

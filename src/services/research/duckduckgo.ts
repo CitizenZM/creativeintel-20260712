@@ -78,7 +78,7 @@ export async function searchDuckDuckGo(
 
   if (opts.viaWorkerOnBlock) {
     const { fetchViaWorker } = await import("./browser-fetch");
-    const page = await fetchViaWorker(url, { projectId: opts.projectId, waitMs: 1500 });
+    const page = await fetchViaWorker(url, { projectId: opts.projectId, waitMs: 2500 });
     if (page?.html) {
       const viaBrowser = parseResultsHtml(page.html, maxResults);
       if (viaBrowser.length > 0) return viaBrowser;
