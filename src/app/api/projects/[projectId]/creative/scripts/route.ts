@@ -18,7 +18,7 @@ import {
   type ScriptAngle,
 } from "../_script-context";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function GET(
   _request: Request,

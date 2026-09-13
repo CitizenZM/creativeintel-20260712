@@ -4,7 +4,7 @@ import { buildStoryboardCreateData } from "@/services/ai/storyboard-generator";
 import { getBrandTruthForPrompts } from "@/services/brand-kit";
 import { withIdempotency } from "@/lib/idempotency";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function GET(
   _request: Request,

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { buildAngleGenerationPrompt } from "@/services/ai/prompts/angle-generation";
 import {
+
+export const maxDuration = 120;
   getScriptTemplate,
   isVideoType,
   defaultTemplateBatch,
