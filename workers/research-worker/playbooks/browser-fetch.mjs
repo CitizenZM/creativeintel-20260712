@@ -19,6 +19,16 @@ const task = await openSpace("creativeintel research worker");
 // the page is closed again at the end of every fetch. Leaving it open hit
 // "PageBudgetError: Page budget reached (8/8)" after eight fetches and then
 // failed every subsequent task in the space.
+// Defence in depth: the finally-block below closes the page on every normal
+// path, but a killed process can still strand one. Reclaim before the space
+// hits its budget, since once it does, every task in it fails.
+try {
+  const open = await task.pages();
+  for (let i = open.length - 1; i >= 1 && (await task.pages()).length > 4; i--) {
+    try { await open[i].close(); } catch {}
+  }
+} catch {}
+
 const page = await task.newPage();
 let status = 0;
 try {
