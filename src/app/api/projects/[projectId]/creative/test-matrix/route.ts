@@ -12,7 +12,7 @@ import {
 import { withIdempotency } from "@/lib/idempotency";
 import { NarrativeType } from "@/generated/prisma/enums";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const matrixSchema = z.object({
   variants: z.array(

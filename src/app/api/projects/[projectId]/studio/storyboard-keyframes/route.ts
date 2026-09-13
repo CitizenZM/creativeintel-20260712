@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import OpenAI from "openai";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 async function generateImageFree(prompt: string): Promise<string> {
   const encoded = encodeURIComponent(prompt);

@@ -5,7 +5,7 @@ import { getBrandTruthForPrompts } from "@/services/brand-kit";
 import { withIdempotency } from "@/lib/idempotency";
 import { pMapSettled } from "@/lib/parallel";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const CONCURRENCY = 4;
 

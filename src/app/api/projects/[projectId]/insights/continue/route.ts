@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { runAnalysisPipeline, ANALYSIS_STAGES, type AnalysisStage } from "@/services/ai/analysis-pipeline";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function parseStage(value: unknown): AnalysisStage | undefined {
   return typeof value === "string" && (ANALYSIS_STAGES as string[]).includes(value)

@@ -27,7 +27,7 @@ import {
 } from "@/services/video-gen/prompt-compiler";
 import { getVideoModel } from "@/services/video-gen/models";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 interface ShotJobResult {
   shotIndex: number;

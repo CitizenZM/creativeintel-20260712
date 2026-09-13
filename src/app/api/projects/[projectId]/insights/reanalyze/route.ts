@@ -9,7 +9,7 @@ import {
   type StageResult,
 } from "@/services/ai/analysis-pipeline";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const BUDGET_MS = Number(process.env.ANALYSIS_BUDGET_MS) || 45_000;
 
