@@ -8,6 +8,12 @@ export interface ProjectStage {
   href: string;
   state: StageState;
   detail: string;
+  /**
+   * The concrete thing to do here, phrased as an instruction. The header shows
+   * this rather than the stage name — "Next: Setup" tells you where to go but
+   * not what to do once you arrive.
+   */
+  action: string;
 }
 
 export interface ProjectStages {
@@ -46,6 +52,10 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
       href: `${base}/overview`,
       state: brandKitScore >= 60 ? "done" : brandKitScore > 0 ? "partial" : "todo",
       detail: `Brand kit ${brandKitScore}%`,
+      action:
+        brandKitScore === 0
+          ? "Add your logo and product photos"
+          : `Finish the Brand Kit (${brandKitScore}%)`,
     },
     {
       id: "research",
@@ -53,6 +63,7 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
       href: `${base}/content`,
       state: assets > 0 ? (paidAssets > 0 ? "done" : "partial") : "todo",
       detail: assets ? `${assets} ads · ${paidAssets} paid` : "Not run",
+      action: assets === 0 ? "Run competitor research" : "Review the ads we found",
     },
     {
       id: "insights",
@@ -60,6 +71,7 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
       href: `${base}/insights`,
       state: teardowns > 0 ? "done" : insights > 0 ? "partial" : "todo",
       detail: teardowns ? `${teardowns} teardowns` : insights ? `${insights} insights` : "Not analyzed",
+      action: teardowns === 0 ? "Analyse what competitors run" : "Read the competitor teardowns",
     },
     {
       id: "creative",
@@ -67,6 +79,12 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
       href: `${base}/creative`,
       state: storyboards > 0 ? "done" : scripts > 0 ? "partial" : "todo",
       detail: `${scripts} scripts · ${storyboards} storyboards`,
+      action:
+        scripts === 0
+          ? "Write your first scripts"
+          : storyboards === 0
+            ? "Pick scripts and build storyboards"
+            : "Send a storyboard to Studio",
     },
     {
       id: "studio",
@@ -74,6 +92,7 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
       href: `${base}/studio`,
       state: completedRuns > 0 ? "done" : runs.length > 0 ? "partial" : "todo",
       detail: runs.length ? `${completedRuns}/${runs.length} runs done` : "No LibTV runs",
+      action: runs.length === 0 ? "Compile a production run" : "Approve the run to start rendering",
     },
     {
       id: "deliver",
@@ -81,6 +100,7 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
       href: `${base}/deliver`,
       state: delivered > 0 ? "done" : "todo",
       detail: delivered ? `${delivered} masters` : "Nothing rendered yet",
+      action: delivered === 0 ? "Render a master video" : "Download your finished ads",
     },
   ];
 

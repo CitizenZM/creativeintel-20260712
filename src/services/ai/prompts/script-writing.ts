@@ -47,6 +47,8 @@ export interface ScriptInput {
   environmentNotes?: string;
   audienceSummary?: string;
   briefing?: string;
+  /** Free-text idea/style the operator typed for this batch. */
+  customBrief?: string;
   /** Campaign platform id from CAMPAIGN_PLATFORMS (tiktok|instagram|youtube|tvc|amazon). */
   platformId?: string;
   /** "What's working in this niche" summary derived from DeepAnalysis.platformInsights. */
@@ -331,6 +333,7 @@ ${timelineBlock}
 ${nicheResearchBlock}
 
 ${input.briefing ? `PROJECT BRIEF:\n${input.briefing.slice(0, 1000)}` : ""}
+${input.customBrief ? `\nWHAT THE OPERATOR ASKED FOR (highest priority after brand truth and compliance — follow it even where it overrides the template's usual treatment):\n${input.customBrief.slice(0, 800)}` : ""}
 
 DELIVERABLE CHECKLIST:
 - hook{} honours the template hook style, names a platform hook formula, and fits its share of ${durationSec}s

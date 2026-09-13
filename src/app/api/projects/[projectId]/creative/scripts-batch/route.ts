@@ -43,6 +43,7 @@ export async function POST(
     angles?: ScriptAngle[];
     videoType?: string;
     totalDurationSec?: number;
+    customBrief?: string;
   };
 
   try {
@@ -78,7 +79,13 @@ export async function POST(
         const angle = angles.length ? angles[i % angles.length] : undefined;
 
         const prompt = buildScriptWritingPrompt(
-          buildScriptInput(ctx, { template, videoType, angle, totalDurationSec })
+          buildScriptInput(ctx, {
+            template,
+            videoType,
+            angle,
+            totalDurationSec,
+            customBrief: body.customBrief?.trim() || undefined,
+          })
         );
 
         let generated: ScriptV2 = await analyzeWithClaude({

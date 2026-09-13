@@ -71,6 +71,12 @@ export interface StoryboardBuildExtras {
   brandTruth?: string;
   approvedCtaText?: string;
   approvedOffer?: string;
+  /**
+   * Operator-chosen look (lighting + style + their own notes), already
+   * rendered to one clause. It drives the prompt's style bible, which every
+   * frame restates and the studio later reads back out of the board.
+   */
+  visualDirection?: string;
 }
 
 /**
@@ -123,6 +129,7 @@ export async function buildStoryboardCreateData(
     beats,
     scenes,
     brandTruth: extras.brandTruth,
+    style: extras.visualDirection || undefined,
   });
 
   // Each rich frame (imagePrompt + videoPrompt + 9 short fields) costs ~780

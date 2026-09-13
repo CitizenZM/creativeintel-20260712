@@ -218,6 +218,7 @@ export function buildScriptInput(
     videoType: VideoType;
     angle?: ScriptAngle;
     totalDurationSec?: number;
+    customBrief?: string;
   }
 ): ScriptInput {
   return {
@@ -240,6 +241,7 @@ export function buildScriptInput(
     hookFormulas: ctx.hookFormulas,
     cameraAngles: ctx.cameraAngles,
     briefing: ctx.project.briefingText || undefined,
+    customBrief: opts.customBrief,
     audienceSummary: ctx.audienceSummary,
     nicheResearch: ctx.nicheResearch,
     brandTruth: ctx.brandTruth,

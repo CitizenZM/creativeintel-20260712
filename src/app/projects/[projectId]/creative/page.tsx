@@ -24,6 +24,9 @@ import { StoryboardFrameCard, type StoryboardFrameData } from "@/components/crea
 import { TemplatePicker, videoTypeBadgeClass, videoTypeLabel } from "@/components/creative/template-picker";
 import { ScriptCard, type ScriptData } from "@/components/creative/script-card";
 import { StoryboardTimeline } from "@/components/creative/storyboard-timeline";
+import { LookControls } from "@/components/creative/look-controls";
+import { NextStepHint } from "@/components/layout/next-step-hint";
+import { Textarea } from "@/components/ui/textarea";
 import { defaultTemplateBatch, getScriptTemplate } from "@/services/ai/prompts/script-templates";
 
 interface Angle {
@@ -101,6 +104,10 @@ export default function CreativePage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [kitUpdatedAt, setKitUpdatedAt] = useState<string | null>(null);
+  const [customBrief, setCustomBrief] = useState("");
+  const [lighting, setLighting] = useState("");
+  const [visualStyle, setVisualStyle] = useState("");
+  const [styleNotes, setStyleNotes] = useState("");
 
   useEffect(() => {
     if (loaded) return;
@@ -124,7 +131,6 @@ export default function CreativePage() {
 
         if (Array.isArray(savedScripts) && savedScripts.length > 0) {
           setScripts(savedScripts);
-          setSelectedScriptIds(new Set(savedScripts.map((s: ScriptData) => s.id)));
           setExpandedScript(savedScripts[0].id);
         }
         if (Array.isArray(savedStoryboards) && savedStoryboards.length > 0) {
@@ -149,6 +155,21 @@ export default function CreativePage() {
     !!kitUpdatedAt &&
     scripts.length > 0 &&
     scripts.every((s) => !!s.createdAt && new Date(s.createdAt) < new Date(kitUpdatedAt));
+
+  // Exactly one control on the page carries `cta-attention`, chosen from where
+  // the project actually is. More than one glowing control tells you nothing.
+  const busy = loadingAngles || loadingScripts || loadingStoryboards || loadingMatrix || loadingAll;
+  const activeStep: "angles" | "scripts" | "select" | "board" | "studio" | null = busy
+    ? null
+    : scripts.length === 0 && angles.length === 0
+      ? "angles"
+      : scripts.length === 0
+        ? "scripts"
+        : storyboards.length === 0 && selectedScriptIds.size === 0
+          ? "select"
+          : storyboards.length === 0
+            ? "board"
+            : "studio";
 
   const stages = [
     { num: 1, name: "Angles", icon: Wand2, done: angles.length > 0, active: loadingAngles },
@@ -219,6 +240,7 @@ export default function CreativePage() {
             templateIds: chunkTemplates,
             count: chunkCount,
             angles: sourceAngles.length ? sourceAngles : undefined,
+            customBrief: customBrief.trim() || undefined,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -229,11 +251,9 @@ export default function CreativePage() {
         newScripts.push(...chunkScripts);
         setScripts((prev) => [...chunkScripts, ...prev]);
       }
-      setSelectedScriptIds((prev) => {
-        const next = new Set(prev);
-        newScripts.forEach((s) => next.add(s.id));
-        return next;
-      });
+      // Deliberately not auto-selected: picking which scripts get boarded is
+      // the decision this step exists for, and selecting all of them by
+      // default quietly turns it into "board everything".
       if (newScripts.length > 0) setExpandedScript(newScripts[0].id);
       return newScripts;
     } catch (err) {
@@ -259,7 +279,14 @@ export default function CreativePage() {
         const res = await fetch(`/api/projects/${projectId}/creative/storyboards-batch`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ scriptIds: slice }),
+          body: JSON.stringify({
+            scriptIds: slice,
+            visualDirection: {
+              lighting: lighting || undefined,
+              style: visualStyle || undefined,
+              notes: styleNotes.trim() || undefined,
+            },
+          }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `Storyboard generation failed (${res.status})`);
@@ -512,7 +539,7 @@ export default function CreativePage() {
               disabled={loadingAngles}
               size="sm"
               variant="outline"
-              className="h-8 rounded-md text-xs"
+              className={cn("h-8 rounded-md text-xs", activeStep === "angles" && "cta-attention")}
             >
               {loadingAngles ? (
                 <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
@@ -575,6 +602,34 @@ export default function CreativePage() {
           <FileText className="h-4 w-4" /> 2. Scripts
         </h3>
 
+        {activeStep === "scripts" && (
+          <NextStepHint
+            step="Step 2"
+            title="Write the scripts"
+            detail="Pick templates below, or just press Write scripts and a balanced batch is chosen for you. Add your own idea first if you have one."
+          />
+        )}
+
+        <div className="space-y-1.5">
+          <label htmlFor="customBrief" className="text-xs font-medium">
+            Your own idea, angle or style{" "}
+            <span className="font-normal text-muted-foreground">(optional)</span>
+          </label>
+          <Textarea
+            id="customBrief"
+            value={customBrief}
+            onChange={(e) => setCustomBrief(e.target.value)}
+            disabled={loadingScripts || loadingAll}
+            rows={2}
+            placeholder="e.g. lead with the 99-day risk-free trial, talk to dads buying a first bike, keep it fast and funny"
+            className="rounded-md text-sm"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Applied on top of the templates below. It outranks their usual treatment — never the
+            brand kit or the compliance rules.
+          </p>
+        </div>
+
         {staleScripts && (
           <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -601,7 +656,7 @@ export default function CreativePage() {
             onClick={() => generateScripts()}
             disabled={loadingScripts}
             variant="outline"
-            className="h-9 rounded-md"
+            className={cn("h-9 rounded-md", activeStep === "scripts" && "cta-attention")}
           >
             {loadingScripts ? (
               <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -614,12 +669,21 @@ export default function CreativePage() {
 
         {scripts.length > 0 && (
           <>
+            {activeStep === "select" && (
+              <NextStepHint
+                step="Step 3"
+                title="Choose which scripts to storyboard"
+                detail="Tick the ones worth producing — boarding costs a generation each, so pick deliberately rather than boarding all of them."
+              />
+            )}
+
             <div className="flex items-start justify-between gap-3 flex-wrap pt-2">
               <p className="text-xs text-muted-foreground">
-                {scripts.length} script{scripts.length !== 1 ? "s" : ""} · select one or more to board
+                {selectedScriptIds.size === 0
+                  ? `${scripts.length} script${scripts.length !== 1 ? "s" : ""} — tick the ones you want to storyboard`
+                  : `${selectedScriptIds.size} of ${scripts.length} selected`}
               </p>
               <div className="flex gap-2 items-center">
-                <span className="text-xs text-muted-foreground">{selectedScriptIds.size} selected</span>
                 <button
                   onClick={() => setSelectedScriptIds(new Set(scripts.map((s) => s.id)))}
                   className="text-xs font-medium text-muted-foreground hover:text-foreground"
@@ -652,12 +716,31 @@ export default function CreativePage() {
             </div>
 
             {selectedScriptIds.size > 0 && !loadingAll && (
-              <div className="flex gap-2 flex-wrap">
+              <div className="space-y-3">
+                {activeStep === "board" && (
+                  <NextStepHint
+                    step="Step 4"
+                    title={`Build storyboards for the ${selectedScriptIds.size} script${selectedScriptIds.size !== 1 ? "s" : ""} you picked`}
+                    detail="Set the look first if you want a specific lighting or style — it is baked into every frame and carried into the render."
+                  />
+                )}
+
+                <LookControls
+                  lighting={lighting}
+                  style={visualStyle}
+                  notes={styleNotes}
+                  onLighting={setLighting}
+                  onStyle={setVisualStyle}
+                  onNotes={setStyleNotes}
+                  disabled={loadingStoryboards}
+                />
+
+                <div className="flex gap-2 flex-wrap">
                 <Button
                   onClick={() => generateStoryboards(Array.from(selectedScriptIds))}
                   disabled={loadingStoryboards}
                   variant="outline"
-                  className="h-9 rounded-md"
+                  className={cn("h-9 rounded-md", activeStep === "board" && "cta-attention")}
                 >
                   {loadingStoryboards ? (
                     <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -666,11 +749,16 @@ export default function CreativePage() {
                   )}
                   Generate storyboards ({selectedScriptIds.size})
                 </Button>
-                <Button onClick={goToStudio} variant="outline" className="h-9 rounded-md">
+                <Button
+                  onClick={goToStudio}
+                  variant="outline"
+                  className={cn("h-9 rounded-md", activeStep === "studio" && "cta-attention")}
+                >
                   <Palette className="mr-2 h-3.5 w-3.5" />
                   {STUDIO_CTA} ({selectedScriptIds.size})
                   <ArrowRight className="ml-2 h-3.5 w-3.5" />
                 </Button>
+                </div>
               </div>
             )}
           </>

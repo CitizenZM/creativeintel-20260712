@@ -172,4 +172,39 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
   }
+
+  /*
+   * Marks the single control that is the next thing to do on a page. Exactly
+   * one element should carry it at a time — a page where three things glow
+   * tells you nothing.
+   */
+  .cta-attention {
+    position: relative;
+    animation: cta-attention-pulse 2.2s ease-in-out infinite;
+  }
+  .cta-attention::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--status-ai-fg, #4f46e5) 45%, transparent);
+    opacity: 0;
+    animation: cta-attention-ring 2.2s ease-in-out infinite;
+  }
+
+  @keyframes cta-attention-pulse {
+    0%, 100% { transform: translateZ(0) scale(1); }
+    50% { transform: translateZ(0) scale(1.025); }
+  }
+  @keyframes cta-attention-ring {
+    0%, 100% { opacity: 0; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.01); }
+  }
+
+  /* Motion is decoration here; the ring alone still points at the control. */
+  @media (prefers-reduced-motion: reduce) {
+    .cta-attention { animation: none; }
+    .cta-attention::after { animation: none; opacity: 1; }
+  }
 }

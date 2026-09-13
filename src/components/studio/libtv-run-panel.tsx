@@ -403,7 +403,17 @@ export function LibtvRunPanel({
           disabled={!storyboard || busy === "compile" || (overBudget && !allowOverBudget)}
           size="sm"
           data-testid="compile-run"
-          className="h-9 rounded-md bg-foreground text-xs font-medium text-background hover:bg-foreground/90"
+          className={cn(
+            "h-9 rounded-md bg-foreground text-xs font-medium text-background hover:bg-foreground/90",
+            // Only when compiling is genuinely the next move: a board is
+            // picked, the kit allows it, and no run is already waiting.
+            !!storyboard &&
+              !activeRun &&
+              busy !== "compile" &&
+              !(overBudget && !allowOverBudget) &&
+              !(brandKit && !brandKit.ready.studio) &&
+              "cta-attention"
+          )}
         >
           {busy === "compile" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Grid2x2 className="mr-1.5 h-3.5 w-3.5" />}
           Compile run
@@ -488,7 +498,10 @@ export function LibtvRunPanel({
                 disabled={busy === "approve" || !!(brandKit && !brandKit.ready.studio)}
                 size="sm"
                 data-testid="approve-run"
-                className="h-9 rounded-md bg-foreground text-xs font-medium text-background hover:bg-foreground/90"
+                className={cn(
+                  "h-9 rounded-md bg-foreground text-xs font-medium text-background hover:bg-foreground/90",
+                  busy !== "approve" && !(brandKit && !brandKit.ready.studio) && "cta-attention"
+                )}
               >
                 {busy === "approve" ? (
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />

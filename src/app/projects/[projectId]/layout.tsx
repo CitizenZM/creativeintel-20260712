@@ -26,7 +26,11 @@ export default async function ProjectLayout({
         status={project.status}
         description={[project.category, project.campaignGoal].filter(Boolean).join(" · ") || undefined}
         brandKit={stages ? { score: stages.brandKitScore, href: `/projects/${projectId}/overview#brand-kit` } : undefined}
-        next={stages?.next ? { label: stages.next.label, href: stages.next.href } : null}
+        next={
+          stages?.next
+            ? { label: stages.next.label, href: stages.next.href, action: stages.next.action }
+            : null
+        }
       />
       <TabNav projectId={projectId} />
       <div className="px-4 py-6 sm:px-6 lg:px-8 max-w-7xl mx-auto">{children}</div>

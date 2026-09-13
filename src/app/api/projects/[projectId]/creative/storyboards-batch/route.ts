@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { buildStoryboardCreateData } from "@/services/ai/storyboard-generator";
 import { getBrandTruthForPrompts } from "@/services/brand-kit";
+import { renderVisualDirection } from "@/lib/visual-direction";
 import { withIdempotency } from "@/lib/idempotency";
 import { pMapSettled } from "@/lib/parallel";
 
@@ -21,7 +22,10 @@ export async function POST(
   if (idem.replay && idem.response) return idem.response;
 
   const body = await request.json().catch(() => ({}));
-  const { scriptIds } = body as { scriptIds?: string[] };
+  const { scriptIds, visualDirection } = body as {
+    scriptIds?: string[];
+    visualDirection?: { lighting?: string; style?: string; notes?: string };
+  };
 
   if (!scriptIds || !Array.isArray(scriptIds) || scriptIds.length === 0) {
     return NextResponse.json({ error: "scriptIds array required" }, { status: 400 });
@@ -45,6 +49,7 @@ export async function POST(
     const extras = {
       brandTruth: brandTruth || undefined,
       approvedOffer: brandKit?.offerText || undefined,
+      visualDirection: renderVisualDirection(visualDirection) || undefined,
     };
 
     const settled = await pMapSettled(

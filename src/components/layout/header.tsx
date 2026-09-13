@@ -7,7 +7,7 @@ interface HeaderProps {
   description?: string;
   actions?: ReactNode;
   brandKit?: { score: number; href: string };
-  next?: { label: string; href: string } | null;
+  next?: { label: string; href: string; action?: string } | null;
 }
 
 const statusStyles: Record<string, string> = {
@@ -56,9 +56,12 @@ export function Header({ title, status, description, actions, brandKit, next }: 
             {next && (
               <Link
                 href={next.href}
-                className="inline-flex items-center rounded-md bg-foreground px-3 py-1.5 text-xs font-semibold text-background hover:opacity-90"
+                className="cta-attention inline-flex flex-col items-start rounded-md bg-foreground px-3.5 py-2 text-background hover:opacity-90"
               >
-                Next: {next.label} →
+                <span className="text-[10px] font-medium uppercase tracking-wider opacity-70">
+                  Next step · {next.label}
+                </span>
+                <span className="text-xs font-semibold">{next.action ?? next.label} →</span>
               </Link>
             )}
             {actions}
