@@ -42,7 +42,7 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
         <a
           href={`/api/projects/${projectId}/export`}
           className={`inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-semibold hover:bg-muted${
-            readyVideos > 0 ? " cta-attention" : ""
+            delivered.length > 0 ? " cta-attention" : ""
           }`}
         >
           <Download className="h-3.5 w-3.5" /> Export package (zip)

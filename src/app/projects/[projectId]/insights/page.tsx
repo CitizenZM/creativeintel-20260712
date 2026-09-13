@@ -218,7 +218,9 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
           label="Re-analyze"
           loadingLabel="Analyzing…"
           icon="brain"
-          className={teardowns.length === 0 ? "cta-attention" : undefined}
+          className={
+            competitorSummaries.every((c) => c.teardownCount === 0) ? "cta-attention" : undefined
+          }
         />
       </div>
 

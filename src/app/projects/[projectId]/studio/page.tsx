@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { VideoLibraryPanel } from "@/components/video/video-library-panel";
 import { StoryboardTimeline } from "@/components/studio/storyboard-timeline";
 import { LibtvRunPanel } from "@/components/studio/libtv-run-panel";
+import { NextStepHint } from "@/components/layout/next-step-hint";
 import { LegacyApiRender } from "@/components/studio/legacy-api-render";
 import type {
   BrandKitReadiness,
@@ -143,6 +144,22 @@ export default function StudioPage() {
 
   return (
     <div className="space-y-6">
+      {storyboards.length > 0 && (
+        <NextStepHint
+          step="Step 5"
+          title={
+            activeRun?.status === "awaiting_approval"
+              ? "Approve the run to start rendering"
+              : "Compile the storyboard into a production run"
+          }
+          detail={
+            activeRun?.status === "awaiting_approval"
+              ? "Compiling costs nothing. Approving hands the run to the local worker, which spends LibTV credits."
+              : "Pick a storyboard, choose the models and budget mode, then compile. Nothing is spent until you approve."
+          }
+        />
+      )}
+
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold tracking-tight">Create Studio</h2>
