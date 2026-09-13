@@ -4,12 +4,12 @@ import { prisma } from "@/lib/db";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { buildAngleGenerationPrompt } from "@/services/ai/prompts/angle-generation";
 import {
-
-export const maxDuration = 120;
   getScriptTemplate,
   isVideoType,
   defaultTemplateBatch,
 } from "@/services/ai/prompts/script-templates";
+
+export const maxDuration = 120;
 
 const anglesSchema = z.object({
   angles: z.array(
