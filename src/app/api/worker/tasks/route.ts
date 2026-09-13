@@ -44,9 +44,24 @@ function isAuthorized(request: Request): boolean {
 
 type Body =
   | { action: "claim"; workerId: string; kinds?: string[] }
-  | { action: "complete"; id: string; result?: { candidates?: unknown } }
+  | { action: "complete"; id: string; result?: { candidates?: unknown; [k: string]: unknown } }
   | { action: "fail"; id: string; error: string }
   | { action: "heartbeat"; id: string };
+
+/** Fetched pages are stored verbatim, so cap what a worker can write back. */
+const MAX_FETCH_CHARS = 600_000;
+
+function parseBrowserFetchResult(result: unknown) {
+  const r = (result ?? {}) as Record<string, unknown>;
+  const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
+  return {
+    finalUrl: str(r.finalUrl, 2000),
+    status: typeof r.status === "number" ? r.status : 0,
+    title: str(r.title, 500),
+    html: str(r.html, MAX_FETCH_CHARS),
+    text: str(r.text, MAX_FETCH_CHARS),
+  };
+}
 
 /**
  * Upsert the worker's candidates into the task's project, then re-rank that
@@ -121,6 +136,14 @@ export async function POST(request: Request) {
         const task = await prisma.workerTask.findUnique({ where: { id: body.id } });
         if (!task) {
           return NextResponse.json({ error: "Task not found" }, { status: 404 });
+        }
+
+        // browser_fetch returns a rendered page, not ad candidates — the
+        // research pipeline reads it back and parses it with the same code it
+        // uses for a direct fetch.
+        if (task.kind === "browser_fetch") {
+          const updated = await completeTask(body.id, parseBrowserFetchResult(body.result));
+          return NextResponse.json({ task: { id: updated.id, status: updated.status } });
         }
 
         // Worker output crosses a trust boundary — validate before it reaches Prisma.

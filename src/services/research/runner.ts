@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { pMapSettled } from "@/lib/parallel";
-import { crawlWebsite, type CrawlResult } from "./website-crawler";
+import { crawlWebsite, parseHtml as parseCrawlHtml, type CrawlResult } from "./website-crawler";
+import { fetchViaWorker } from "./browser-fetch";
 import {
   quickBrandUnderstanding,
   extractSearchKeywords,
@@ -65,7 +66,16 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
     const crawlResults = await pMapSettled(
       crawlTargets,
       async (t, i) => {
-        const result = await crawlWebsite(t.url);
+        let result: CrawlResult;
+        try {
+          result = await crawlWebsite(t.url);
+        } catch (err) {
+          // Storefronts that 403 this server's IP still render for a browser —
+          // retry through the local worker before giving up on the site.
+          const page = await fetchViaWorker(t.url, { projectId }).catch(() => null);
+          if (!page?.html) throw err;
+          result = parseCrawlHtml(t.url, page.html);
+        }
         await updateStep(
           jobId,
           "Crawl websites",
@@ -76,6 +86,30 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
       },
       { concurrency: CONCURRENCY }
     );
+
+    // The product page is scraped once at project creation; if that was blocked
+    // there is no product truth at all, so retry it here through the worker.
+    if (project.productUrl && !project.productPageText) {
+      const page = await fetchViaWorker(project.productUrl, { projectId }).catch(() => null);
+      if (page?.text) {
+        const crawled = parseCrawlHtml(project.productUrl, page.html);
+        await prisma.project.update({
+          where: { id: projectId },
+          data: {
+            productPageTitle: project.productPageTitle || crawled.title || null,
+            productPageText:
+              [crawled.metaDescription, ...crawled.productFeatures].filter(Boolean).join("\n\n") ||
+              crawled.bodyText.slice(0, 4000) ||
+              null,
+            productPageImages:
+              (project.productPageImages as unknown[] | null)?.length
+                ? (project.productPageImages as never)
+                : (crawled.images.slice(0, 8).map((im) => ({ url: im.src, alt: im.alt })) as never),
+          },
+        });
+        await updateStep(jobId, "Crawl websites", 100, `Recovered product page via local browser`);
+      }
+    }
 
     let brandCrawl: CrawlResult | null = null;
     crawlResults.forEach((r, i) => {

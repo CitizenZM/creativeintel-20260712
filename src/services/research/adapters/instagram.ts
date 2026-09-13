@@ -28,7 +28,10 @@ export const instagramAdapter: Adapter = async (
   const query = `site:instagram.com "${ctx.ownerName}" ${disambig} reel`.trim();
 
   try {
-    const results = await searchDuckDuckGo(query, 10);
+    const results = await searchDuckDuckGo(query, 10, {
+      projectId: ctx.projectId,
+      viaWorkerOnBlock: true,
+    });
     const candidates: AdCandidate[] = results
       .filter(
         (r) =>

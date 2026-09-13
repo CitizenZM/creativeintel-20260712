@@ -16,7 +16,7 @@ import {
 } from "./prompts/ad-teardown";
 import { buildCompetitorRollupPrompt, type RollupTeardown } from "./prompts/competitor-rollup";
 import { buildCompetitiveGapPrompt, GAP_CATEGORIES, type GapCategory } from "./prompts/competitive-gap";
-import { crawlWebsite, type CrawlResult } from "@/services/research/website-crawler";
+import { crawlWebsite, parseHtml as parseCrawlHtml, type CrawlResult } from "@/services/research/website-crawler";
 import { collectVideoSignal } from "@/services/research/video-signal";
 import { extractKeyframes, extractTranscriptSegments, frameTimestamps } from "@/services/video/frames";
 import { NarrativeType } from "@/generated/prisma/enums";
@@ -416,6 +416,15 @@ async function getBrandCrawl(projectId: string): Promise<CrawlResult | null> {
     return await crawlWebsite(project.brandUrl);
   } catch (err) {
     console.error("Brand crawl failed:", err);
+    // Many storefronts answer this server's IP with 403 while serving the same
+    // page normally to a browser — re-fetch through the local worker.
+    try {
+      const { fetchViaWorker } = await import("@/services/research/browser-fetch");
+      const page = await fetchViaWorker(project.brandUrl, { projectId });
+      if (page?.html) return parseCrawlHtml(project.brandUrl, page.html);
+    } catch (workerErr) {
+      console.error("Brand crawl via worker also failed:", workerErr);
+    }
     return null;
   }
 }

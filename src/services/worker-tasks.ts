@@ -18,7 +18,7 @@ export const MAX_ATTEMPTS = 3;
 const STALE_AFTER_MS = 20 * 60 * 1000;
 const REUSE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type WorkerTaskKind = "ad_library_fetch";
+export type WorkerTaskKind = "ad_library_fetch" | "browser_fetch";
 
 export interface AdLibraryFetchPayload {
   source: "meta" | "tiktok" | "google";
@@ -29,8 +29,31 @@ export interface AdLibraryFetchPayload {
   limit: number;
 }
 
+/**
+ * Fetch one URL through the operator's real browser. Exists because a growing
+ * list of sites answer this app's datacentre IP with a block while serving the
+ * same URL normally from a residential one — DuckDuckGo replies 202 with an
+ * anti-bot challenge, and many DTC storefronts reply 403.
+ */
+export interface BrowserFetchPayload {
+  url: string;
+  /** Extra settle time for client-rendered pages. */
+  waitMs?: number;
+}
+
+export interface BrowserFetchResult {
+  finalUrl: string;
+  status: number;
+  title: string;
+  html: string;
+  text: string;
+}
+
 /** Stable hash over the semantic payload, stored inside payload for lookup. */
-export function payloadHash(payload: AdLibraryFetchPayload): string {
+export function payloadHash(payload: AdLibraryFetchPayload | BrowserFetchPayload): string {
+  if ("url" in payload) {
+    return createHash("sha1").update(JSON.stringify({ url: payload.url })).digest("hex");
+  }
   const canonical = JSON.stringify({
     source: payload.source,
     advertiser: payload.advertiser.trim().toLowerCase(),
@@ -42,9 +65,9 @@ export function payloadHash(payload: AdLibraryFetchPayload): string {
   return createHash("sha1").update(canonical).digest("hex");
 }
 
-export interface StoredPayload extends AdLibraryFetchPayload {
+export type StoredPayload = (AdLibraryFetchPayload | BrowserFetchPayload) & {
   hash: string;
-}
+};
 
 // ─── Enqueue + reuse ─────────────────────────────────────────────────────────
 
@@ -77,7 +100,7 @@ export interface EnqueueResult {
 export async function enqueueWorkerTask(params: {
   projectId: string | null;
   kind: WorkerTaskKind;
-  payload: AdLibraryFetchPayload;
+  payload: AdLibraryFetchPayload | BrowserFetchPayload;
   priority?: number;
 }): Promise<EnqueueResult> {
   const hash = payloadHash(params.payload);

@@ -25,7 +25,10 @@ export const tiktokOrganicAdapter: Adapter = async (
     const perQuery = await pMap(
       queries,
       async (query) => {
-        const results = await searchDuckDuckGo(query, 8);
+        const results = await searchDuckDuckGo(query, 8, {
+          projectId: ctx.projectId,
+          viaWorkerOnBlock: true,
+        });
         return results
           .filter((r) => r.url.includes("tiktok.com") && r.url.includes("/video/"))
           .slice(0, 4);

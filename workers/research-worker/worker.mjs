@@ -12,7 +12,8 @@
 //   APP_URL          default "https://creativeintel.vercel.app"
 //   WORKER_TOKEN     required — sent as x-worker-token on every request
 //   WORKER_KINDS     default "ad_library_fetch"
-//   POLL_INTERVAL_MS default 30000 — delay between claim attempts when idle
+//   POLL_INTERVAL_MS default 6000 — delay between claim attempts when idle;
+//                    kept short because browser_fetch tasks block a research run
 //   EGO_BROWSER_BIN  default "ego-browser"
 //
 // Run: node worker.mjs   (see README.md for launchd setup)
@@ -23,6 +24,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { runMetaAdLibrary } from './playbooks/meta-ad-library.mjs';
 import { runTikTokAdLibrary } from './playbooks/tiktok-ad-library.mjs';
 import { runGoogleAdsTransparency } from './playbooks/google-ads-transparency.mjs';
+import { runBrowserFetch } from './playbooks/browser-fetch.mjs';
 
 // ---- Config -----------------------------------------------------------
 
@@ -31,11 +33,11 @@ const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
 // Vercel Deployment Protection (SSO) is on for this project; without the bypass
 // secret every API call is answered with an HTML login page.
 const VERCEL_BYPASS = process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '';
-const WORKER_KINDS =(process.env.WORKER_KINDS || 'ad_library_fetch')
+const WORKER_KINDS =(process.env.WORKER_KINDS || 'ad_library_fetch,browser_fetch')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
-const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 30000);
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 6000);
 const HEARTBEAT_INTERVAL_MS = 60 * 1000;
 // Public sites get a breather between tasks so a queue burst never reads as a crawl.
 const COOLDOWN_MS = Number(process.env.TASK_COOLDOWN_MS || 15000);
@@ -100,8 +102,8 @@ async function claimTask() {
   return body.task || null;
 }
 
-async function completeTask(id, candidates) {
-  return callWorkerApi('complete', { id, result: { candidates } });
+async function completeTask(id, result) {
+  return callWorkerApi('complete', { id, result });
 }
 
 async function failTask(id, error) {
@@ -123,6 +125,15 @@ async function heartbeat(id) {
 
 async function runTask(task) {
   const payload = task.payload || {};
+
+  // A plain page fetch — the app asks for this when its own server-side fetch
+  // was refused by the site. It returns a page, not ad candidates.
+  if (task.kind === 'browser_fetch') {
+    const { result, note } = await runBrowserFetch(payload);
+    if (!result) throw new Error(note || 'browser_fetch produced no page');
+    return { result, note };
+  }
+
   const playbook = PLAYBOOKS[payload.source];
   if (!playbook) {
     throw new Error(`No playbook registered for source "${payload.source}"`);
@@ -134,7 +145,12 @@ async function runTask(task) {
 }
 
 async function processTask(task) {
-  log(`claimed task ${task.id} (kind=${task.kind}, source=${task.payload?.source}, advertiser="${task.payload?.advertiser}")`);
+  log(
+    `claimed task ${task.id} (kind=${task.kind}` +
+      (task.kind === 'browser_fetch'
+        ? `, url="${task.payload?.url}")`
+        : `, source=${task.payload?.source}, advertiser="${task.payload?.advertiser}")`)
+  );
 
   let heartbeatTimer;
   try {
@@ -142,11 +158,16 @@ async function processTask(task) {
       heartbeat(task.id);
     }, HEARTBEAT_INTERVAL_MS);
 
-    const { candidates, note } = await runTask(task);
-    log(`task ${task.id}: ${candidates.length} candidates — ${note}`);
-
-    const res = await completeTask(task.id, candidates);
-    log(`task ${task.id}: complete (accepted ${res.accepted ?? 0}, saved ${res.saved ?? 0})`);
+    const { candidates, result, note } = await runTask(task);
+    if (result) {
+      log(`task ${task.id}: ${note}`);
+      await completeTask(task.id, result);
+      log(`task ${task.id}: complete (browser_fetch)`);
+    } else {
+      log(`task ${task.id}: ${candidates.length} candidates — ${note}`);
+      const res = await completeTask(task.id, { candidates });
+      log(`task ${task.id}: complete (accepted ${res.accepted ?? 0}, saved ${res.saved ?? 0})`);
+    }
   } catch (err) {
     logError(`task ${task.id} failed:`, err?.message || err);
     try {

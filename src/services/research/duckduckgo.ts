@@ -22,30 +22,7 @@ export class DuckDuckGoBlockedError extends Error {
   }
 }
 
-export async function searchDuckDuckGo(
-  query: string,
-  maxResults = 10
-): Promise<SearchResult[]> {
-  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-
-  const response = await fetchWithRetry(
-    url,
-    {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
-    },
-    { timeoutMs: 8000 }
-  );
-
-  if (response.status !== 200) {
-    throw new DuckDuckGoBlockedError(
-      `DuckDuckGo answered with HTTP ${response.status} instead of 200 — this is its anti-bot challenge response, not a real results page (seen from this server's IP; the identical query returns normal results from a residential IP).`
-    );
-  }
-
-  const html = await response.text();
+function parseResultsHtml(html: string, maxResults: number): SearchResult[] {
   const $ = cheerio.load(html);
 
   const results: SearchResult[] = [];
@@ -66,4 +43,52 @@ export async function searchDuckDuckGo(
   });
 
   return results.slice(0, maxResults);
+}
+
+export interface SearchOptions {
+  /**
+   * Re-run the search through the operator's browser when this server's IP is
+   * challenged. Only for background work — it waits on the local worker.
+   */
+  projectId?: string | null;
+  viaWorkerOnBlock?: boolean;
+}
+
+export async function searchDuckDuckGo(
+  query: string,
+  maxResults = 10,
+  opts: SearchOptions = {}
+): Promise<SearchResult[]> {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+
+  const response = await fetchWithRetry(
+    url,
+    {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    },
+    { timeoutMs: 8000 }
+  );
+
+  if (response.status === 200) {
+    return parseResultsHtml(await response.text(), maxResults);
+  }
+
+  if (opts.viaWorkerOnBlock) {
+    const { fetchViaWorker } = await import("./browser-fetch");
+    const page = await fetchViaWorker(url, { projectId: opts.projectId, waitMs: 1500 });
+    if (page?.html) {
+      const viaBrowser = parseResultsHtml(page.html, maxResults);
+      if (viaBrowser.length > 0) return viaBrowser;
+    }
+    throw new DuckDuckGoBlockedError(
+      `DuckDuckGo answered this server with HTTP ${response.status} (anti-bot challenge) and the local browser worker could not complete the search either — is the research worker running?`
+    );
+  }
+
+  throw new DuckDuckGoBlockedError(
+    `DuckDuckGo answered with HTTP ${response.status} instead of 200 — this is its anti-bot challenge response, not a real results page (seen from this server's IP; the identical query returns normal results from a residential IP).`
+  );
 }

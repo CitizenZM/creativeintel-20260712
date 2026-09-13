@@ -51,7 +51,7 @@ async function crawlWebsiteUncached(url: string): Promise<CrawlResult> {
   }
 }
 
-function parseHtml(url: string, html: string): CrawlResult {
+export function parseHtml(url: string, html: string): CrawlResult {
   const $ = cheerio.load(html);
 
   // Remove scripts and styles
