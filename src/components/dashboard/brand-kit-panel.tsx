@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   CheckCircle2,
@@ -205,6 +206,10 @@ function StringListEditor({
 }
 
 export function BrandKitPanel({ projectId }: { projectId: string }) {
+  // The "% complete / Still missing" summary above this panel and the stage
+  // rail are server-rendered, so a client-side save left them showing a stale
+  // score until a manual reload — router.refresh() re-renders them in place.
+  const router = useRouter();
   const [form, setForm] = useState<FormState>(EMPTY);
   const [assets, setAssets] = useState<BrandAsset[]>([]);
   const [completeness, setCompleteness] = useState<Completeness | null>(null);
@@ -304,6 +309,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
       if (!res.ok) throw new Error(payload.error || "Failed to save brand kit");
       applyResponse(payload as BrandKitResponse);
       setNotice("Brand kit saved.");
+      router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save brand kit");
     } finally {
@@ -343,6 +349,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
         if (payload.warning) setNotice(payload.warning as string);
         if (payload.provider) setStorage((s) => ({ ...s, provider: payload.provider as string }));
       }
+      router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -360,6 +367,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
       if (!res.ok) throw new Error(payload.error || "Failed to delete asset");
       setAssets((prev) => prev.filter((a) => a.id !== assetId));
       if (payload.completeness) setCompleteness(payload.completeness as Completeness);
+      router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to delete asset");
     }
