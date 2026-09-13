@@ -219,7 +219,12 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
           loadingLabel="Analyzing…"
           icon="brain"
           className={
-            competitorSummaries.every((c) => c.teardownCount === 0) ? "cta-attention" : undefined
+            // Only worth pointing at once research has actually collected ads
+            // to tear down — otherwise this competes with the real next step.
+            competitorSummaries.some((c) => c.adCount > 0) &&
+            competitorSummaries.every((c) => c.teardownCount === 0)
+              ? "cta-attention"
+              : undefined
           }
         />
       </div>
