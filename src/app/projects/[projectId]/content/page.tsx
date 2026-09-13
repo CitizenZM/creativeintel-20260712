@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { StageGuide } from "@/components/layout/stage-guide";
 import Link from "next/link";
 import { NARRATIVE_TYPE_LABELS, CONTENT_TYPE_LABELS } from "@/lib/constants";
 import { getCampaignPlatform } from "@/lib/campaign-platform";
@@ -224,6 +225,7 @@ export default async function ContentPage({
 
   return (
     <div className="space-y-5">
+      <StageGuide projectId={projectId} stage="research" detail="These are the competitor ads we collected. Skim the top performers before writing creative." />
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-base font-semibold tracking-tight">Competitor Ad Intelligence</h2>

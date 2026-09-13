@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { StageGuide } from "@/components/layout/stage-guide";
 import { ActionButton } from "@/components/dashboard/action-buttons";
 import {
   Film, Zap, Heart, MousePointerClick, Megaphone, TrendingDown,
@@ -197,6 +198,11 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
 
   return (
     <div className="space-y-8">
+      <StageGuide
+        projectId={projectId}
+        stage="insights"
+        detail="Each competitor is torn down ad by ad — hooks, offers and CTAs. This is what your scripts get written against."
+      />
 
       {/* ── Page header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -207,7 +213,13 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
             <span className="font-mono">{aiModel}</span>
           </p>
         </div>
-        <ActionButton endpoint={`/api/projects/${projectId}/insights/reanalyze`} label="Re-analyze" loadingLabel="Analyzing…" icon="brain" />
+        <ActionButton
+          endpoint={`/api/projects/${projectId}/insights/reanalyze`}
+          label="Re-analyze"
+          loadingLabel="Analyzing…"
+          icon="brain"
+          className={teardowns.length === 0 ? "cta-attention" : undefined}
+        />
       </div>
 
       <CompetitorsSection projectId={projectId} competitors={competitorSummaries} />

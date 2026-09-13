@@ -383,6 +383,15 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
 
   const logos = assets.filter((a) => a.kind === "LOGO");
   const packshots = assets.filter((a) => a.kind === "PACKSHOT");
+  // Point at the first thing still missing — a logo, then packshots — and at
+  // nothing once both are satisfied.
+  const nextUpload: "logo" | "packshot" | null = !uploading
+    ? logos.length === 0
+      ? "logo"
+      : packshots.length < 2
+        ? "packshot"
+        : null
+    : null;
   const score = completeness?.score ?? 0;
   const ready = completeness?.ready.creative ?? false;
 
@@ -472,7 +481,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
             <Button
               size="sm"
               variant="outline"
-              className="h-6 gap-1 px-2 text-[10px]"
+              className={cn("h-6 gap-1 px-2 text-[10px]", nextUpload === "logo" && "cta-attention")}
               onClick={() => pickFile("LOGO", "light")}
               disabled={!!uploading}
             >
@@ -516,7 +525,10 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
                 key={v}
                 size="sm"
                 variant="outline"
-                className="h-6 gap-1 px-2 text-[10px]"
+                className={cn(
+                  "h-6 gap-1 px-2 text-[10px]",
+                  nextUpload === "packshot" && v === "front" && "cta-attention"
+                )}
                 onClick={() => pickFile("PACKSHOT", v)}
                 disabled={!!uploading}
               >

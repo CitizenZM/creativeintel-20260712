@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { StageGuide } from "@/components/layout/stage-guide";
 import { isPlayable } from "@/components/studio/types";
 import { Download, ExternalLink, Film, FileText, Clapperboard } from "lucide-react";
 
@@ -30,6 +31,7 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
 
   return (
     <div className="space-y-8">
+      <StageGuide projectId={projectId} stage="deliver" detail="Finished masters land here once a studio run renders." />
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Deliverables</h2>
@@ -39,7 +41,9 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
         </div>
         <a
           href={`/api/projects/${projectId}/export`}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-semibold hover:bg-muted"
+          className={`inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-semibold hover:bg-muted${
+            readyVideos > 0 ? " cta-attention" : ""
+          }`}
         >
           <Download className="h-3.5 w-3.5" /> Export package (zip)
         </a>

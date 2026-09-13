@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { StageGuide } from "@/components/layout/stage-guide";
 import { NARRATIVE_TYPE_LABELS, DATA_SOURCE_LABELS } from "@/lib/constants";
 import { OverviewCharts } from "@/components/dashboard/overview-charts";
 import { HeroMetric } from "@/components/dashboard/hero-metric";
@@ -84,6 +85,7 @@ export default async function OverviewPage({
 
   return (
     <div className="space-y-6">
+      <StageGuide projectId={projectId} stage="setup" detail="Upload your logo and at least two product photos, then set brand colours and an approved CTA. Everything generated later is held to this." />
       {/* Action bar */}
       <div className="flex justify-end">
         <ActionButton
