@@ -57,6 +57,44 @@ credits, exactly the sum of their displayed prices (balance 133 → 61). Treat e
 creation with a reference edge as a paid generation. Only probe prices in the web UI by changing
 the model dropdown on an existing un-run node, or use the measured table below.
 
+### Default video engine: **Seedance 2.5** (Barron's instruction, 2026-09-13)
+
+Use `star-video2.5` for every generated video shot unless Barron says otherwise. It is the most
+capable model on the platform (全能参考, up to 30 s, audio-visual sync) and it is also the most
+expensive, so the budget discipline below is part of the instruction, not an alternative to it.
+
+```bash
+libtv node create "V1" -t video --left "K1" --prompt "..." \
+  -s "model=Seedance 2.5" -s modeType=singleImage2video -s ratio=9:16 \
+  -s resolution=720p -s duration=5 -s enableSound=off --run
+```
+
+Schema (`libtv model star-video2.5`, read for free):
+
+| Param | Values | Note |
+|---|---|---|
+| `modeType` | singleImage2video [1,1] · frames2video [1,2] · image2video [1,30] · mixed2video [1,50] · audio2video [1,10] · videoEdit2video [1,1] | mixed2video takes ≤10 video + ≤30 image + ≤10 audio refs |
+| `resolution` | 480p / 720p / **1080p** | default 720p |
+| `duration` | 4–30 s, step 1 | default 5 |
+| `ratio` | adaptive / 16:9 / 4:3 / 1:1 / 3:4 / **9:16** / 21:9 | default adaptive — always set it |
+| `enableSound` | on / off — **default `on`** | set `off`: our audio is beat-built locally, and generated sound would fight the music bed |
+
+**Pricing rule (from the model listing): 按秒计价, and the length of any uploaded reference video
+counts toward the billed total.** Measured: 480P 4 s = 80 credits (≈20/s), 720P 4 s = 156 (≈39/s).
+So a 5 s 720P shot ≈ 195 credits and a 6 s ≈ 234 — 13–16× Hailuo 2.3 Fast at 768P.
+
+Consequences to plan around:
+* **Duration is the cost.** Generate the shortest clip that contains the action (4–5 s), and cut
+  two or three shots out of it, rather than generating a longer clip.
+* **Never attach a reference video you don't need** — its seconds are billed too.
+* **Keep the local-compositing split.** Plates, price cards, CTA, screens and text stay local at
+  zero cost; Seedance is spent only on people and hands.
+* Get a credit cap per ad from Barron before a batch, and read the balance in the web UI before
+  and after (the CLI cannot show it).
+
+Seedance is video-only. Keyframes stay on the cheapest image model that passes QC
+(Seedream 4.0 = 1 credit; Seedream 5.0 Pro 2K = 14 when a keyframe must hold fine detail).
+
 ### Measured prices, 9:16, count=1, image2image with 1 reference (2026-09-11)
 | Model | Settings | Credits |
 |---|---|---|

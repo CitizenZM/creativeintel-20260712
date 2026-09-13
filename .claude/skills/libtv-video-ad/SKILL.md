@@ -42,8 +42,11 @@ and cannot hit a beat.
    every boundary**, generation plan, cost estimate. Approval gate before spending credits.
 5. **Keyframes** — images first (cheap). A clip inherits its first frame: static keyframe →
    static clip. Generate mid-movement. See `reference/shot-design.md`.
-6. **Clips** — image-to-video, cheapest model that passes QC. Budget roughly one clip per 1.5 s
-   of人 footage; no clip may appear more than twice in 15 s.
+6. **Clips** — image-to-video on **Seedance 2.5** (`star-video2.5`), Barron's standing choice.
+   It bills per second (uploaded reference video included), ≈39 credits/s at 720P, so generate
+   the shortest clip that holds the action (4–5 s) and cut two or three shots out of it. Budget
+   roughly one clip per 1.5 s of人 footage; no clip may appear more than twice in 15 s. Agree a
+   credit cap before the batch — see `reference/libtv-cli.md`.
 7. **Assembly + QC** — build with `scripts/motion_engine.py` (motion floor, `snap()`, centred
    transitions, per-beat accents), then `scripts/qc_gate.py` on every ratio and duration, then
    export 9:16 master + natively-laid-out 4:5 / 1:1 + 720p preview.
@@ -90,7 +93,8 @@ libtv upload "ref name" --file path.png
 libtv node create "K1" -t image  --left "ref name" --prompt "..." \
   -s "model=Seedream 4.0" -s modeType=image2image -s ratio=9:16 -s quality=2K -s count=1 --run
 libtv node create "V1" -t video  --left "K1" --prompt "..." \
-  -s "model=Hailuo 2.3 Fast" -s modeType=singleImage2video -s duration=6 --run
+  -s "model=Seedance 2.5" -s modeType=singleImage2video -s ratio=9:16 \
+  -s resolution=720p -s duration=5 -s enableSound=off --run
 libtv download -n "V1" -o clips/ --without-ai-watermark --vip
 
 # product work (local)
