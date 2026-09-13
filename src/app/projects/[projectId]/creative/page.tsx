@@ -93,17 +93,21 @@ export default function CreativePage() {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [kitUpdatedAt, setKitUpdatedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (loaded) return;
     async function loadSaved() {
       try {
-        const [scriptsRes, storyboardsRes, matrixRes, campaignRes] = await Promise.all([
+        const [scriptsRes, storyboardsRes, matrixRes, campaignRes, kitRes] = await Promise.all([
           fetch(`/api/projects/${projectId}/creative/scripts`),
           fetch(`/api/projects/${projectId}/creative/storyboards`),
           fetch(`/api/projects/${projectId}/creative/test-matrix`),
           fetch(`/api/projects/${projectId}/campaign-selection`),
+          fetch(`/api/projects/${projectId}/brand-kit`),
         ]);
+        const kit = await kitRes.json().catch(() => null);
+        if (kit?.kit?.updatedAt) setKitUpdatedAt(kit.kit.updatedAt as string);
         const savedScripts = await scriptsRes.json().catch(() => []);
         const savedStoryboards = await storyboardsRes.json().catch(() => []);
         const savedMatrix = await matrixRes.json().catch(() => ({ variants: [] }));
@@ -129,6 +133,15 @@ export default function CreativePage() {
     }
     loadSaved();
   }, [projectId, loaded]);
+
+  // Scripts written before the Brand Kit was last saved never saw the current
+  // product truth — the studio renders what the script says, so a stale script
+  // silently produces an off-brand ad (observed live: an adult, un-helmeted
+  // rider on a 68cm kids' bike).
+  const staleScripts =
+    !!kitUpdatedAt &&
+    scripts.length > 0 &&
+    scripts.every((s) => !!s.createdAt && new Date(s.createdAt) < new Date(kitUpdatedAt));
 
   const stages = [
     { num: 1, name: "Angles", icon: Wand2, done: angles.length > 0, active: loadingAngles },
@@ -533,6 +546,18 @@ export default function CreativePage() {
         <h3 className="text-sm font-semibold tracking-tight flex items-center gap-2">
           <FileText className="h-4 w-4" /> 2. Scripts
         </h3>
+
+        {staleScripts && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <p>
+              <strong>These scripts were written before the Brand Kit was last updated.</strong> They
+              were generated without the current product truth, so they can describe the wrong
+              audience, scale or scene — and the studio will render exactly what they say. Regenerate
+              scripts and storyboards before compiling a run.
+            </p>
+          </div>
+        )}
 
         <TemplatePicker
           platformId={platformId}

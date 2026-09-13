@@ -37,6 +37,7 @@ export interface ScriptCtaData {
 
 export interface ScriptData {
   id: string;
+  createdAt?: string;
   title: string;
   angle: string;
   format: string;
