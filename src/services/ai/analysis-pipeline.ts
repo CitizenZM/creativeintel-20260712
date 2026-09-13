@@ -420,6 +420,41 @@ async function getBrandCrawl(projectId: string): Promise<CrawlResult | null> {
   }
 }
 
+/**
+ * Many DTC sites answer a datacentre IP with 403, so the brand crawl comes back
+ * empty even though the operator gave us a brief, a product page and a product
+ * name. Losing the whole research run over that is worse than analysing the
+ * material we do have — so synthesise a crawl from it and only give up when
+ * there is genuinely nothing to read.
+ */
+function crawlFromKnownCopy(project: {
+  brandName: string;
+  brandUrl: string | null;
+  productUrl: string | null;
+  productName: string | null;
+  productPageTitle: string | null;
+  productPageText: string | null;
+  briefingText: string | null;
+}): CrawlResult | null {
+  const body = [project.productPageText, project.briefingText].filter(Boolean).join("\n\n").trim();
+  if (!body) return null;
+
+  return {
+    url: project.brandUrl || project.productUrl || "",
+    title: project.productPageTitle || project.productName || project.brandName,
+    metaDescription: "",
+    headings: [project.productName, project.productPageTitle].filter((v): v is string => !!v),
+    ctaTexts: [],
+    productFeatures: [],
+    testimonials: [],
+    pricingMentions: [],
+    socialProof: [],
+    images: [],
+    bodyText: body.slice(0, 12000),
+    links: [],
+  };
+}
+
 // ─── Stage: brand analysis ────────────────────────────────────────────────────
 
 export async function runBrandStage(projectId: string): Promise<number> {
@@ -430,8 +465,13 @@ export async function runBrandStage(projectId: string): Promise<number> {
   if (!project) throw new Error("Project not found");
   if (!project.brand) throw new Error("Brand row missing for project");
 
-  const crawl = await getBrandCrawl(projectId);
-  if (!crawl) throw new Error("No brand website data available for analysis");
+  const crawl = (await getBrandCrawl(projectId)) ?? crawlFromKnownCopy(project);
+  if (!crawl) {
+    throw new Error(
+      `Could not read ${project.brandUrl || "the brand website"} and there is no product page text or briefing to analyse instead. ` +
+        `Add a briefing, or paste a product page the crawler can reach, then re-run research.`
+    );
+  }
 
   const productContext = {
     productUrl: project.productUrl || undefined,
