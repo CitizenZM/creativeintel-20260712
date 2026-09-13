@@ -118,6 +118,19 @@ export async function POST(request: Request) {
             productDescription: productPageText?.slice(0, 2000) || null,
           },
         },
+        // Seed the two Brand Kit fields we already have real data for — the
+        // rest (logo, packshots, colours, CTA) genuinely need a human to
+        // supply/approve the actual assets and can't be inferred from a scrape.
+        ...(data.productUrl || productPageText
+          ? {
+              brandKit: {
+                create: {
+                  landingUrl: data.productUrl || null,
+                  productSummary: productPageText?.slice(0, 1800) || null,
+                },
+              },
+            }
+          : {}),
         competitors: {
           create: data.competitors.map((c, i) => ({
             name: c.name,
