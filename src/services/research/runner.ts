@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { pMapSettled } from "@/lib/parallel";
 import { crawlWebsite, parseHtml as parseCrawlHtml, type CrawlResult } from "./website-crawler";
 import { fetchViaWorker } from "./browser-fetch";
+import { refreshCompleteness } from "@/services/brand-kit";
 import {
   quickBrandUnderstanding,
   extractSearchKeywords,
@@ -107,6 +108,21 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
                 : (crawled.images.slice(0, 8).map((im) => ({ url: im.src, alt: im.alt })) as never),
           },
         });
+        // The Brand Kit seeds its summary at project creation from the scrape;
+        // if that was blocked the field is still empty, so fill it now that we
+        // finally have the copy.
+        const summary =
+          [crawled.metaDescription, ...crawled.productFeatures].filter(Boolean).join("\n\n") ||
+          crawled.bodyText.slice(0, 1800);
+        if (summary) {
+          await prisma.brandKit
+            .updateMany({
+              where: { projectId, OR: [{ productSummary: null }, { productSummary: "" }] },
+              data: { productSummary: summary.slice(0, 1800) },
+            })
+            .catch(() => null);
+          await refreshCompleteness(projectId).catch(() => null);
+        }
         await updateStep(jobId, "Crawl websites", 100, `Recovered product page via local browser`);
       }
     }
