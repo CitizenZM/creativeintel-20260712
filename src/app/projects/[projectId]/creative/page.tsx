@@ -551,6 +551,14 @@ export default function CreativePage() {
           )}
         </div>
 
+        {activeStep === "angles" && (
+          <NextStepHint
+            step="Step 1"
+            title="Start with ad angles"
+            detail="Angles are the distinct arguments your ads can make. Generate them first — the scripts below are written against whichever angles score best."
+          />
+        )}
+
         {angles.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {angles.map((angle, i) => {
