@@ -15,7 +15,15 @@ const MAX_CHARS = 600_000;
 
 const SCRAPE = `
 const task = await openSpace("creativeintel research worker");
-const page = task.page("fetch");
+// task.page(label) only resolves a label that already exists in the space, so
+// the first fetch in a fresh space has to create the page.
+let page;
+try {
+  page = task.page("fetch");
+  await page.evaluate(() => 1);
+} catch {
+  page = await task.newPage();
+}
 let status = 0;
 try {
   const res = await page.goto(URL);

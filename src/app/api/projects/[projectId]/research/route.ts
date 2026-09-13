@@ -8,7 +8,7 @@ import {
 } from "@/services/research/job-progress";
 import { runResearch, STEP_NAMES } from "@/services/research/runner";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(
   request: Request,
