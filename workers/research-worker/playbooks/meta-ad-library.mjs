@@ -23,6 +23,27 @@
 
 import { runEgoScript, parseDateRange, unwrapFacebookLink, aspectFrom } from './_ego.mjs';
 
+/** Lowercase, strip punctuation and legal suffixes, collapse whitespace. */
+function normaliseAdvertiser(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[®™©]/g, '')
+    .replace(/\b(inc|llc|ltd|co|corp|gmbh|company|official)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * True when the ad's advertiser plausibly IS the requested one — equal, or one
+ * name starting with the other on a word boundary. "ridge wallet" matches
+ * "ridge"; "willow ridge weddings events" does not.
+ */
+function advertiserMatches(name, needle) {
+  if (!name || !needle) return false;
+  if (name === needle) return true;
+  return name.startsWith(needle + ' ') || needle.startsWith(name + ' ');
+}
+
 function searchUrl({ advertiser, country }) {
   const params = new URLSearchParams({
     active_status: 'all',
@@ -192,15 +213,14 @@ const LIMIT = ${limit};
 ${SCRAPE}`;
 
   const result = await runEgoScript(body, { timeoutMs: 180_000 });
-  const advertiserNeedle = payload.advertiser.trim().toLowerCase();
+  const advertiserNeedle = normaliseAdvertiser(payload.advertiser);
 
   const candidates = (result.cards || [])
-    // A keyword search returns ads that merely MENTION the brand; keep the ones
-    // the advertiser actually ran.
-    .filter((c) => {
-      const name = (c.advertiser || '').toLowerCase();
-      return !name || name.includes(advertiserNeedle) || advertiserNeedle.includes(name);
-    })
+    // A keyword search returns ads that merely MENTION the brand. A substring
+    // test was far too loose — searching "Ridge" accepted "Willow Ridge
+    // Weddings & Events", and a card with no advertiser at all was accepted
+    // outright. Anchor the match to the start of the name instead.
+    .filter((c) => advertiserMatches(normaliseAdvertiser(c.advertiser), advertiserNeedle))
     .map((c) => {
       const { firstSeen, lastSeen } = parseDateRange(c.dateText);
       const aspect = aspectFrom(c.videoWidth, c.videoHeight);

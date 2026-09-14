@@ -4,6 +4,27 @@ import OpenAI from "openai";
 
 export const maxDuration = 30;
 
+// fal.ai caps the account at 10 concurrent requests and answers the eleventh
+// with a 429 — 23 frame generations were lost that way. Hold a slot instead of
+// relying on their limiter to say no.
+const FAL_MAX_CONCURRENT = 9;
+let falActive = 0;
+const falWaiting: Array<() => void> = [];
+
+async function acquireFalSlot(): Promise<() => void> {
+  if (falActive >= FAL_MAX_CONCURRENT) {
+    await new Promise<void>((resolve) => falWaiting.push(resolve));
+  }
+  falActive++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    falActive--;
+    falWaiting.shift()?.();
+  };
+}
+
 /**
  * Image generation priority:
  * 1. OpenAI gpt-image-1 (GPT Image 2 in the API) — highest quality, uses subscription plan
@@ -44,6 +65,8 @@ async function generateFrameImage(prompt: string, aspectRatio: "landscape_16_9" 
 
   // ── Option 2: fal.ai Flux Schnell ──
   if (falKey) {
+    const release = await acquireFalSlot();
+    try {
     const res = await fetch("https://fal.run/fal-ai/flux/schnell", {
       method: "POST",
       headers: {
@@ -69,6 +92,9 @@ async function generateFrameImage(prompt: string, aspectRatio: "landscape_16_9" 
     const url = data?.images?.[0]?.url;
     if (!url) throw new Error("fal.ai returned no image URL");
     return url;
+    } finally {
+      release();
+    }
   }
 
   // ── Option 3: Pollinations (last resort) ──

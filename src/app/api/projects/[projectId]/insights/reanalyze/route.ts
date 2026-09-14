@@ -11,7 +11,10 @@ import {
 
 export const maxDuration = 300;
 
-const BUDGET_MS = Number(process.env.ANALYSIS_BUDGET_MS) || 45_000;
+// Requests to the custom domain die at Cloudflare's ~100s origin timeout, so
+// spend most of that here rather than the old 45s — a single click then gets
+// through several stages instead of one.
+const BUDGET_MS = Number(process.env.ANALYSIS_BUDGET_MS) || 80_000;
 
 export async function POST(
   _req: Request,
@@ -62,6 +65,20 @@ export async function POST(
   await run("patterns", () => runPatternMiningStage(projectId));
   await run("patterns", () => runDeepAnalysisStage(projectId));
 
+  // Tell the caller whether anything is still outstanding, so the UI can keep
+  // going instead of making someone press Re-analyze until the numbers stop
+  // moving.
+  const [pendingTeardowns, competitorsWithoutRollup] = await Promise.all([
+    prisma.contentAsset.count({
+      where: { projectId, overallScore: { not: null }, teardown: { is: null } },
+    }),
+    prisma.competitor.count({ where: { projectId, rollup: { is: null } } }),
+  ]);
+  const remaining = pendingTeardowns + competitorsWithoutRollup;
+
   const ok = stages.every((s) => s.ok);
-  return NextResponse.json({ ok, assetsAnalyzed: scored, stages }, { status: ok ? 200 : 207 });
+  return NextResponse.json(
+    { ok, assetsAnalyzed: scored, stages, remaining, done: remaining === 0 },
+    { status: ok ? 200 : 207 }
+  );
 }

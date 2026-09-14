@@ -15,7 +15,16 @@ interface ActionButtonProps {
   variant?: "default" | "outline";
   className?: string;
   onComplete?: () => void;
+  /**
+   * Keep re-posting while the response reports work still outstanding
+   * (`{ done: false }`). Analysis stages are time-budgeted per request, and
+   * without this someone has to keep pressing the button until the numbers
+   * stop moving.
+   */
+  autoContinue?: boolean;
 }
+
+const MAX_CONTINUE_ROUNDS = 6;
 
 const ICONS = {
   refresh: RefreshCw,
@@ -33,25 +42,37 @@ export function ActionButton({
   variant = "outline",
   className,
   onComplete,
+  autoContinue,
 }: ActionButtonProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [round, setRound] = useState(0);
   const Icon = ICONS[icon];
 
   async function handleClick() {
     setLoading(true);
+    setRound(0);
     try {
-      await fetch(endpoint, {
-        method: "POST",
-        headers: body ? { "Content-Type": "application/json" } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-      });
+      for (let i = 0; i < (autoContinue ? MAX_CONTINUE_ROUNDS : 1); i++) {
+        setRound(i + 1);
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: body ? { "Content-Type": "application/json" } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        if (!autoContinue) break;
+        const data = await res.json().catch(() => null);
+        // Stop when the server says it is finished, or when it stops making
+        // progress, so a permanently-stuck item cannot loop forever.
+        if (!data || data.done !== false) break;
+      }
       router.refresh();
       onComplete?.();
     } catch {
       // ignore
     } finally {
       setLoading(false);
+      setRound(0);
     }
   }
 
@@ -67,6 +88,7 @@ export function ActionButton({
         <>
           <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
           {loadingLabel}
+          {autoContinue && round > 1 ? ` (pass ${round})` : ""}
         </>
       ) : (
         <>

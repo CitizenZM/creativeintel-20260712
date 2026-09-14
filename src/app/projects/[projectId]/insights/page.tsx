@@ -218,6 +218,7 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
           label="Re-analyze"
           loadingLabel="Analyzing…"
           icon="brain"
+          autoContinue
           className={
             // Only worth pointing at once research has actually collected ads
             // to tear down — otherwise this competes with the real next step.
