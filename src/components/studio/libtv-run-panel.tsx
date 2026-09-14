@@ -124,6 +124,9 @@ export function LibtvRunPanel({
   }, [storyboard, budgetMode, effectiveDuration, imageModel, videoModel]);
 
   const estimate = board?.total ?? 0;
+  // LibTV shows the balance only in its own web UI, so what this panel can
+  // honestly report is what the project has already spent.
+  const spentSoFar = runs.reduce((sum, r) => sum + (r.creditsSpent || 0), 0);
   const ctaFrames = board?.ctaCount ?? 0;
   const overBudget = estimate > maxCredits;
 
@@ -385,6 +388,21 @@ export function LibtvRunPanel({
               {estimate} credits
             </span>{" "}
             of {maxCredits} allowed
+          </p>
+          <p className="text-muted-foreground">
+            {/* LibTV shows the balance only in its own web UI, so the honest
+                thing to surface here is what this project has already spent. */}
+            Spent on this project so far:{" "}
+            <span className="font-semibold text-foreground">{spentSoFar} credits</span>
+            {" "}across {runs.length} run{runs.length === 1 ? "" : "s"} · balance is only visible at{" "}
+            <a
+              href="https://www.liblib.tv/"
+              target="_blank"
+              rel="noreferrer"
+              className="underline hover:text-foreground"
+            >
+              liblib.tv
+            </a>
           </p>
           {overBudget && (
             <label className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-red-700">

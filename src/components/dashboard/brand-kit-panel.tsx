@@ -222,6 +222,48 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
   const [uploading, setUploading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [otherProjects, setOtherProjects] = useState<{ id: string; brandName: string }[]>([]);
+  const [copying, setCopying] = useState(false);
+
+  // Offered only when this kit is still thin — once it is filled in, a copy
+  // would be more likely to overwrite deliberate work than to save time.
+  useEffect(() => {
+    if ((completeness?.score ?? 0) >= 60) return;
+    fetch("/api/projects")
+      .then((r) => r.json())
+      .then((rows) => {
+        if (!Array.isArray(rows)) return;
+        setOtherProjects(
+          rows
+            .filter((r: { id: string }) => r.id !== projectId)
+            .slice(0, 30)
+            .map((r: { id: string; brandName: string }) => ({ id: r.id, brandName: r.brandName }))
+        );
+      })
+      .catch(() => {});
+  }, [projectId, completeness?.score]);
+
+  async function copyFrom(sourceProjectId: string) {
+    setCopying(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/brand-kit/copy-from`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceProjectId }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.error || "Could not copy that Brand Kit");
+      setNotice(`Copied the brand rules and ${payload.copiedAssets ?? 0} asset(s).`);
+      const fresh = await fetch(`/api/projects/${projectId}/brand-kit`).then((r) => r.json());
+      applyResponse(fresh as BrandKitResponse);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not copy that Brand Kit");
+    } finally {
+      setCopying(false);
+    }
+  }
 
   const uploadTarget = useRef<{ kind: string; variant?: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -448,6 +490,32 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
           </span>
         </div>
       )}
+      {otherProjects.length > 0 && (
+        <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2.5">
+          <p className="text-xs font-medium">Reuse a Brand Kit you already built</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Copies colours, CTAs, claims, tone and any logo or packshot slots still empty here.
+            Product-specific fields stay untouched.
+          </p>
+          <select
+            disabled={copying}
+            defaultValue=""
+            onChange={(e) => {
+              if (e.target.value) copyFrom(e.target.value);
+              e.target.value = "";
+            }}
+            className="mt-2 h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+          >
+            <option value="">{copying ? "Copying…" : "Choose a project…"}</option>
+            {otherProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.brandName}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {storage.provider !== "inline" && (
         <p className="text-[10px] text-muted-foreground">
           Asset storage: <span className="font-medium">{storage.provider}</span>

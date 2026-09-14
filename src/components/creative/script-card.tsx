@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { CheckSquare, Square, ChevronDown, ChevronUp } from "lucide-react";
 import { getScriptTemplate } from "@/services/ai/prompts/script-templates";
@@ -68,6 +69,7 @@ function Field({ label, value }: { label: string; value?: string | null }) {
 }
 
 export function ScriptCard({
+  projectId,
   script,
   selected,
   expanded,
@@ -75,6 +77,7 @@ export function ScriptCard({
   onToggleExpand,
 }: {
   script: ScriptData;
+  projectId: string;
   selected: boolean;
   expanded: boolean;
   onToggleSelect: () => void;
@@ -84,6 +87,38 @@ export function ScriptCard({
   const total = script.totalDurationSec || 30;
   const hook = script.hook ?? null;
   const beats = Array.isArray(script.bodyBeats) ? script.bodyBeats : [];
+  const [editing, setEditing] = useState(false);
+  // The saved body lives here rather than being written back onto the prop —
+  // the parent owns that object and mutating it would not re-render anyway.
+  const [bodyText, setBodyText] = useState(script.body);
+  const [draft, setDraft] = useState(script.body);
+  const [saving, setSaving] = useState(false);
+  const [editNote, setEditNote] = useState<string | null>(null);
+
+  async function save() {
+    setSaving(true);
+    setEditNote(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/creative/scripts/${script.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: draft }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save");
+      setBodyText(draft);
+      setEditing(false);
+      // Edits are not blocked on compliance, but they are reported — the
+      // studio will render exactly what this says.
+      if (Array.isArray(data.complianceWarnings) && data.complianceWarnings.length > 0) {
+        setEditNote(`Saved, but check: ${data.complianceWarnings.join(" · ")}`);
+      }
+    } catch (err) {
+      setEditNote(err instanceof Error ? err.message : "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  }
   const cta = script.cta ?? null;
   const structured = Boolean(hook?.text || beats.length || cta?.text);
 
@@ -246,16 +281,53 @@ export function ScriptCard({
                 </div>
               </section>
             </div>
-          ) : (
-            <div>
-              <p className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground mb-2">
+          ) : null}
+
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground">
                 Script body
               </p>
-              <div className="rounded-md bg-muted p-4 text-sm whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
-                {script.body}
-              </div>
+              {!editing ? (
+                <button
+                  onClick={() => {
+                    setDraft(bodyText);
+                    setEditing(true);
+                    setEditNote(null);
+                  }}
+                  className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                >
+                  Edit
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setEditing(false)}
+                    disabled={saving}
+                    className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                  <button onClick={save} disabled={saving} className="text-[11px] font-semibold">
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+            {editing ? (
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={14}
+                className="w-full rounded-md border border-border bg-background p-3 text-sm leading-relaxed font-mono"
+              />
+            ) : (
+              <div className="rounded-md bg-muted p-4 text-sm whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
+                {bodyText}
+              </div>
+            )}
+            {editNote && <p className="mt-1.5 text-[11px] text-amber-700">{editNote}</p>}
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>

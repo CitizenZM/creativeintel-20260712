@@ -102,6 +102,7 @@ export default function CreativePage() {
   const [allProgress, setAllProgress] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [failedTemplateIds, setFailedTemplateIds] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [kitUpdatedAt, setKitUpdatedAt] = useState<string | null>(null);
   const [customBrief, setCustomBrief] = useState("");
@@ -193,9 +194,23 @@ export default function CreativePage() {
           return `${label}: ${row.templateId ?? row.scriptTitle ?? "item"} — ${row.error ?? "failed"}`;
         }),
       ]);
+      // Keep the template ids so one failure out of ten does not mean
+      // regenerating the whole batch.
+      const ids = failures
+        .map((f) => (f as { templateId?: string }).templateId)
+        .filter((id): id is string => !!id);
+      if (ids.length) setFailedTemplateIds((prev) => [...new Set([...prev, ...ids])]);
     },
     []
   );
+
+  async function retryFailedScripts() {
+    const ids = failedTemplateIds;
+    if (ids.length === 0) return;
+    setWarnings([]);
+    setFailedTemplateIds([]);
+    await generateScripts(undefined, ids);
+  }
 
   async function generateAngles(): Promise<Angle[]> {
     setLoadingAngles(true);
@@ -215,7 +230,7 @@ export default function CreativePage() {
     }
   }
 
-  async function generateScripts(fromAngles?: Angle[]): Promise<ScriptData[]> {
+  async function generateScripts(fromAngles?: Angle[], onlyTemplateIds?: string[]): Promise<ScriptData[]> {
     setLoadingScripts(true);
     setError(null);
     try {
@@ -225,7 +240,12 @@ export default function CreativePage() {
 
       // Chunked for the same reason as generateStoryboards — 10 scripts in one
       // call runs ~100s, which is exactly Cloudflare's origin timeout.
-      const explicit = selectedTemplateIds.length > 0 ? selectedTemplateIds : null;
+      const explicit =
+        onlyTemplateIds && onlyTemplateIds.length > 0
+          ? onlyTemplateIds
+          : selectedTemplateIds.length > 0
+            ? selectedTemplateIds
+            : null;
       const total = explicit ? explicit.length : scriptCount;
       const newScripts: ScriptData[] = [];
 
@@ -510,12 +530,25 @@ export default function CreativePage() {
                 ))}
               </ul>
             </div>
-            <button
-              onClick={() => setWarnings([])}
-              className="text-xs font-medium text-amber-800 hover:underline shrink-0"
-            >
-              Dismiss
-            </button>
+            <div className="flex items-center gap-3 shrink-0">
+              {failedTemplateIds.length > 0 && !loadingScripts && (
+                <button
+                  onClick={retryFailedScripts}
+                  className="rounded-md bg-amber-800 px-2.5 py-1 text-[11px] font-medium text-amber-50"
+                >
+                  Retry {failedTemplateIds.length} failed
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setWarnings([]);
+                  setFailedTemplateIds([]);
+                }}
+                className="text-xs font-medium text-amber-800 hover:underline"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -618,6 +651,11 @@ export default function CreativePage() {
           />
         )}
 
+        <p className="text-[11px] text-muted-foreground">
+          Each script is one model call, plus a second one if it trips the compliance
+          check. Boarding a script is another call per storyboard.
+        </p>
+
         <div className="space-y-1.5">
           <label htmlFor="customBrief" className="text-xs font-medium">
             Your own idea, angle or style{" "}
@@ -712,6 +750,7 @@ export default function CreativePage() {
               {scripts.map((script) => (
                 <ScriptCard
                   key={script.id}
+                  projectId={projectId}
                   script={script}
                   selected={selectedScriptIds.has(script.id)}
                   expanded={expandedScript === script.id}

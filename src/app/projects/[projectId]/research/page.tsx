@@ -180,6 +180,32 @@ export default function ResearchPage() {
   }, []);
 
   const pendingWorker = sources.filter((s) => s.status === "pending_worker");
+
+  // Worker-backed sources finish minutes after the run does. Without this the
+  // report sits on "pending local worker" until someone re-runs research,
+  // even though the ads have already been saved.
+  useEffect(() => {
+    if (status !== "complete" || pendingWorker.length === 0) return;
+    let cancelled = false;
+    let rounds = 0;
+    const timer = setInterval(async () => {
+      if (cancelled || ++rounds > 30) return clearInterval(timer);
+      const data = await fetch(`/api/projects/${projectId}/research/status`)
+        .then((r) => r.json())
+        .catch(() => null);
+      if (cancelled || !data) return;
+      applyStatusPayload(data);
+      const stillPending = (data.sources || []).some(
+        (s: SourceStatus) => s.status === "pending_worker"
+      );
+      if (!stillPending) clearInterval(timer);
+    }, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, pendingWorker.length, projectId]);
   const missingKeys = sources.filter((s) => s.status === "skipped_no_key");
 
   return (

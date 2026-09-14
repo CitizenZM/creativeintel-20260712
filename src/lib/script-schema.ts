@@ -440,6 +440,38 @@ function numberOccursIn(value: number, sourceText: string): boolean {
  * list of absolute/curative words, confirms the CTA came from the approved
  * pool verbatim, and flags urgency copy the offer text never authorized.
  */
+/**
+ * Run the same forbidden / absolute-word and unsourced-number checks over one
+ * free-text block. Used when a human edits a script by hand — the structured
+ * beats are untouched, so only the prose they changed can be audited.
+ */
+export function auditScriptText(text: string, opts: ScriptClaimsAuditInput): ScriptClaimsAudit {
+  const claimsForbidden = (opts.claimsForbidden ?? []).filter(
+    (c): c is string => typeof c === "string" && c.trim().length > 0
+  );
+  const sourceText = opts.sourceText ?? "";
+  const violations: ScriptClaimsViolation[] = [];
+
+  for (const hit of findForbiddenMatches(text, claimsForbidden)) {
+    violations.push({ path: "body", text: hit, reason: `forbidden claim: "${hit}"` });
+  }
+  for (const hit of findAbsoluteMatches(text)) {
+    violations.push({ path: "body", text: hit, reason: `absolute/curative claim: "${hit}"` });
+  }
+  if (sourceText) {
+    for (const nc of extractNumericClaims(text)) {
+      if (!numberOccursIn(nc.value, sourceText)) {
+        violations.push({
+          path: "body",
+          text: nc.raw,
+          reason: `unsourced numeric claim: "${nc.raw}" does not appear in brand truth / briefing / claimsAllowed / offer text`,
+        });
+      }
+    }
+  }
+  return { ok: violations.length === 0, violations };
+}
+
 export function auditScriptClaims(script: ScriptV2, opts: ScriptClaimsAuditInput): ScriptClaimsAudit {
   const claimsForbidden = (opts.claimsForbidden ?? []).filter(
     (c): c is string => typeof c === "string" && c.trim().length > 0
