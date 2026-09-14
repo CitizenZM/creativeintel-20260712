@@ -87,6 +87,12 @@ function isAuthError(err: unknown): boolean {
   return status === 401 || status === 403;
 }
 
+/** Free-tier quota exhausted or too many requests — the next provider can likely serve this call. */
+function isRateLimitError(err: unknown): boolean {
+  const status = (err as { status?: number } | null)?.status;
+  return status === 429;
+}
+
 /** Translate a bare OpenAI model id into OpenRouter's namespaced form. */
 function toOpenRouterModel(model: string): string {
   if (model.includes("/")) return model;
@@ -283,8 +289,10 @@ async function createOnRoute(
 
 /**
  * Tries each provider in providerOrder() until one succeeds. A 401/403 disables
- * that provider for the rest of the process and falls through to the next one;
- * any other error is thrown immediately (it won't be fixed by switching keys).
+ * that provider for the rest of the process and falls through to the next one.
+ * A 429 (free-tier quota exhausted) falls through for this call only — it's
+ * usually transient, so the provider stays eligible for the next call. Any
+ * other error is thrown immediately (it won't be fixed by switching providers).
  */
 async function callModel(
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
@@ -303,10 +311,18 @@ async function callModel(
     try {
       return await createOnRoute(client, provider, messages, modelToUse, maxTokens);
     } catch (err) {
-      if (!isAuthError(err)) throw err;
-      console.warn(`[ai] ${provider} rejected the API key — disabling it for this process`);
-      _disabledProviders.add(provider);
-      lastErr = err;
+      if (isAuthError(err)) {
+        console.warn(`[ai] ${provider} rejected the API key — disabling it for this process`);
+        _disabledProviders.add(provider);
+        lastErr = err;
+        continue;
+      }
+      if (isRateLimitError(err)) {
+        console.warn(`[ai] ${provider} rate-limited (429) — trying the next provider`);
+        lastErr = err;
+        continue;
+      }
+      throw err;
     }
   }
 

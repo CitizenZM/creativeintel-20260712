@@ -108,7 +108,7 @@ export default async function StatusPage() {
 
   const env = [
     ["OPENAI_API_KEY", !!process.env.OPENAI_API_KEY, "Primary LLM + image model"],
-    ["GOOGLE_GENAI_API_KEY", !!process.env.GOOGLE_GENAI_API_KEY, "Gemini fallback"],
+    ["GEMINI_API_KEY / GOOGLE_API_KEY", !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY), "Gemini fallback (what claude-client.ts actually reads)"],
     ["OPENROUTER_API_KEY", !!process.env.OPENROUTER_API_KEY, "Last-resort LLM fallback"],
     ["META_ACCESS_TOKEN", !!process.env.META_ACCESS_TOKEN, "Meta Ad Library API source"],
     ["YOUTUBE_API_KEY", !!process.env.YOUTUBE_API_KEY, "YouTube search (HTML fallback works without it)"],
