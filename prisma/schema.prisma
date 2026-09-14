@@ -166,6 +166,9 @@ model Project {
   // LibTV canvas this project's studio runs render into (bound once, reused).
   libtvCanvasUuid String?
 
+  // Set to hide a finished or abandoned project from the default lists.
+  archivedAt DateTime?
+
   // Product definition — user-specified, foundational source of truth
   productUrl        String? // specific product page URL (Amazon PDP, DTC page)
   productName       String? // exact product name entered by user

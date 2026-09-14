@@ -42,6 +42,11 @@ export async function PATCH(
   for (const key of allowed) {
     if (body && typeof body === "object" && key in body) data[key] = body[key];
   }
+  // Archiving is a boolean at the API edge but a timestamp in the row, so the
+  // list can show when something was put away.
+  if (body && typeof body === "object" && "archived" in body) {
+    data.archivedAt = body.archived ? new Date() : null;
+  }
   try {
     const project = await prisma.project.update({ where: { id: projectId }, data });
     return NextResponse.json(project);

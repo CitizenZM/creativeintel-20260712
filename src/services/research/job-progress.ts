@@ -300,6 +300,8 @@ export function nestSteps(steps: JobStep[]): JobStep[] {
 const JOB_STALE_AFTER_MS = 6 * 60 * 1000;
 
 export async function failStaleJobs(projectId: string) {
+  // The project's own status has to come back with the job, or it sits on
+  // RESEARCHING forever — 11 of 27 projects were stuck that way.
   const { count } = await prisma.researchJob.updateMany({
     where: {
       projectId,
@@ -312,6 +314,17 @@ export async function failStaleJobs(projectId: string) {
       completedAt: new Date(),
     },
   });
+
+  if (count > 0) {
+    const assets = await prisma.contentAsset.count({ where: { projectId } });
+    await prisma.project
+      .updateMany({
+        where: { id: projectId, status: "RESEARCHING" },
+        // Keep whatever was collected — a partial run is still usable.
+        data: { status: assets > 0 ? "ANALYZED" : "ERROR" },
+      })
+      .catch(() => null);
+  }
   return count;
 }
 

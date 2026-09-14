@@ -792,6 +792,11 @@ export default function CreativePage() {
               size="sm"
               className="h-8 rounded-md text-xs"
               disabled={selectedScriptIds.size === 0}
+              title={
+                selectedScriptIds.size === 0
+                  ? "Tick at least one script above first — Studio renders a specific storyboard."
+                  : undefined
+              }
             >
               <Palette className="mr-1.5 h-3 w-3" />
               {STUDIO_CTA}

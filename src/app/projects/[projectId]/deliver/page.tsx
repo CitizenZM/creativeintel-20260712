@@ -55,12 +55,27 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
           <span className="text-xs font-normal text-muted-foreground">{delivered.length} ready · {runs.length} runs</span>
         </h3>
         {runs.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
-            No LibTV runs yet.{" "}
-            <Link href={`/projects/${projectId}/studio`} className="underline">
-              Open Studio
-            </Link>{" "}
-            to compile a storyboard into a production run.
+          <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground space-y-2">
+            <p>
+              Nothing rendered yet.{" "}
+              {storyboards.length > 0 ? (
+                <>
+                  You already have{" "}
+                  <strong className="text-foreground">
+                    {storyboards.length} storyboard{storyboards.length === 1 ? "" : "s"}
+                  </strong>{" "}
+                  ready to compile.
+                </>
+              ) : (
+                <>Write a script and build a storyboard first.</>
+              )}
+            </p>
+            <Link
+              href={`/projects/${projectId}/${storyboards.length > 0 ? "studio" : "creative"}`}
+              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs font-semibold text-background"
+            >
+              {storyboards.length > 0 ? "Compile a run in Studio" : "Go to Creative"} →
+            </Link>
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

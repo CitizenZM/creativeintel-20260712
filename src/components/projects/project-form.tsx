@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { CATEGORIES, CAMPAIGN_GOALS } from "@/lib/constants";
 import { projectPath } from "@/lib/project-slug";
+import { looksLikeUrl } from "@/lib/validations";
 import { Plus, Trash2, Loader2, ArrowRight, Link, Package, AlertCircle } from "lucide-react";
 
 interface CompetitorField {
@@ -36,6 +37,7 @@ export function ProjectForm() {
   const [briefingText, setBriefingText] = useState("");
   const [briefingFile, setBriefingFile] = useState<File | null>(null);
   const [scrapeWarning, setScrapeWarning] = useState<{ projectId: string; message: string } | null>(null);
+  const [duplicate, setDuplicate] = useState<{ projectId: string; message: string } | null>(null);
   const [competitors, setCompetitors] = useState<CompetitorField[]>([
     { name: "", url: "" },
   ]);
@@ -58,11 +60,12 @@ export function ProjectForm() {
     );
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent, allowDuplicate = false) {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setScrapeWarning(null);
+    if (!allowDuplicate) setDuplicate(null);
 
     const validCompetitors = competitors.filter((c) => c.name.trim());
     if (validCompetitors.length === 0) {
@@ -71,8 +74,17 @@ export function ProjectForm() {
       return;
     }
 
-    if (/^https?:\/\/|^www\./i.test(brandName.trim())) {
+    if (looksLikeUrl(brandName)) {
       setError('Brand name looks like a URL — enter the actual brand name (e.g. "Segway"), and put the URL in Brand Website URL instead.');
+      setLoading(false);
+      return;
+    }
+
+    const urlNamedCompetitor = validCompetitors.find((c) => looksLikeUrl(c.name));
+    if (urlNamedCompetitor) {
+      setError(
+        `Competitor "${urlNamedCompetitor.name}" is a URL — enter the competitor's name (e.g. "Ekster") and put the URL in the URL field beside it.`
+      );
       setLoading(false);
       return;
     }
@@ -93,8 +105,19 @@ export function ProjectForm() {
             name: c.name.trim(),
             url: c.url.trim() || undefined,
           })),
+          allowDuplicate: allowDuplicate || undefined,
         }),
       });
+
+      if (res.status === 409) {
+        const data = await res.json().catch(() => ({}));
+        setDuplicate({
+          projectId: data.duplicateProjectId,
+          message: data.error || "A project for this brand already exists.",
+        });
+        setLoading(false);
+        return;
+      }
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: "Request failed" }));
@@ -347,6 +370,31 @@ export function ProjectForm() {
       {error && (
         <div className="rounded-md border border-[var(--status-urgent)] bg-[var(--status-urgent-bg)] px-3 py-2 text-xs text-[var(--status-urgent-fg)]">
           {error}
+        </div>
+      )}
+
+      {duplicate && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+            <p>{duplicate.message}</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => router.push(`/projects/${duplicate.projectId}/overview`)}
+              className="rounded-md bg-foreground px-2.5 py-1 text-[11px] font-medium text-background"
+            >
+              Open the existing project
+            </button>
+            <button
+              type="button"
+              onClick={(e) => handleSubmit(e as unknown as React.FormEvent, true)}
+              className="rounded-md border border-amber-300 px-2.5 py-1 text-[11px] font-medium"
+            >
+              Create a second one anyway
+            </button>
+          </div>
         </div>
       )}
 

@@ -32,6 +32,34 @@ export async function POST(request: Request) {
     const data = createProjectSchema.parse(body);
 
     const workspace = await getActiveWorkspace();
+
+    // 27 projects had accumulated with the same brands created several times
+    // over. Same brand + same site in this workspace is almost always a
+    // re-run, not a second campaign — say so instead of silently forking.
+    const host = (() => {
+      try { return data.brandUrl ? new URL(data.brandUrl).host.replace(/^www\./, "") : null; }
+      catch { return null; }
+    })();
+    const duplicate = await prisma.project.findFirst({
+      where: {
+        workspaceId: workspace.id,
+        OR: [
+          { brandName: { equals: data.brandName.trim(), mode: "insensitive" } },
+          ...(host ? [{ brandUrl: { contains: host, mode: "insensitive" as const } }] : []),
+        ],
+      },
+      select: { id: true, brandName: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (duplicate && body.allowDuplicate !== true) {
+      return NextResponse.json(
+        {
+          error: `You already have a project for ${duplicate.brandName}. Open it, or resubmit with allowDuplicate to create a second one.`,
+          duplicateProjectId: duplicate.id,
+        },
+        { status: 409 }
+      );
+    }
     const brandProfile = await upsertBrandProfile({
       workspaceId: workspace.id,
       name: data.brandName,

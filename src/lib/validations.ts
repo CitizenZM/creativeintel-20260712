@@ -1,7 +1,20 @@
 import { z } from "zod";
 
+/**
+ * A URL pasted into a name field poisons everything downstream — it becomes
+ * the search term for every ad library and the "brand" the AI writes copy
+ * about. 12 of 44 stored competitors were URLs before this existed.
+ */
+export const looksLikeUrl = (v: string) => /^https?:\/\/|^www\./i.test(v.trim());
+
+const NAME_NOT_URL = (field: string) =>
+  `${field} looks like a URL — enter the actual name (e.g. "Ekster"), and put the URL in the URL field instead`;
+
 export const competitorSchema = z.object({
-  name: z.string().min(1, "Competitor name is required"),
+  name: z
+    .string()
+    .min(1, "Competitor name is required")
+    .refine((v) => !looksLikeUrl(v), NAME_NOT_URL("Competitor name")),
   url: z.string().url("Must be a valid URL").optional().or(z.literal("")),
 });
 
@@ -44,10 +57,7 @@ export const createProjectSchema = z.object({
   brandName: z
     .string()
     .min(1, "Brand name is required")
-    .refine(
-      (v) => !/^https?:\/\/|^www\./i.test(v.trim()),
-      "Brand name looks like a URL — enter the actual brand name (e.g. \"Segway\"), and put the URL in Brand Website URL instead"
-    ),
+    .refine((v) => !looksLikeUrl(v), NAME_NOT_URL("Brand name")),
   brandUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")),
   productUrl: optionalProductUrlSchema,
   productName: z.string().optional(),

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { projectPath } from "@/lib/project-slug";
 
 /**
@@ -11,6 +12,12 @@ import { projectPath } from "@/lib/project-slug";
  * is reloaded or the URL is shared.
  */
 export function ProjectUrlSync({ projectId, brandName }: { projectId: string; brandName: string }) {
+  // Client-side navigation inside a project keeps this layout mounted, so
+  // without the pathname in the deps the effect never re-runs and every
+  // in-project link (competitor detail, asset detail) drops back to the bare
+  // cuid it was rendered with.
+  const pathname = usePathname();
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const path = window.location.pathname;
@@ -21,7 +28,7 @@ export function ProjectUrlSync({ projectId, brandName }: { projectId: string; br
     if (desired === path) return;
 
     window.history.replaceState(window.history.state, "", `${desired}${window.location.search}${window.location.hash}`);
-  }, [projectId, brandName]);
+  }, [projectId, brandName, pathname]);
 
   return null;
 }
