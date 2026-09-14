@@ -85,7 +85,20 @@ export default async function StatusPage() {
       if (!latest.has(s.name)) latest.set(s.name, s);
     }
   }
-  const sources = [...latest.values()].sort((a, b) => a.name.localeCompare(b.name));
+  // A run's report is a snapshot taken while worker tasks were still queued.
+  // Showing "pending worker" when the queue is empty is simply wrong, so
+  // reconcile those rows against the live queue.
+  const sources = [...latest.values()]
+    .map((s) =>
+      s.status === "pending_worker" && queued === 0
+        ? {
+            ...s,
+            status: "ran" as const,
+            note: "the local worker has since drained the queue — re-run research to pull its results into the report",
+          }
+        : s
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const storage = getStorageStatus();
   const workerSeen = [lastAdTask?.completedAt ?? null, lastFetchTask?.completedAt ?? null]
