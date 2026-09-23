@@ -162,6 +162,9 @@ model Project {
   brandUrl     String?
   category     String?
   campaignGoal String?
+  // The creative intent that steers ranking, style picks and templates:
+  // storytelling | conversion | hybrid (see src/lib/style-categories.ts).
+  goalType     String?
 
   // LibTV canvas this project's studio runs render into (bound once, reused).
   libtvCanvasUuid String?
@@ -434,6 +437,7 @@ model NarrativePattern {
   examples       Json?
   bestPractices  Json?
   selected       Boolean       @default(false)
+  dismissed      Boolean       @default(false) // marked "not relevant" — hidden and ignored by generation
 
   createdAt DateTime @default(now())
 
@@ -452,6 +456,8 @@ model SellingPoint {
   competitorUsage Boolean @default(false)
   uniqueness      Float?
   selected        Boolean @default(false)
+  dismissed       Boolean @default(false)
+  addedByUser     Boolean @default(false)
 
   createdAt DateTime @default(now())
 
@@ -898,6 +904,9 @@ model CampaignSelection {
 
   // Reference videos (selected from content page)
   referenceVideoIds Json? // [contentAssetId, ...]
+
+  // Ad style categories the user picked on Insights (src/lib/style-categories.ts)
+  styleCategories Json? // string[]
 
   // Confirmation
   confirmedAt DateTime?

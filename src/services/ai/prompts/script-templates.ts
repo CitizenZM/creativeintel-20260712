@@ -287,8 +287,21 @@ export function templatesForPlatform(platformId?: string | null): ScriptTemplate
   return SCRIPT_TEMPLATES.filter((t) => !t.excludedPlatforms?.includes(p));
 }
 
-/** Default batch: spread across the three video types, best-fit platforms first. */
-export function defaultTemplateBatch(platformId?: string | null, count = 10): ScriptTemplate[] {
+/** Which funnel types lead the batch for each creative goal. */
+const GOAL_TYPE_ORDER: Record<string, VideoType[]> = {
+  conversion: ["PROMO_OFFER", "PRODUCT_INTRO", "AWARENESS_INTEREST"],
+  storytelling: ["AWARENESS_INTEREST", "PRODUCT_INTRO", "PROMO_OFFER"],
+};
+
+/**
+ * Default batch: spread across the three video types, best-fit platforms
+ * first; the project's goal type decides which type leads.
+ */
+export function defaultTemplateBatch(
+  platformId?: string | null,
+  count = 10,
+  goalType?: string | null
+): ScriptTemplate[] {
   const p = platformId?.toLowerCase();
   const pool = templatesForPlatform(p);
   const ranked = [...pool].sort((a, b) => {
@@ -303,7 +316,11 @@ export function defaultTemplateBatch(platformId?: string | null, count = 10): Sc
     AWARENESS_INTEREST: [],
   };
   for (const t of ranked) byType[t.videoType].push(t);
-  const order: VideoType[] = ["PRODUCT_INTRO", "AWARENESS_INTEREST", "PROMO_OFFER"];
+  const order: VideoType[] = (goalType && GOAL_TYPE_ORDER[goalType]) || [
+    "PRODUCT_INTRO",
+    "AWARENESS_INTEREST",
+    "PROMO_OFFER",
+  ];
   let i = 0;
   while (out.length < Math.min(count, pool.length)) {
     const list = byType[order[i % order.length]];

@@ -175,7 +175,7 @@ const ASPECTS = new Set(["9:16", "1:1", "16:9", "4:5"]);
  * identical terms to the rows already in the table rather than by a second,
  * divergent scoring rule.
  */
-function scoreStoredRow(row: ScoredRow): number {
+function scoreStoredRow(row: ScoredRow, goalType?: string | null): number {
   const spend = (row.adSpendEstimate ?? {}) as Record<string, unknown>;
   const impressionsLower =
     typeof spend.impressionsLower === "number" ? spend.impressionsLower : undefined;
@@ -201,7 +201,12 @@ function scoreStoredRow(row: ScoredRow): number {
     publishedAt: row.publishedAt?.toISOString(),
   } as unknown as AdCandidate;
 
-  return scoreCandidate(shim).score;
+  return scoreCandidate(shim, goalType).score;
+}
+
+async function projectGoalType(projectId: string): Promise<string | null> {
+  const p = await prisma.project.findUnique({ where: { id: projectId }, select: { goalType: true } });
+  return p?.goalType ?? null;
 }
 
 /**
@@ -221,8 +226,9 @@ export async function rerankOwner(
   })) as unknown as ScoredRow[];
   if (rows.length === 0) return { ranked: 0 };
 
+  const goalType = await projectGoalType(projectId);
   const ordered = rows
-    .map((row) => ({ row, score: scoreStoredRow(row) }))
+    .map((row) => ({ row, score: scoreStoredRow(row, goalType) }))
     .sort((a, b) => b.score - a.score);
 
   const nextRank = new Map<string, number | null>();
@@ -257,6 +263,7 @@ export async function rankAndSaveCandidates(params: {
   const ranked = rankByOwner(params.candidates, {
     topN: params.topN,
     knownOwnerIds: params.knownOwnerIds,
+    goalType: await projectGoalType(params.projectId),
   });
 
   let saved = 0;

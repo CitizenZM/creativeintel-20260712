@@ -4,6 +4,8 @@ import { createJob, failJob, runJobItems, runningJob } from "@/services/jobs";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { LIVE } from "@/services/creative-library";
+import { creativeDirectionLine, narrativeTypesFor } from "@/lib/style-categories";
+import type { NarrativeType } from "@/generated/prisma/enums";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { buildAngleGenerationPrompt } from "@/services/ai/prompts/angle-generation";
 import {
@@ -85,6 +87,11 @@ async function generateAngles(projectId: string) {
     });
     if (!project) throw new Error("Project not found");
 
+    const campaignSel = await prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null);
+    // Chosen styles restrict which mined patterns feed the prompt.
+    const styleTypes = narrativeTypesFor(campaignSel?.styleCategories);
+    const typeFilter = styleTypes.length ? { type: { in: styleTypes as NarrativeType[] } } : {};
+
     // What the user sent to script context on the Insights page outranks the
     // score-ordered defaults; fall back to top-N only when nothing is picked.
     const [pickedPoints, pickedPatterns, pickedInsights] = await Promise.all([
@@ -96,7 +103,7 @@ async function generateAngles(projectId: string) {
     const sellingPoints = pickedPoints.length
       ? pickedPoints
       : await prisma.sellingPoint.findMany({
-          where: { projectId },
+          where: { projectId, dismissed: false },
           orderBy: { strength: "desc" },
           take: 10,
         });
@@ -104,7 +111,7 @@ async function generateAngles(projectId: string) {
     const patterns = pickedPatterns.length
       ? pickedPatterns
       : await prisma.narrativePattern.findMany({
-          where: { projectId },
+          where: { projectId, dismissed: false, ...typeFilter },
           orderBy: { avgPerformance: "desc" },
         });
 
@@ -113,8 +120,7 @@ async function generateAngles(projectId: string) {
           .map((i) => `- ${i.title}: ${i.recommendation || i.description}`)
           .join("\n")}`
       : "";
-
-    const campaignSel = await prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null);
+    const direction = creativeDirectionLine(project.goalType, campaignSel?.styleCategories);
 
     // Get audience data
     const audience = await prisma.audienceProfile.findUnique({ where: { projectId } });
@@ -135,7 +141,7 @@ async function generateAngles(projectId: string) {
       painPoints: painPoints.map((p) => p.point),
       platformPreferences: platforms.filter((p) => p.adReceptivity === "high").map((p) => p.platform),
       briefing:
-        [project.briefingText, project.briefingParsed, insightBrief].filter(Boolean).join("\n\n") ||
+        [direction, project.briefingText, project.briefingParsed, insightBrief].filter(Boolean).join("\n\n") ||
         undefined,
       platformId: (campaignSel?.platform as string | null) || undefined,
     });

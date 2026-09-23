@@ -65,7 +65,7 @@ export async function POST(
         return NextResponse.json({ error: "No valid templateIds" }, { status: 400 });
       }
     } else {
-      templates = defaultTemplateBatch(ctx.platformId, count);
+      templates = defaultTemplateBatch(ctx.platformId, count, ctx.goalType);
     }
 
     const angles = Array.isArray(body.angles) ? body.angles : [];

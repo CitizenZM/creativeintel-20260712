@@ -14,6 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CATEGORIES, CAMPAIGN_GOALS } from "@/lib/constants";
+import { GoalTypePicker } from "@/components/projects/goal-type-picker";
+import type { GoalType } from "@/lib/style-categories";
 import { projectPath } from "@/lib/project-slug";
 import { looksLikeUrl } from "@/lib/validations";
 import { Plus, Trash2, Loader2, ArrowRight, Link, Package, AlertCircle } from "lucide-react";
@@ -34,6 +36,7 @@ export function ProjectForm() {
   const [productName, setProductName] = useState("");
   const [category, setCategory] = useState("");
   const [campaignGoal, setCampaignGoal] = useState("");
+  const [goalType, setGoalType] = useState<GoalType | null>(null);
   const [briefingText, setBriefingText] = useState("");
   const [briefingFile, setBriefingFile] = useState<File | null>(null);
   const [scrapeWarning, setScrapeWarning] = useState<{ projectId: string; message: string } | null>(null);
@@ -100,6 +103,7 @@ export function ProjectForm() {
           productName: productName.trim() || undefined,
           category: category || undefined,
           campaignGoal: campaignGoal || undefined,
+          goalType: goalType ?? undefined,
           briefingText: briefingText.trim() || undefined,
           competitors: validCompetitors.map((c) => ({
             name: c.name.trim(),
@@ -285,6 +289,16 @@ export function ProjectForm() {
               </SelectContent>
             </Select>
           </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            What kind of ads?
+          </Label>
+          <p className="text-[11px] text-muted-foreground">
+            Steers which competitor ads count as the best examples and which styles we recommend. You can
+            change it later.
+          </p>
+          <GoalTypePicker value={goalType} onChange={setGoalType} disabled={loading} />
         </div>
       </div>
 

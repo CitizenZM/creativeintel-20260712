@@ -63,6 +63,7 @@ export const createProjectSchema = z.object({
   productName: z.string().optional(),
   category: z.string().optional(),
   campaignGoal: z.string().optional(),
+  goalType: z.enum(["storytelling", "conversion", "hybrid"]).optional(),
   briefingText: z.string().optional(),
   competitors: z.array(competitorSchema).min(1, "Add at least one competitor"),
 });
