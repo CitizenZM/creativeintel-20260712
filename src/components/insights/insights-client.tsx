@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import {
   MapPin, Users, Pencil, Check, X, Plus, Trash2,
   ChevronDown, ChevronUp, ArrowRight, Lightbulb, Target,
-  Zap, CheckCircle2, XCircle, Sparkles,
+  Zap, CheckCircle2, XCircle, Sparkles, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,8 @@ interface SellingPoint {
   uniqueness: number;
   frequency: number;
   selected?: boolean;
+  dismissed?: boolean;
+  addedByUser?: boolean;
 }
 interface NarrativePattern {
   id: string;
@@ -57,6 +59,7 @@ interface NarrativePattern {
   avgPerformance: number | null;
   bestPractices: unknown;
   selected?: boolean;
+  dismissed?: boolean;
 }
 
 type SelectionKind = "insight" | "sellingPoint" | "pattern";
@@ -98,7 +101,61 @@ function useSavedSelection(projectId: string, kind: SelectionKind, initial: stri
     [projectId, kind]
   );
 
+  /** Mirror a change the server already made (e.g. a new row saved as selected). */
+  const adopt = useCallback((id: string, on: boolean) => {
+    setIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  return { ids, set, adopt, error };
+}
+
+/** "Not relevant" for selling points and patterns: hidden and kept out of generation. */
+function useDismissed(projectId: string, kind: "sellingPoint" | "pattern", initial: string[]) {
+  const [ids, setIds] = useState<Set<string>>(() => new Set(initial));
+  const [error, setError] = useState<string | null>(null);
+  const set = useCallback(
+    async (id: string, dismissed: boolean) => {
+      setError(null);
+      const flip = (on: boolean) =>
+        setIds((prev) => {
+          const next = new Set(prev);
+          if (on) next.add(id);
+          else next.delete(id);
+          return next;
+        });
+      flip(dismissed);
+      const res = await fetch(`/api/projects/${projectId}/insights/selection`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, ids: [id], dismissed }),
+      }).catch(() => null);
+      if (!res?.ok) {
+        flip(!dismissed);
+        setError("Couldn't save that change — try again.");
+      }
+      return !!res?.ok;
+    },
+    [projectId, kind]
+  );
   return { ids, set, error };
+}
+
+function DismissButton({ dismissed, onClick }: { dismissed: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="text-[10px] font-medium text-muted-foreground hover:text-foreground whitespace-nowrap"
+      title={dismissed ? "Use this again" : "Hide this and keep it out of angles and scripts"}
+    >
+      {dismissed ? "Restore" : "Not relevant"}
+    </button>
+  );
 }
 
 function SaveError({ message }: { message: string | null }) {
@@ -177,6 +234,55 @@ function SendToScriptBadge({ active, onToggle }: { active: boolean; onToggle: ()
   );
 }
 
+/**
+ * Ask the AI for more settings or roles; they are appended to the brand's
+ * list (and saved) so scripts can be cast from them.
+ */
+function GenerateMoreButton<T>({
+  projectId,
+  kind,
+  onAdded,
+}: {
+  projectId: string;
+  kind: "environment" | "actor";
+  onAdded: (all: T[]) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/brand/options`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, count: 3 }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !Array.isArray(data.all)) throw new Error(data.error || "Could not generate options");
+      onAdded(data.all as T[]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate options");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <span className="inline-flex flex-col items-start gap-1">
+      <button
+        type="button"
+        onClick={run}
+        disabled={busy}
+        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-60 px-1 py-2"
+      >
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+        {busy ? `Generating 3 ${kind === "environment" ? "settings" : "roles"}…` : `Generate 3 more ${kind === "environment" ? "settings" : "roles"}`}
+      </button>
+      {error && <span className="text-[11px] text-red-600 px-1">{error}</span>}
+    </span>
+  );
+}
+
 // ─── SECTION 1: Environments (editable, priority top) ─────────────────────────
 
 export function EnvironmentsSection({
@@ -214,9 +320,12 @@ export function EnvironmentsSection({
       <MapPin className="h-7 w-7 mx-auto mb-2 text-muted-foreground/40" />
       <p className="text-sm text-muted-foreground">No environments defined</p>
       <p className="text-xs text-muted-foreground mt-1 mb-3">Run research or add environments manually</p>
-      <Button size="sm" variant="outline" onClick={addEnv} className="h-7 text-xs gap-1">
-        <Plus className="h-3 w-3" /> Add Environment
-      </Button>
+      <div className="flex items-center justify-center gap-3 flex-wrap">
+        <Button size="sm" variant="outline" onClick={addEnv} className="h-7 text-xs gap-1">
+          <Plus className="h-3 w-3" /> Add Environment
+        </Button>
+        <GenerateMoreButton<UseEnvironment> projectId={projectId} kind="environment" onAdded={setEnvs} />
+      </div>
     </div>
   );
 
@@ -274,9 +383,12 @@ export function EnvironmentsSection({
           )}
         </div>
       ))}
-      <button onClick={addEnv} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-1 py-2">
-        <Plus className="h-3.5 w-3.5" /> Add environment
-      </button>
+      <div className="flex items-center gap-4 flex-wrap">
+        <button onClick={addEnv} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-1 py-2">
+          <Plus className="h-3.5 w-3.5" /> Add environment
+        </button>
+        <GenerateMoreButton<UseEnvironment> projectId={projectId} kind="environment" onAdded={setEnvs} />
+      </div>
     </div>
   );
 }
@@ -313,9 +425,12 @@ export function ActorSettingsSection({
     <div className="rounded-xl border border-dashed border-border p-5 text-center">
       <Users className="h-7 w-7 mx-auto mb-2 text-muted-foreground/40" />
       <p className="text-sm text-muted-foreground">No actor roles defined</p>
-      <Button size="sm" variant="outline" onClick={addActor} className="h-7 text-xs gap-1 mt-3">
-        <Plus className="h-3 w-3" /> Add Actor Role
-      </Button>
+      <div className="flex items-center justify-center gap-3 flex-wrap mt-3">
+        <Button size="sm" variant="outline" onClick={addActor} className="h-7 text-xs gap-1">
+          <Plus className="h-3 w-3" /> Add Actor Role
+        </Button>
+        <GenerateMoreButton<ActorSetting> projectId={projectId} kind="actor" onAdded={setActors} />
+      </div>
     </div>
   );
 
@@ -381,9 +496,12 @@ export function ActorSettingsSection({
           )}
         </div>
       ))}
-      <button onClick={addActor} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-1 py-2">
-        <Plus className="h-3.5 w-3.5" /> Add actor role
-      </button>
+      <div className="flex items-center gap-4 flex-wrap">
+        <button onClick={addActor} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-1 py-2">
+          <Plus className="h-3.5 w-3.5" /> Add actor role
+        </button>
+        <GenerateMoreButton<ActorSetting> projectId={projectId} kind="actor" onAdded={setActors} />
+      </div>
     </div>
   );
 }
@@ -595,12 +713,83 @@ export function SellingPointsSection({
     "sellingPoint",
     sellingPoints.filter((sp) => sp.selected).map((sp) => sp.id)
   );
+  const dismissed = useDismissed(
+    projectId,
+    "sellingPoint",
+    sellingPoints.filter((sp) => sp.dismissed).map((sp) => sp.id)
+  );
+  const [items, setItems] = useState<SellingPoint[]>(sellingPoints);
+  const [showDismissed, setShowDismissed] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  async function addPoint() {
+    const point = draft.trim();
+    if (!point) return;
+    setAdding(true);
+    setAddError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/selling-points`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ point }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.sellingPoint) throw new Error(data.error || "Could not add");
+      const sp = data.sellingPoint;
+      setItems((prev) => [
+        { id: sp.id, point: sp.point, category: sp.category, strength: sp.strength ?? 70, uniqueness: 0, frequency: 0, selected: true, addedByUser: true },
+        ...prev,
+      ]);
+      saved.adopt(sp.id, true);
+      setDraft("");
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : "Could not add");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const hiddenCount = items.filter((sp) => dismissed.ids.has(sp.id)).length;
+  const visible = items.filter((sp) => showDismissed || !dismissed.ids.has(sp.id));
 
   return (
     <div className="space-y-2">
-      <SaveError message={saved.error} />
-      {sellingPoints.map(sp => (
-        <div key={sp.id} className="rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3">
+      <SaveError message={saved.error ?? dismissed.error} />
+      <form
+        onSubmit={(e) => { e.preventDefault(); void addPoint(); }}
+        className="flex gap-2"
+      >
+        <label htmlFor="new-selling-point" className="sr-only">Add a selling point</label>
+        <input
+          id="new-selling-point"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Add a selling point the analysis missed…"
+          className="flex-1 min-w-0 rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+          disabled={adding}
+        />
+        <button
+          type="submit"
+          disabled={adding || !draft.trim()}
+          className="inline-flex items-center gap-1 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-50"
+        >
+          <Plus className="h-3 w-3" /> Add
+        </button>
+      </form>
+      {addError && <p className="text-xs text-red-600">{addError}</p>}
+      {items.length === 0 && (
+        <p className="text-xs text-muted-foreground">No selling points yet — run the analysis or add your own.</p>
+      )}
+      {visible.map(sp => (
+        <div
+          key={sp.id}
+          className={cn(
+            "rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3",
+            dismissed.ids.has(sp.id) && "opacity-50"
+          )}
+        >
           {/* Strength bar on left */}
           <div className="flex-shrink-0 w-1 h-10 rounded-full bg-muted overflow-hidden">
             <div className="w-full rounded-full bg-foreground/60 transition-all" style={{ height: `${sp.strength}%` }} />
@@ -612,14 +801,33 @@ export function SellingPointsSection({
               <span className="text-[10px] text-muted-foreground">Strength: {sp.strength}</span>
               <span className="text-[10px] text-muted-foreground">Unique: {sp.uniqueness}</span>
               <span className="text-[10px] text-muted-foreground">{sp.frequency}×</span>
+              {sp.addedByUser && <span className="text-[10px] font-medium text-muted-foreground">added by you</span>}
             </div>
           </div>
-          <SendToScriptBadge
-            active={saved.ids.has(sp.id)}
-            onToggle={() => void saved.set([sp.id], !saved.ids.has(sp.id))}
+          <DismissButton
+            dismissed={dismissed.ids.has(sp.id)}
+            onClick={async () => {
+              const next = !dismissed.ids.has(sp.id);
+              if ((await dismissed.set(sp.id, next)) && next) saved.adopt(sp.id, false);
+            }}
           />
+          {!dismissed.ids.has(sp.id) && (
+            <SendToScriptBadge
+              active={saved.ids.has(sp.id)}
+              onToggle={() => void saved.set([sp.id], !saved.ids.has(sp.id))}
+            />
+          )}
         </div>
       ))}
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowDismissed((v) => !v)}
+          className="text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          {showDismissed ? "Hide dismissed" : `Show ${hiddenCount} dismissed`}
+        </button>
+      )}
     </div>
   );
 }
@@ -645,12 +853,24 @@ export function NarrativePatternsSection({
     "pattern",
     patterns.filter((p) => p.selected).map((p) => p.id)
   );
+  const dismissed = useDismissed(
+    projectId,
+    "pattern",
+    patterns.filter((p) => p.dismissed).map((p) => p.id)
+  );
+  const [showDismissed, setShowDismissed] = useState(false);
+  const hiddenCount = patterns.filter((p) => dismissed.ids.has(p.id)).length;
+  const visible = patterns.filter((p) => showDismissed || !dismissed.ids.has(p.id));
+  const error = saved.error ?? dismissed.error;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-      {saved.error && <div className="lg:col-span-2"><SaveError message={saved.error} /></div>}
-      {patterns.map(p => (
-        <div key={p.id} className="rounded-xl border border-border bg-card p-4 space-y-3">
+      {error && <div className="lg:col-span-2"><SaveError message={error} /></div>}
+      {visible.map(p => (
+        <div
+          key={p.id}
+          className={cn("rounded-xl border border-border bg-card p-4 space-y-3", dismissed.ids.has(p.id) && "opacity-50")}
+        >
           <div className="flex items-start justify-between gap-2">
             <div>
               <p className="text-sm font-semibold">{NARRATIVE_LABELS[p.type] || p.name}</p>
@@ -667,10 +887,21 @@ export function NarrativePatternsSection({
           </div>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>Used {p.frequency}× in top content</span>
-            <SendToScriptBadge
-              active={saved.ids.has(p.id)}
-              onToggle={() => void saved.set([p.id], !saved.ids.has(p.id))}
-            />
+            <span className="flex items-center gap-3">
+              <DismissButton
+                dismissed={dismissed.ids.has(p.id)}
+                onClick={async () => {
+                  const next = !dismissed.ids.has(p.id);
+                  if ((await dismissed.set(p.id, next)) && next) saved.adopt(p.id, false);
+                }}
+              />
+              {!dismissed.ids.has(p.id) && (
+                <SendToScriptBadge
+                  active={saved.ids.has(p.id)}
+                  onToggle={() => void saved.set([p.id], !saved.ids.has(p.id))}
+                />
+              )}
+            </span>
           </div>
           {(p.bestPractices as string[])?.length > 0 && (
             <div className="rounded-lg bg-muted/50 p-2.5 space-y-1">
@@ -686,6 +917,15 @@ export function NarrativePatternsSection({
           )}
         </div>
       ))}
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowDismissed((v) => !v)}
+          className="lg:col-span-2 justify-self-start text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          {showDismissed ? "Hide dismissed" : `Show ${hiddenCount} dismissed`}
+        </button>
+      )}
     </div>
   );
 }

@@ -24,6 +24,8 @@ import { BrandKitPanel } from "@/components/dashboard/brand-kit-panel";
 import { CampaignSelection } from "@/components/dashboard/campaign-selection";
 import { getBrandKitCompleteness } from "@/services/brand-kit";
 import { CheckCircle2, AlertCircle } from "lucide-react";
+import { GoalTypeSetting } from "@/components/projects/goal-type-picker";
+import { isGoalType } from "@/lib/style-categories";
 
 export default async function OverviewPage({
   params,
@@ -96,6 +98,8 @@ export default async function OverviewPage({
           icon="refresh"
         />
       </div>
+
+      <GoalTypeSetting projectId={projectId} initial={isGoalType(project.goalType) ? project.goalType : null} />
 
       {/* Product Definition — user-controlled source of truth */}
       <section className="space-y-3">

@@ -130,6 +130,7 @@ export async function POST(request: Request) {
         brandUrl: data.brandUrl || null,
         category: data.category || null,
         campaignGoal: data.campaignGoal || null,
+        goalType: data.goalType ?? null,
         briefingText: data.briefingText || null,
         productUrl: data.productUrl || null,
         productName: data.productName || productPageTitle || null,

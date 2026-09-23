@@ -15,6 +15,7 @@ import {
   type ScriptV2,
 } from "@/lib/script-schema";
 import { NarrativeType } from "@/generated/prisma/enums";
+import { creativeDirectionLine, sanitizeStyleCategories } from "@/lib/style-categories";
 
 const VALID_NARRATIVE_TYPES: NarrativeType[] = [
   "PROBLEM_SOLUTION",
@@ -54,6 +55,8 @@ export interface ScriptContext {
     campaignGoal: string | null;
     briefingText: string | null;
   };
+  goalType: string | null;
+  styleCategories: string[];
   sellingPoints: string[];
   platformId?: string;
   totalDurationSec: number;
@@ -89,7 +92,7 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
       // Points the user sent to script context lead; the strongest others fill
       // the remaining slots.
       prisma.sellingPoint.findMany({
-        where: { projectId },
+        where: { projectId, dismissed: false },
         orderBy: [{ selected: "desc" }, { strength: "desc" }],
         take: 5,
       }),
@@ -136,6 +139,10 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     nicheResearch = [picked, nicheResearch].filter(Boolean).join("\n\n").slice(0, 2200);
   }
 
+  // Goal and chosen styles lead: they are the brief every script must follow.
+  const direction = creativeDirectionLine(project.goalType, campaignSel?.styleCategories);
+  if (direction) nicheResearch = [direction, nicheResearch].filter(Boolean).join("\n\n").slice(0, 2800);
+
   const teardowns = await loadTeardownHighlights(projectId);
 
   const ctaOptions = (
@@ -164,6 +171,8 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
       campaignGoal: project.campaignGoal,
       briefingText: project.briefingText,
     },
+    goalType: project.goalType,
+    styleCategories: sanitizeStyleCategories(campaignSel?.styleCategories),
     sellingPoints: sellingPoints.map((sp) => sp.point),
     platformId,
     totalDurationSec: (campaignSel?.totalDurationSec as number | null) || 30,

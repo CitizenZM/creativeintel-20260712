@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { isGoalType } from "@/lib/style-categories";
 
 export async function GET(
   _request: Request,
@@ -41,6 +42,12 @@ export async function PATCH(
   const data: Record<string, unknown> = {};
   for (const key of allowed) {
     if (body && typeof body === "object" && key in body) data[key] = body[key];
+  }
+  if (body && typeof body === "object" && "goalType" in body) {
+    if (body.goalType !== null && !isGoalType(body.goalType)) {
+      return NextResponse.json({ error: "goalType must be storytelling, conversion or hybrid" }, { status: 400 });
+    }
+    data.goalType = body.goalType;
   }
   // Archiving is a boolean at the API edge but a timestamp in the row, so the
   // list can show when something was put away.

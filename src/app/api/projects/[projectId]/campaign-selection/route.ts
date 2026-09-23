@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { sanitizeStyleCategories } from "@/lib/style-categories";
 
 // Only these fields may be written from the request body. A raw `...body` spread
 // would let an unknown field or a wrong-typed value (e.g. totalDurationSec as a
@@ -35,6 +36,7 @@ function sanitizeSelection(body: Record<string, unknown>): Record<string, unknow
     if (Number.isFinite(n)) data.totalDurationSec = Math.round(n);
   }
   if (typeof body.confirmed === "boolean") data.confirmed = body.confirmed;
+  if (body.styleCategories !== undefined) data.styleCategories = sanitizeStyleCategories(body.styleCategories);
   return data;
 }
 

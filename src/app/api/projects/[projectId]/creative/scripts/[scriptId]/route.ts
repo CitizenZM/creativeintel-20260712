@@ -24,15 +24,75 @@ export async function PATCH(
     title?: string;
     body?: string;
     status?: unknown;
+    selectedHookIdx?: unknown;
+    selectedCtaIdx?: unknown;
+    roleName?: unknown;
+    environmentName?: unknown;
+    restore?: unknown;
   };
+
+  if (body.restore === true) {
+    // Bring back the script and the storyboards archived together with it.
+    const archived = await prisma.script.findFirst({
+      where: { id: scriptId, projectId, deletedAt: { not: null } },
+      select: { deletedAt: true },
+    });
+    if (!archived) return NextResponse.json({ error: "No archived script with that id" }, { status: 404 });
+    await prisma.$transaction([
+      prisma.script.update({ where: { id: scriptId }, data: { deletedAt: null } }),
+      prisma.storyboard.updateMany({
+        where: { projectId, scriptId, deletedAt: archived.deletedAt },
+        data: { deletedAt: null },
+      }),
+    ]);
+    const boards = await prisma.storyboard.findMany({
+      where: { projectId, scriptId, deletedAt: null },
+      orderBy: { version: "desc" },
+      select: { id: true, isActive: true },
+    });
+    if (boards.length && !boards.some((b) => b.isActive)) {
+      await prisma.storyboard.update({ where: { id: boards[0].id }, data: { isActive: true } });
+    }
+    return NextResponse.json({ ok: true });
+  }
 
   const existing = await prisma.script.findFirst({
     where: { id: scriptId, projectId, ...LIVE },
-    select: { id: true },
+    select: { id: true, hookVariants: true, ctaVariants: true },
   });
   if (!existing) return NextResponse.json({ error: "Script not found" }, { status: 404 });
 
-  const data: { title?: string; body?: string; status?: string } = {};
+  const data: {
+    title?: string;
+    body?: string;
+    status?: string;
+    selectedHookIdx?: number | null;
+    selectedCtaIdx?: number | null;
+    roleName?: string | null;
+    environmentName?: string | null;
+  } = {};
+
+  const optionIndex = (value: unknown, options: unknown): number | null | "invalid" => {
+    if (value === null) return null;
+    const len = Array.isArray(options) ? options.length : 0;
+    return Number.isInteger(value) && (value as number) >= 0 && (value as number) < len ? (value as number) : "invalid";
+  };
+  for (const [key, options] of [
+    ["selectedHookIdx", existing.hookVariants],
+    ["selectedCtaIdx", existing.ctaVariants],
+  ] as const) {
+    if (body[key] === undefined) continue;
+    const idx = optionIndex(body[key], options);
+    if (idx === "invalid") return NextResponse.json({ error: `${key} is not one of this script's options` }, { status: 400 });
+    data[key] = idx;
+  }
+  for (const key of ["roleName", "environmentName"] as const) {
+    if (body[key] === undefined) continue;
+    if (body[key] !== null && typeof body[key] !== "string") {
+      return NextResponse.json({ error: `${key} must be a string or null` }, { status: 400 });
+    }
+    data[key] = typeof body[key] === "string" ? (body[key] as string).trim().slice(0, 120) || null : null;
+  }
   if (typeof body.title === "string" && body.title.trim()) data.title = body.title.trim().slice(0, 300);
   if (typeof body.body === "string" && body.body.trim()) data.body = body.body.trim();
   if (body.status !== undefined) {

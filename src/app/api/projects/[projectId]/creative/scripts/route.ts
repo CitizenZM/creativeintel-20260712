@@ -75,7 +75,7 @@ export async function POST(
     if (!ctx) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const template =
-      getScriptTemplate(body.templateId) ?? defaultTemplateBatch(ctx.platformId, 1)[0];
+      getScriptTemplate(body.templateId) ?? defaultTemplateBatch(ctx.platformId, 1, ctx.goalType)[0];
     if (!template) {
       return NextResponse.json({ error: "Unknown templateId" }, { status: 400 });
     }

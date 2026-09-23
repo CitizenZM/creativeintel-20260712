@@ -6,13 +6,9 @@ import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import type { JobView } from "@/services/jobs";
 
-export function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  if (m < 60) return s ? `${m} min ${s} s` : `${m} min`;
-  return `${Math.floor(m / 60)} h ${m % 60} min`;
-}
+import { formatDuration } from "@/lib/format-duration";
+
+export { formatDuration };
 
 const STATUS_LABEL: Record<string, string> = {
   queued: "Starting",

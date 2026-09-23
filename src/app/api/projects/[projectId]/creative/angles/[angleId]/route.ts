@@ -11,7 +11,15 @@ export async function PATCH(
   { params }: { params: Promise<{ projectId: string; angleId: string }> }
 ) {
   const { projectId, angleId } = await params;
-  const body = (await request.json().catch(() => ({}))) as { status?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { status?: unknown; restore?: unknown };
+  if (body.restore === true) {
+    const { count } = await prisma.angle.updateMany({
+      where: { id: angleId, projectId, deletedAt: { not: null } },
+      data: { deletedAt: null },
+    });
+    if (!count) return NextResponse.json({ error: "No archived angle with that id" }, { status: 404 });
+    return NextResponse.json({ ok: true });
+  }
   if (!isSelectionStatus(body.status)) {
     return NextResponse.json({ error: "status must be draft or selected" }, { status: 400 });
   }

@@ -65,7 +65,13 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
   ] = await Promise.all([
     prisma.project.findUnique({
       where: { id: projectId },
-      select: { productName: true, productUrl: true, campaignGoal: true },
+      select: {
+        productName: true,
+        productUrl: true,
+        campaignGoal: true,
+        goalType: true,
+        campaignSelection: { select: { styleCategories: true } },
+      },
     }),
     prisma.brandKit.findUnique({ where: { projectId }, select: { completenessScore: true } }),
     prisma.competitor.count({ where: { projectId } }),
@@ -110,6 +116,7 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
   const setupCriteria: StageCriterion[] = [
     { label: "Define the product (name or product URL)", met: !!(project?.productName || project?.productUrl) },
     { label: "Set the campaign goal", met: !!project?.campaignGoal },
+    { label: "Choose storytelling, conversion or hybrid ads", met: !!project?.goalType },
     { label: `Complete the Brand Kit to 60% (now ${brandKitScore}%)`, met: brandKitScore >= 60 },
   ];
   const researchCriteria: StageCriterion[] = [
@@ -120,6 +127,12 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
   ];
   const insightsCriteria: StageCriterion[] = [
     { label: "Analyse what competitors run (ad teardowns)", met: teardowns > 0 },
+    {
+      label: "Pick at least one ad style",
+      met:
+        Array.isArray(project?.campaignSelection?.styleCategories) &&
+        (project.campaignSelection.styleCategories as unknown[]).length > 0,
+    },
     { label: "Send at least one insight, selling point or pattern to scripts", met: picked > 0 },
   ];
   const creativeCriteria: StageCriterion[] = [

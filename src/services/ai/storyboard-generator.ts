@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma/client";
+import { prisma } from "@/lib/db";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { buildStoryboardPrompt } from "@/services/ai/prompts/storyboard";
 import { getScriptTemplate, DEFAULT_BEATS } from "@/services/ai/prompts/script-templates";
@@ -54,6 +55,45 @@ interface ScriptLike {
   hook?: unknown;
   bodyBeats?: unknown;
   cta?: unknown;
+  selectedHookIdx?: number | null;
+  selectedCtaIdx?: number | null;
+  roleName?: string | null;
+  environmentName?: string | null;
+}
+
+/** The chosen option first, so every consumer that reads [0] gets the user's pick. */
+function pickFirst(options: string[], idx: number | null | undefined): string[] {
+  if (idx == null || idx < 0 || idx >= options.length) return options;
+  return [options[idx], ...options.filter((_, i) => i !== idx)];
+}
+
+/** "Cast / Setting" lines for the script's chosen role and environment. */
+async function castingDirection(projectId: string, script: ScriptLike): Promise<string | undefined> {
+  if (!script.roleName && !script.environmentName) return undefined;
+  const brand = await prisma.brand
+    .findUnique({ where: { projectId }, select: { actorSettings: true, useEnvironments: true } })
+    .catch(() => null);
+  const actors = (Array.isArray(brand?.actorSettings) ? brand.actorSettings : []) as {
+    role?: string;
+    ageRange?: string;
+    visualDescription?: string;
+  }[];
+  const envs = (Array.isArray(brand?.useEnvironments) ? brand.useEnvironments : []) as {
+    name?: string;
+    description?: string;
+  }[];
+  const lines: string[] = [];
+  if (script.roleName) {
+    const a = actors.find((x) => x.role === script.roleName);
+    lines.push(
+      `Cast: ${script.roleName}${a?.ageRange ? ` (${a.ageRange})` : ""}${a?.visualDescription ? ` — ${a.visualDescription}` : ""}`
+    );
+  }
+  if (script.environmentName) {
+    const e = envs.find((x) => x.name === script.environmentName);
+    lines.push(`Setting: ${script.environmentName}${e?.description ? ` — ${e.description}` : ""}`);
+  }
+  return lines.join("\n");
 }
 
 interface ProjectLike {
@@ -92,8 +132,15 @@ export async function buildStoryboardCreateData(
   campaignSel: CampaignLike | null,
   extras: StoryboardBuildExtras = {}
 ): Promise<Prisma.StoryboardUncheckedCreateInput> {
-  const hooks = (Array.isArray(script.hookVariants) ? script.hookVariants : []) as string[];
-  const ctas = (Array.isArray(script.ctaVariants) ? script.ctaVariants : []) as string[];
+  const hooks = pickFirst(
+    (Array.isArray(script.hookVariants) ? script.hookVariants : []) as string[],
+    script.selectedHookIdx
+  );
+  const ctas = pickFirst(
+    (Array.isArray(script.ctaVariants) ? script.ctaVariants : []) as string[],
+    script.selectedCtaIdx
+  );
+  const casting = await castingDirection(projectId, script);
 
   const totalDurationSec = script.totalDurationSec || campaignSel?.totalDurationSec || 30;
 
@@ -120,7 +167,13 @@ export async function buildStoryboardCreateData(
     scriptBody: script.body,
     hooks,
     ctas,
-    approvedCtaText: extras.approvedCtaText || structuredCta?.text || ctas[0] || undefined,
+    // An explicitly picked CTA option beats the structured one.
+    approvedCtaText:
+      extras.approvedCtaText ||
+      (script.selectedCtaIdx != null ? ctas[0] : undefined) ||
+      structuredCta?.text ||
+      ctas[0] ||
+      undefined,
     approvedOffer: extras.approvedOffer || structuredCta?.offer || undefined,
     platform: campaignSel?.platform || "TikTok",
     totalDurationSec,
@@ -129,7 +182,7 @@ export async function buildStoryboardCreateData(
     beats,
     scenes,
     brandTruth: extras.brandTruth,
-    style: extras.visualDirection || undefined,
+    style: [extras.visualDirection, casting].filter(Boolean).join("\n") || undefined,
   });
 
   // Each rich frame (imagePrompt + videoPrompt + 9 short fields) costs ~780

@@ -17,6 +17,8 @@ import {
 } from "@/components/insights/insights-client";
 import { CompetitorsSection, type CompetitorSummaryView } from "@/components/insights/competitors-section";
 import { AnalysisRunner } from "@/components/insights/analysis-runner";
+import { StylePicker, type StyleCategoryView } from "@/components/insights/style-picker";
+import { STYLE_CATEGORIES, isGoalType, isRecommendedFor, sanitizeStyleCategories } from "@/lib/style-categories";
 import { getConfiguredModelLabel } from "@/services/ai/claude-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -145,13 +147,13 @@ function TimelineDiagramServer({ timeline }: { timeline: VideoTimeline }) {
 export default async function InsightsListPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
 
-  const [patterns, sellingPoints, insights, deepAnalysis, brand, project, competitorRows] = await Promise.all([
+  const [patterns, sellingPoints, insights, deepAnalysis, brand, project, competitorRows, campaignSel, styledAssets] = await Promise.all([
     prisma.narrativePattern.findMany({ where: { projectId }, orderBy: { avgPerformance: "desc" } }),
     prisma.sellingPoint.findMany({ where: { projectId }, orderBy: { strength: "desc" } }),
     prisma.insight.findMany({ where: { projectId }, orderBy: { importance: "desc" } }),
     prisma.deepAnalysis.findUnique({ where: { projectId } }),
     prisma.brand.findUnique({ where: { projectId } }),
-    prisma.project.findUnique({ where: { id: projectId }, select: { campaignGoal: true, brandName: true, category: true } }),
+    prisma.project.findUnique({ where: { id: projectId }, select: { campaignGoal: true, brandName: true, category: true, goalType: true } }),
     prisma.competitor.findMany({
       where: { projectId },
       include: {
@@ -160,7 +162,39 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
       },
       orderBy: { createdAt: "asc" },
     }),
+    prisma.campaignSelection.findUnique({ where: { projectId }, select: { styleCategories: true } }),
+    prisma.contentAsset.findMany({
+      where: { projectId, narrativeType: { not: null } },
+      orderBy: { overallScore: "desc" },
+      take: 300,
+      select: { id: true, title: true, url: true, thumbnailUrl: true, overallScore: true, platform: true, narrativeType: true },
+    }),
   ]);
+
+  // Style picker: every scored ad already carries a NarrativeType, so each
+  // style category can show how many ads and which top ones back it.
+  const pickedStyles = sanitizeStyleCategories(campaignSel?.styleCategories);
+  const styleCategories: StyleCategoryView[] = STYLE_CATEGORIES.map((cat) => {
+    const ads = styledAssets.filter((a) => a.narrativeType && cat.narrativeTypes.includes(a.narrativeType));
+    const scored = ads.filter((a) => a.overallScore != null);
+    return {
+      ...cat,
+      recommended: isRecommendedFor(cat, isGoalType(project?.goalType) ? project.goalType : null),
+      patterns: patterns
+        .filter((p) => !p.dismissed && cat.narrativeTypes.includes(p.type))
+        .map((p) => ({ id: p.id, name: p.name, avgPerformance: p.avgPerformance })),
+      evidence: ads.slice(0, 3).map((a) => ({
+        id: a.id,
+        title: a.title,
+        url: a.url,
+        thumbnailUrl: a.thumbnailUrl,
+        overallScore: a.overallScore,
+        platform: a.platform,
+      })),
+      adCount: ads.length,
+      avgScore: scored.length ? scored.reduce((s, a) => s + (a.overallScore ?? 0), 0) / scored.length : null,
+    };
+  });
 
   const competitorSummaries: CompetitorSummaryView[] = competitorRows.map((c) => ({
     id: c.id,
@@ -223,6 +257,13 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
           }
         />
       </div>
+
+      <StylePicker
+        projectId={projectId}
+        goalType={project?.goalType ?? null}
+        categories={styleCategories}
+        initial={pickedStyles}
+      />
 
       <CompetitorsSection projectId={projectId} competitors={competitorSummaries} />
 
@@ -523,20 +564,18 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
           BLOCK 7: Selling Points Matrix (with send-to-script)
       ══════════════════════════════════════════════════ */}
 
-      {sellingPoints.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Megaphone className="h-4 w-4 text-orange-500" />
-            <p className="text-sm font-bold">Selling Points</p>
-            <span className="text-[10px] text-muted-foreground">— click → Script to add to your script context</span>
-          </div>
-          <SellingPointsSection projectId={projectId} sellingPoints={sellingPoints.map(sp => ({
-            id: sp.id, point: sp.point, category: sp.category,
-            strength: sp.strength || 0, uniqueness: sp.uniqueness || 0, frequency: sp.frequency || 0,
-            selected: sp.selected,
-          }))} />
-        </section>
-      )}
+      <section className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Megaphone className="h-4 w-4 text-orange-500" />
+          <p className="text-sm font-bold">Selling Points</p>
+          <span className="text-[10px] text-muted-foreground">— click → Script to use one, “Not relevant” to drop it, or add your own</span>
+        </div>
+        <SellingPointsSection projectId={projectId} sellingPoints={sellingPoints.map(sp => ({
+          id: sp.id, point: sp.point, category: sp.category,
+          strength: sp.strength || 0, uniqueness: sp.uniqueness || 0, frequency: sp.frequency || 0,
+          selected: sp.selected, dismissed: sp.dismissed, addedByUser: sp.addedByUser,
+        }))} />
+      </section>
 
       {/* ══════════════════════════════════════════════════
           BLOCK 8: Narrative Patterns
@@ -552,7 +591,7 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
           <NarrativePatternsSection projectId={projectId} patterns={patterns.map(p => ({
             id: p.id, type: p.type, name: p.name, description: p.description,
             frequency: p.frequency, avgPerformance: p.avgPerformance, bestPractices: p.bestPractices,
-            selected: p.selected,
+            selected: p.selected, dismissed: p.dismissed,
           }))} />
         </section>
       )}

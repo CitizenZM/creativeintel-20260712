@@ -240,7 +240,22 @@ function recencyScore(c: AdCandidate): number {
   return clamp01(1 - ageDays / 365);
 }
 
-export function scoreCandidate(c: AdCandidate): { score: number; parts: ScoreParts } {
+/**
+ * Score weights per creative goal. Conversion trusts ads that have kept
+ * running (spend is being renewed) and look like real ads; storytelling
+ * trusts reach and engagement — people chose to watch. Default is balanced.
+ */
+const GOAL_WEIGHTS: Record<"default" | "conversion" | "storytelling", Record<keyof Omit<ScoreParts, "unknownFormatPenalty">, number>> = {
+  default: { reach: 0.3, longevity: 0.25, engagement: 0.2, recency: 0.15, creative: 0.1 },
+  conversion: { reach: 0.2, longevity: 0.35, engagement: 0.1, recency: 0.15, creative: 0.2 },
+  storytelling: { reach: 0.35, longevity: 0.1, engagement: 0.35, recency: 0.1, creative: 0.1 },
+};
+
+function weightsFor(goalType?: string | null) {
+  return goalType === "conversion" || goalType === "storytelling" ? GOAL_WEIGHTS[goalType] : GOAL_WEIGHTS.default;
+}
+
+export function scoreCandidate(c: AdCandidate, goalType?: string | null): { score: number; parts: ScoreParts } {
   const reach = reachScore(c);
   const longevity = longevityScore(c);
   const engagement = engagementScore(c);
@@ -250,8 +265,13 @@ export function scoreCandidate(c: AdCandidate): { score: number; parts: ScorePar
   const unknownFormatPenalty =
     c.durationSec === undefined && c.aspect === undefined ? 0.9 : 1;
 
+  const w = weightsFor(goalType);
   const score =
-    (0.3 * reach + 0.25 * longevity + 0.2 * engagement + 0.15 * recency + 0.1 * creative) *
+    (w.reach * reach +
+      w.longevity * longevity +
+      w.engagement * engagement +
+      w.recency * recency +
+      w.creative * creative) *
     unknownFormatPenalty;
 
   return {
@@ -285,6 +305,8 @@ export interface RankOptions {
   topN?: number;
   /** competitorIds that own a partition; anything else falls into UNOWNED_KEY. */
   knownOwnerIds?: Set<string>;
+  /** Project goal type — shifts the score weights (see GOAL_WEIGHTS). */
+  goalType?: string | null;
 }
 
 /**
@@ -313,7 +335,7 @@ export function rankByOwner(
   for (const [key, list] of buckets) {
     const scored = list
       .map((c) => {
-        const { score, parts } = scoreCandidate(c);
+        const { score, parts } = scoreCandidate(c, opts.goalType);
         return { c, score, parts };
       })
       .sort((a, b) => b.score - a.score);
