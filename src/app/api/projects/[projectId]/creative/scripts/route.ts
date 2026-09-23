@@ -17,6 +17,7 @@ import {
   formatComplianceViolations,
   type ScriptAngle,
 } from "../_script-context";
+import { LIVE, isSelectionStatus } from "@/services/creative-library";
 
 export const maxDuration = 300;
 
@@ -26,10 +27,29 @@ export async function GET(
 ) {
   const { projectId } = await params;
   const scripts = await prisma.script.findMany({
-    where: { projectId },
+    where: { projectId, ...LIVE },
     orderBy: { createdAt: "desc" },
   });
   return NextResponse.json(scripts);
+}
+
+/** Bulk pick / unpick — backs "Select all" and "Clear" on the Creative page. */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  const { projectId } = await params;
+  const body = (await request.json().catch(() => ({}))) as { ids?: unknown; status?: unknown };
+  if (!isSelectionStatus(body.status)) {
+    return NextResponse.json({ error: "status must be draft or selected" }, { status: 400 });
+  }
+  const ids = Array.isArray(body.ids) ? body.ids.filter((id): id is string => typeof id === "string") : null;
+
+  const { count } = await prisma.script.updateMany({
+    where: { projectId, ...LIVE, ...(ids ? { id: { in: ids } } : {}) },
+    data: { status: body.status },
+  });
+  return NextResponse.json({ ok: true, count });
 }
 
 export async function POST(

@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { LIVE } from "@/services/creative-library";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { buildAngleGenerationPrompt } from "@/services/ai/prompts/angle-generation";
 import {
@@ -29,6 +31,19 @@ const anglesSchema = z.object({
   ),
 });
 
+/** Every saved angle, newest generation first. */
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  const { projectId } = await params;
+  const angles = await prisma.angle.findMany({
+    where: { projectId, ...LIVE },
+    orderBy: [{ createdAt: "desc" }, { predictedScore: "desc" }],
+  });
+  return NextResponse.json({ angles });
+}
+
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
@@ -42,16 +57,34 @@ export async function POST(
     });
     if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const sellingPoints = await prisma.sellingPoint.findMany({
-      where: { projectId },
-      orderBy: { strength: "desc" },
-      take: 10,
-    });
+    // What the user sent to script context on the Insights page outranks the
+    // score-ordered defaults; fall back to top-N only when nothing is picked.
+    const [pickedPoints, pickedPatterns, pickedInsights] = await Promise.all([
+      prisma.sellingPoint.findMany({ where: { projectId, selected: true }, orderBy: { strength: "desc" } }),
+      prisma.narrativePattern.findMany({ where: { projectId, selected: true }, orderBy: { avgPerformance: "desc" } }),
+      prisma.insight.findMany({ where: { projectId, selected: true }, orderBy: { importance: "desc" }, take: 8 }),
+    ]);
 
-    const patterns = await prisma.narrativePattern.findMany({
-      where: { projectId },
-      orderBy: { avgPerformance: "desc" },
-    });
+    const sellingPoints = pickedPoints.length
+      ? pickedPoints
+      : await prisma.sellingPoint.findMany({
+          where: { projectId },
+          orderBy: { strength: "desc" },
+          take: 10,
+        });
+
+    const patterns = pickedPatterns.length
+      ? pickedPatterns
+      : await prisma.narrativePattern.findMany({
+          where: { projectId },
+          orderBy: { avgPerformance: "desc" },
+        });
+
+    const insightBrief = pickedInsights.length
+      ? `User-prioritised insights (build angles on these):\n${pickedInsights
+          .map((i) => `- ${i.title}: ${i.recommendation || i.description}`)
+          .join("\n")}`
+      : "";
 
     const campaignSel = await prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null);
 
@@ -73,7 +106,9 @@ export async function POST(
       audienceSegments: segments.map((s) => `${s.name} (${s.ageRange}): ${s.description}`),
       painPoints: painPoints.map((p) => p.point),
       platformPreferences: platforms.filter((p) => p.adReceptivity === "high").map((p) => p.platform),
-      briefing: [project.briefingText, project.briefingParsed].filter(Boolean).join("\n\n") || undefined,
+      briefing:
+        [project.briefingText, project.briefingParsed, insightBrief].filter(Boolean).join("\n\n") ||
+        undefined,
       platformId: (campaignSel?.platform as string | null) || undefined,
     });
 
@@ -104,7 +139,30 @@ export async function POST(
       };
     });
 
-    return NextResponse.json({ angles });
+    // Saved as a new batch — earlier generations stay available.
+    const batchId = randomUUID();
+    const saved = await prisma.$transaction(
+      angles.map((a) =>
+        prisma.angle.create({
+          data: {
+            projectId,
+            batchId,
+            title: a.title,
+            description: a.description,
+            targetEmotion: a.targetEmotion || null,
+            narrativeType: a.narrativeType || null,
+            videoType: a.videoType,
+            templateIds: a.templateIds,
+            predictedScore: a.predictedScore,
+            rationale: a.rationale || null,
+            targetAudience: a.targetAudience || null,
+            platform: a.platform || null,
+          },
+        })
+      )
+    );
+
+    return NextResponse.json({ angles: saved, batchId });
   } catch (err) {
     console.error("Angle generation failed:", err);
     return NextResponse.json(

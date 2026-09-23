@@ -41,12 +41,12 @@ export async function GET(
 
   const [scripts, storyboards, libtvRuns] = await Promise.all([
     prisma.script.findMany({
-      where: { projectId },
+      where: { projectId, deletedAt: null },
       orderBy: { predictedScore: "desc" },
     }),
     prisma.storyboard.findMany({
-      where: { projectId },
-      orderBy: { createdAt: "desc" },
+      where: { projectId, deletedAt: null },
+      orderBy: [{ isActive: "desc" }, { createdAt: "desc" }],
     }),
     prisma.libtvRun.findMany({
       where: { projectId, status: "completed" },

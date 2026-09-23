@@ -536,9 +536,10 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
             <p className="text-sm font-bold">Selling Points</p>
             <span className="text-[10px] text-muted-foreground">— click → Script to add to your script context</span>
           </div>
-          <SellingPointsSection sellingPoints={sellingPoints.map(sp => ({
+          <SellingPointsSection projectId={projectId} sellingPoints={sellingPoints.map(sp => ({
             id: sp.id, point: sp.point, category: sp.category,
             strength: sp.strength || 0, uniqueness: sp.uniqueness || 0, frequency: sp.frequency || 0,
+            selected: sp.selected,
           }))} />
         </section>
       )}
@@ -554,9 +555,10 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
             <p className="text-sm font-bold">Narrative Patterns</p>
             <span className="text-[10px] text-muted-foreground">— what story structures perform best</span>
           </div>
-          <NarrativePatternsSection patterns={patterns.map(p => ({
+          <NarrativePatternsSection projectId={projectId} patterns={patterns.map(p => ({
             id: p.id, type: p.type, name: p.name, description: p.description,
             frequency: p.frequency, avgPerformance: p.avgPerformance, bestPractices: p.bestPractices,
+            selected: p.selected,
           }))} />
         </section>
       )}
@@ -628,10 +630,10 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
             <p className="text-sm font-bold">Strategic Insights</p>
             <span className="text-[10px] text-muted-foreground">— select any to add to your script or ideation context</span>
           </div>
-          <InsightsSelectableSection insights={generalInsights.map(ins => ({
+          <InsightsSelectableSection projectId={projectId} insights={generalInsights.map(ins => ({
             id: ins.id, category: ins.category, title: ins.title,
             description: ins.description, importance: ins.importance || 0,
-            recommendation: ins.recommendation,
+            recommendation: ins.recommendation, selected: ins.selected,
           }))} />
         </section>
       )}

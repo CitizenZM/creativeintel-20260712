@@ -26,6 +26,7 @@ interface StoryboardRow {
   totalDuration: string | null;
   frameSeconds: number | null;
   frames: unknown;
+  isActive?: boolean;
 }
 
 function toStoryboardView(row: StoryboardRow): StoryboardView {
@@ -79,7 +80,11 @@ export default function StudioPage() {
         const runData = await runRes.json().catch(() => ({}));
         if (cancelled) return;
 
-        const boards = (Array.isArray(sbData) ? sbData : []).map(toStoryboardView);
+        // One entry per script: its active storyboard version (switched on the
+        // Creative page). A deep link to an older version still resolves.
+        const boards = (Array.isArray(sbData) ? (sbData as StoryboardRow[]) : [])
+          .filter((row) => row.isActive !== false || row.id === initialStoryboardId)
+          .map(toStoryboardView);
         setStoryboards(boards);
         // boards are returned newest-first (orderBy createdAt desc), so
         // boards[0] is the default "newest storyboard" fallback.

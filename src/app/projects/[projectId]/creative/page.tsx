@@ -17,6 +17,8 @@ import {
   Zap,
   Download,
   AlertTriangle,
+  Archive,
+  Star,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScoreBar, StatusBadge } from "@/components/dashboard/status-badge";
@@ -29,18 +31,22 @@ import { NextStepHint } from "@/components/layout/next-step-hint";
 import { Textarea } from "@/components/ui/textarea";
 import { defaultTemplateBatch, getScriptTemplate } from "@/services/ai/prompts/script-templates";
 
+// A saved angle row (see prisma model Angle). Every generation is kept and
+// grouped by batchId; status "selected" marks the ones scripts are written from.
 interface Angle {
-  id: number;
+  id: string;
+  batchId: string;
+  status: string;
   title: string;
   description: string;
-  targetEmotion: string;
-  narrativeType: string;
-  videoType?: string;
-  templateIds?: string[];
-  predictedScore: number;
-  rationale: string;
-  targetAudience: string;
-  platform: string;
+  targetEmotion: string | null;
+  narrativeType: string | null;
+  videoType?: string | null;
+  templateIds?: string[] | null;
+  predictedScore: number | null;
+  rationale: string | null;
+  targetAudience: string | null;
+  platform: string | null;
 }
 
 type StoryboardFrame = StoryboardFrameData;
@@ -53,6 +59,31 @@ interface Storyboard {
   scriptId: string | null;
   frameSeconds?: number;
   frames: StoryboardFrame[];
+  version?: number;
+  isActive?: boolean;
+}
+
+/** All versions of one script's storyboard, newest first, plus the one shown. */
+function groupStoryboards(boards: Storyboard[]) {
+  const groups = new Map<string, Storyboard[]>();
+  for (const sb of boards) {
+    const key = sb.scriptId ?? sb.id;
+    groups.set(key, [...(groups.get(key) ?? []), sb]);
+  }
+  return [...groups.values()].map((versions) => {
+    const sorted = [...versions].sort((a, b) => (b.version ?? 1) - (a.version ?? 1));
+    return { versions: sorted, current: sorted.find((v) => v.isActive) ?? sorted[0] };
+  });
+}
+
+function toScriptAngle(a: Angle) {
+  return {
+    title: a.title,
+    description: a.description,
+    targetEmotion: a.targetEmotion ?? "",
+    narrativeType: a.narrativeType ?? "DEMONSTRATION",
+    predictedScore: a.predictedScore ?? undefined,
+  };
 }
 
 interface TestVariant {
@@ -83,6 +114,7 @@ export default function CreativePage() {
   const projectId = params.projectId as string;
 
   const [angles, setAngles] = useState<Angle[]>([]);
+  const [showAllAngles, setShowAllAngles] = useState(false);
   const [scripts, setScripts] = useState<ScriptData[]>([]);
   const [selectedScriptIds, setSelectedScriptIds] = useState<Set<string>>(new Set());
   const [storyboards, setStoryboards] = useState<Storyboard[]>([]);
@@ -114,7 +146,8 @@ export default function CreativePage() {
     if (loaded) return;
     async function loadSaved() {
       try {
-        const [scriptsRes, storyboardsRes, matrixRes, campaignRes, kitRes] = await Promise.all([
+        const [anglesRes, scriptsRes, storyboardsRes, matrixRes, campaignRes, kitRes] = await Promise.all([
+          fetch(`/api/projects/${projectId}/creative/angles`),
           fetch(`/api/projects/${projectId}/creative/scripts`),
           fetch(`/api/projects/${projectId}/creative/storyboards`),
           fetch(`/api/projects/${projectId}/creative/test-matrix`),
@@ -128,10 +161,19 @@ export default function CreativePage() {
         const savedMatrix = await matrixRes.json().catch(() => ({ variants: [] }));
         const campaign = await campaignRes.json().catch(() => ({}));
 
+        const savedAngles = await anglesRes.json().catch(() => ({ angles: [] }));
+
         if (campaign?.platform) setPlatformId(campaign.platform);
+
+        if (Array.isArray(savedAngles?.angles)) setAngles(savedAngles.angles);
 
         if (Array.isArray(savedScripts) && savedScripts.length > 0) {
           setScripts(savedScripts);
+          setSelectedScriptIds(
+            new Set(
+              (savedScripts as ScriptData[]).filter((s) => s.status === "selected").map((s) => s.id)
+            )
+          );
           setExpandedScript(savedScripts[0].id);
         }
         if (Array.isArray(savedStoryboards) && savedStoryboards.length > 0) {
@@ -179,6 +221,15 @@ export default function CreativePage() {
     { num: 4, name: "Test Matrix", icon: Grid3X3, done: testMatrix.length > 0, active: loadingMatrix },
   ];
 
+  // Newest generation, plus anything starred from earlier ones.
+  const latestBatchId = angles[0]?.batchId;
+  const latestAngles = angles.filter((a) => a.batchId === latestBatchId);
+  const starredCount = angles.filter((a) => a.status === "selected").length;
+  const visibleAngles = showAllAngles
+    ? angles
+    : angles.filter((a) => a.batchId === latestBatchId || a.status === "selected");
+  const hiddenAngleCount = angles.length - visibleAngles.length;
+
   const effectiveTemplates =
     selectedTemplateIds.length > 0
       ? selectedTemplateIds
@@ -219,8 +270,10 @@ export default function CreativePage() {
       const res = await fetch(`/api/projects/${projectId}/creative/angles`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Angle generation failed (${res.status})`);
+      // Saved server-side as a new batch; earlier batches stay in the list.
       const result: Angle[] = data.angles || [];
-      setAngles(result);
+      setAngles((prev) => [...result, ...prev]);
+      setShowAllAngles(false);
       return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Angle generation failed");
@@ -234,9 +287,12 @@ export default function CreativePage() {
     setLoadingScripts(true);
     setError(null);
     try {
-      const sourceAngles = (fromAngles || angles)
+      // Starred angles win; otherwise the latest generation is used.
+      const starred = angles.filter((a) => a.status === "selected");
+      const sourceAngles = (fromAngles || (starred.length ? starred : latestAngles))
         .slice()
-        .sort((a, b) => b.predictedScore - a.predictedScore);
+        .sort((a, b) => (b.predictedScore ?? 0) - (a.predictedScore ?? 0))
+        .map(toScriptAngle);
 
       // Chunked for the same reason as generateStoryboards — 10 scripts in one
       // call runs ~100s, which is exactly Cloudflare's origin timeout.
@@ -314,7 +370,12 @@ export default function CreativePage() {
         noteFailures("Storyboard", data.failures);
         const newBoards: Storyboard[] = data.storyboards || [];
         all.push(...newBoards);
-        setStoryboards((prev) => [...newBoards, ...prev]);
+        // A new board becomes its script's active version; older ones are kept.
+        const replaced = new Set(newBoards.map((b) => b.scriptId).filter(Boolean));
+        setStoryboards((prev) => [
+          ...newBoards,
+          ...prev.map((sb) => (sb.scriptId && replaced.has(sb.scriptId) ? { ...sb, isActive: false } : sb)),
+        ]);
       }
       return all;
     } catch (err) {
@@ -369,7 +430,7 @@ export default function CreativePage() {
       }
 
       setScripts((prev) => [script, ...prev]);
-      setSelectedScriptIds((prev) => new Set(prev).add(script.id));
+      void setScriptSelection([script.id], true);
       setExpandedScript(script.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not promote variant");
@@ -398,7 +459,7 @@ export default function CreativePage() {
       }
 
       setAllProgress("Creating 2-second storyboards...");
-      setSelectedScriptIds(new Set(newScripts.map((s) => s.id)));
+      void setScriptSelection(newScripts.map((s) => s.id), true);
       const boards = await generateStoryboards(newScripts.map((s) => s.id));
       if (boards.length === 0) {
         setError((prev) => prev ?? "No storyboards were generated.");
@@ -414,12 +475,121 @@ export default function CreativePage() {
     }
   }
 
+  /**
+   * Picks are saved on the script rows so they are still there next visit.
+   * Applied optimistically and rolled back if the save fails.
+   */
+  async function setScriptSelection(ids: string[], selected: boolean) {
+    if (ids.length === 0) return;
+    const apply = (on: boolean) =>
+      setSelectedScriptIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) {
+          if (on) next.add(id);
+          else next.delete(id);
+        }
+        return next;
+      });
+    apply(selected);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/creative/scripts`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, status: selected ? "selected" : "draft" }),
+      });
+      if (!res.ok) throw new Error(`Could not save selection (${res.status})`);
+    } catch (err) {
+      apply(!selected);
+      setError(err instanceof Error ? err.message : "Could not save selection");
+    }
+  }
+
   function toggleScript(id: string) {
+    void setScriptSelection([id], !selectedScriptIds.has(id));
+  }
+
+  async function archiveScript(id: string) {
+    if (!window.confirm("Archive this script and its storyboards? They are hidden from the project, not destroyed.")) {
+      return;
+    }
+    setError(null);
+    const res = await fetch(`/api/projects/${projectId}/creative/scripts/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      setError(`Could not archive script (${res.status})`);
+      return;
+    }
+    setScripts((prev) => prev.filter((s) => s.id !== id));
+    setStoryboards((prev) => prev.filter((sb) => sb.scriptId !== id));
     setSelectedScriptIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      next.delete(id);
       return next;
+    });
+  }
+
+  async function toggleAngle(angle: Angle) {
+    const status = angle.status === "selected" ? "draft" : "selected";
+    setAngles((prev) => prev.map((a) => (a.id === angle.id ? { ...a, status } : a)));
+    const res = await fetch(`/api/projects/${projectId}/creative/angles/${angle.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      setAngles((prev) => prev.map((a) => (a.id === angle.id ? { ...a, status: angle.status } : a)));
+      setError("Could not save the angle pick — try again.");
+    }
+  }
+
+  async function archiveAngle(angle: Angle) {
+    const res = await fetch(`/api/projects/${projectId}/creative/angles/${angle.id}`, {
+      method: "DELETE",
+    }).catch(() => null);
+    if (!res?.ok) {
+      setError("Could not archive the angle — try again.");
+      return;
+    }
+    setAngles((prev) => prev.filter((a) => a.id !== angle.id));
+  }
+
+  async function activateStoryboard(board: Storyboard) {
+    const res = await fetch(`/api/projects/${projectId}/creative/storyboards/${board.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive: true }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      setError("Could not switch storyboard version — try again.");
+      return;
+    }
+    setStoryboards((prev) =>
+      prev.map((sb) =>
+        sb.id === board.id
+          ? { ...sb, isActive: true }
+          : board.scriptId && sb.scriptId === board.scriptId
+            ? { ...sb, isActive: false }
+            : sb
+      )
+    );
+  }
+
+  async function archiveStoryboard(board: Storyboard) {
+    if (!window.confirm(`Archive storyboard v${board.version ?? 1}? It is hidden, not destroyed.`)) return;
+    const res = await fetch(`/api/projects/${projectId}/creative/storyboards/${board.id}`, {
+      method: "DELETE",
+    }).catch(() => null);
+    if (!res?.ok) {
+      setError("Could not archive the storyboard — try again.");
+      return;
+    }
+    setStoryboards((prev) => {
+      const rest = prev.filter((sb) => sb.id !== board.id);
+      if (!board.isActive || !board.scriptId) return rest;
+      // Mirror the server: the newest remaining version becomes active.
+      const successor = rest
+        .filter((sb) => sb.scriptId === board.scriptId)
+        .sort((a, b) => (b.version ?? 1) - (a.version ?? 1))[0];
+      return rest.map((sb) => (sb.id === successor?.id ? { ...sb, isActive: true } : sb));
     });
   }
 
@@ -430,6 +600,8 @@ export default function CreativePage() {
 
   const nothingGenerated =
     angles.length === 0 && scripts.length === 0 && storyboards.length === 0 && testMatrix.length === 0;
+
+  const boardGroups = groupStoryboards(storyboards);
 
   return (
     <div className="space-y-6">
@@ -579,7 +751,7 @@ export default function CreativePage() {
               ) : (
                 <Sparkles className="mr-1.5 h-3 w-3" />
               )}
-              {angles.length > 0 ? "Regenerate" : "Generate 10 angles"}
+              {angles.length > 0 ? "Generate 10 more" : "Generate 10 angles"}
             </Button>
           )}
         </div>
@@ -593,22 +765,59 @@ export default function CreativePage() {
         )}
 
         {angles.length > 0 && (
+          <p className="text-[11px] text-muted-foreground">
+            Every angle you generate is saved. Star the ones to write scripts from
+            {starredCount > 0
+              ? ` — ${starredCount} starred, scripts will use only those.`
+              : " — with none starred, scripts use the latest set."}
+          </p>
+        )}
+
+        {angles.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {angles.map((angle, i) => {
-              const isTop3 = i < 3;
+            {visibleAngles.map((angle) => {
+              const rank = latestAngles
+                .slice()
+                .sort((a, b) => (b.predictedScore ?? 0) - (a.predictedScore ?? 0))
+                .findIndex((a) => a.id === angle.id);
+              const isTop3 = rank >= 0 && rank < 3;
+              const starred = angle.status === "selected";
               return (
                 <div
                   key={angle.id}
                   className={cn(
                     "rounded-lg border bg-card p-3.5",
-                    isTop3 ? "border-foreground/40 ring-1 ring-foreground/10" : "border-border"
+                    starred
+                      ? "border-foreground ring-1 ring-foreground/20"
+                      : isTop3
+                        ? "border-foreground/40 ring-1 ring-foreground/10"
+                        : "border-border"
                   )}
                 >
                   <div className="flex items-start justify-between gap-2 mb-1.5">
                     <p className="text-sm font-semibold">{angle.title}</p>
                     <div className="flex items-center gap-1 shrink-0">
-                      {isTop3 && <StatusBadge level="ai">TOP {i + 1}</StatusBadge>}
-                      <span className="text-sm font-semibold num">{angle.predictedScore}</span>
+                      {isTop3 && <StatusBadge level="ai">TOP {rank + 1}</StatusBadge>}
+                      <span className="text-sm font-semibold num">{angle.predictedScore ?? "—"}</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleAngle(angle)}
+                        aria-pressed={starred}
+                        aria-label={starred ? "Unstar angle" : "Star angle"}
+                        title={starred ? "Starred — scripts are written from starred angles" : "Star to write scripts from this angle"}
+                        className="rounded p-1 hover:bg-muted"
+                      >
+                        <Star className={cn("h-3.5 w-3.5", starred ? "fill-foreground text-foreground" : "text-muted-foreground")} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => archiveAngle(angle)}
+                        aria-label="Archive angle"
+                        title="Archive angle"
+                        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Archive className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{angle.description}</p>
@@ -628,12 +837,22 @@ export default function CreativePage() {
                         {getScriptTemplate(id)?.name ?? id}
                       </StatusBadge>
                     ))}
-                    <StatusBadge level="neutral">{angle.platform}</StatusBadge>
+                    {angle.platform && <StatusBadge level="neutral">{angle.platform}</StatusBadge>}
                   </div>
                 </div>
               );
             })}
           </div>
+        )}
+
+        {(hiddenAngleCount > 0 || showAllAngles) && (
+          <button
+            type="button"
+            onClick={() => setShowAllAngles((v) => !v)}
+            className="text-xs font-medium text-muted-foreground hover:text-foreground"
+          >
+            {showAllAngles ? "Show latest set only" : `Show ${hiddenAngleCount} earlier angle${hiddenAngleCount !== 1 ? "s" : ""}`}
+          </button>
         )}
       </section>
 
@@ -731,14 +950,14 @@ export default function CreativePage() {
               </p>
               <div className="flex gap-2 items-center">
                 <button
-                  onClick={() => setSelectedScriptIds(new Set(scripts.map((s) => s.id)))}
+                  onClick={() => void setScriptSelection(scripts.map((s) => s.id), true)}
                   className="text-xs font-medium text-muted-foreground hover:text-foreground"
                 >
                   Select all
                 </button>
                 <span className="text-xs text-muted-foreground">·</span>
                 <button
-                  onClick={() => setSelectedScriptIds(new Set())}
+                  onClick={() => void setScriptSelection([...selectedScriptIds], false)}
                   className="text-xs font-medium text-muted-foreground hover:text-foreground"
                 >
                   Clear
@@ -755,6 +974,7 @@ export default function CreativePage() {
                   selected={selectedScriptIds.has(script.id)}
                   expanded={expandedScript === script.id}
                   onToggleSelect={() => toggleScript(script.id)}
+                  onArchive={() => archiveScript(script.id)}
                   onToggleExpand={() =>
                     setExpandedScript(expandedScript === script.id ? null : script.id)
                   }
@@ -818,7 +1038,7 @@ export default function CreativePage() {
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <h3 className="text-sm font-semibold tracking-tight flex items-center gap-2">
-                <Layout className="h-4 w-4" /> 3. Storyboards ({storyboards.length})
+                <Layout className="h-4 w-4" /> 3. Storyboards ({boardGroups.length})
               </h3>
               <p className="text-[11px] text-muted-foreground mt-0.5">
                 One frame per 2 seconds, tagged HOOK / BODY / CTA. Approve each frame or add feedback
@@ -842,7 +1062,7 @@ export default function CreativePage() {
             </Button>
           </div>
 
-          {storyboards.map((storyboard) => {
+          {boardGroups.map(({ current: storyboard, versions }) => {
             const linkedScript = scripts.find((s) => s.id === storyboard.scriptId);
             const template = getScriptTemplate(linkedScript?.template);
             const approvedCount = storyboard.frames.filter((f) => f.approved === true).length;
@@ -883,6 +1103,36 @@ export default function CreativePage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 text-[10px] shrink-0">
+                    {versions.length > 1 && (
+                      <div className="flex items-center gap-0.5" role="group" aria-label="Storyboard versions">
+                        {versions.map((v) => (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => v.id !== storyboard.id && activateStoryboard(v)}
+                            aria-pressed={v.id === storyboard.id}
+                            title={v.id === storyboard.id ? "Active version — used by Studio" : "Make this the active version"}
+                            className={cn(
+                              "px-1.5 py-0.5 rounded font-semibold border",
+                              v.id === storyboard.id
+                                ? "bg-foreground text-background border-foreground"
+                                : "border-border text-muted-foreground hover:text-foreground"
+                            )}
+                          >
+                            v{v.version ?? 1}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => archiveStoryboard(storyboard)}
+                      aria-label="Archive this storyboard version"
+                      title="Archive this version"
+                      className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <Archive className="h-3.5 w-3.5" />
+                    </button>
                     {approvedCount > 0 && (
                       <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">
                         ✓ {approvedCount}

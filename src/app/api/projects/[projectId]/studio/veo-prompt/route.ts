@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { findActiveStoryboard } from "@/services/creative-library";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 
 export const maxDuration = 60;
@@ -91,7 +92,7 @@ export async function POST(
     const [project, script, storyboard, audience, deepAnalysis, campaignSel] = await Promise.all([
       prisma.project.findUnique({ where: { id: projectId }, include: { brand: true } }),
       prisma.script.findUnique({ where: { id: scriptId } }),
-      prisma.storyboard.findFirst({ where: { projectId, scriptId } }),
+      findActiveStoryboard(projectId, scriptId),
       prisma.audienceProfile.findUnique({ where: { projectId } }),
       prisma.deepAnalysis.findUnique({ where: { projectId } }),
       prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null),
