@@ -6,6 +6,7 @@ import { getCampaignPlatform } from "@/lib/campaign-platform";
 import { ContentPlatformControls } from "@/components/content/content-platform-controls";
 import { ResearchProgress } from "@/components/research/research-progress";
 import { VideoLibraryPanel } from "@/components/video/video-library-panel";
+import { AdCurationButtons, CompetitorManager } from "@/components/content/curation";
 import { OpenOnPlatform } from "@/components/content/open-on-platform";
 import { ScoreBar } from "@/components/dashboard/status-badge";
 import { LoadMoreButton } from "@/components/dashboard/action-buttons";
@@ -137,6 +138,7 @@ export default async function ContentPage({
     platform?: string;
     paid?: string;
     owner?: string;
+    excluded?: string;
   }>;
 }) {
   const { projectId } = await params;
@@ -148,12 +150,18 @@ export default async function ContentPage({
   // Paid/ad candidates are the default view; ?paid=all opts out.
   const paidOnly = sp.paid !== "all";
   const ownerFilter = sp.owner || "";
+  // Excluded ads (and removed competitors' ads) are hidden unless asked for.
+  const showExcluded = sp.excluded === "show";
 
   const [campaignSelection, competitors, project] = await Promise.all([
     prisma.campaignSelection
       .findUnique({ where: { projectId }, select: { platform: true, totalDurationSec: true } })
       .catch(() => null),
-    prisma.competitor.findMany({ where: { projectId }, select: { id: true, name: true } }),
+    prisma.competitor.findMany({
+      where: { projectId },
+      select: { id: true, name: true, url: true, excluded: true, _count: { select: { contentAssets: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
     prisma.project.findUnique({ where: { id: projectId }, select: { brandName: true } }),
   ]);
   const campaignPlatform = getCampaignPlatform(campaignSelection?.platform);
@@ -164,9 +172,16 @@ export default async function ContentPage({
   else if (campaignScopeActive) whereClause.type = { in: campaignPlatform!.contentTypes };
   if (paidOnly) whereClause.isPaidMedia = true;
   if (ownerFilter) whereClause.competitorId = ownerFilter === "brand" ? null : ownerFilter;
+  if (!showExcluded) {
+    whereClause.excluded = false;
+    whereClause.NOT = { competitor: { is: { excluded: true } } };
+  }
+  const excludedCount = await prisma.contentAsset.count({
+    where: { projectId, OR: [{ excluded: true }, { competitor: { is: { excluded: true } } }] },
+  });
 
   const orderByMap: Record<string, Record<string, "asc" | "desc">[]> = {
-    rank: [{ rankInOwner: "asc" }, { overallScore: "desc" }],
+    rank: [{ pinned: "desc" }, { rankInOwner: "asc" }, { overallScore: "desc" }],
     overallScore: [{ overallScore: order }],
     viewCount: [{ viewCount: order }],
     publishedAt: [{ publishedAt: order }],
@@ -205,7 +220,7 @@ export default async function ContentPage({
   const orderedGroups = [
     ...(groups.has("brand") ? [["brand", groups.get("brand")!] as const] : []),
     ...competitors
-      .filter((c) => groups.has(c.id))
+      .filter((c) => groups.has(c.id) && (showExcluded || !c.excluded))
       .map((c) => [c.id, groups.get(c.id)!] as const),
   ];
 
@@ -215,6 +230,7 @@ export default async function ContentPage({
     if (showAllPlatforms) base.platform = "all";
     if (!paidOnly) base.paid = "all";
     if (ownerFilter) base.owner = ownerFilter;
+    if (showExcluded) base.excluded = "show";
     const merged: Record<string, string> = { ...base, ...overrides };
     for (const k of Object.keys(merged)) if (!merged[k]) delete merged[k];
     return `?${new URLSearchParams(merged).toString()}`;
@@ -229,6 +245,24 @@ export default async function ContentPage({
     <div className="space-y-5">
       <StageGuide projectId={projectId} stage="research" detail="These are the competitor ads we collected. Skim the top performers before writing creative." />
       <ResearchProgress projectId={projectId} />
+      <CompetitorManager
+        projectId={projectId}
+        competitors={competitors.map((c) => ({
+          id: c.id,
+          name: c.name,
+          url: c.url,
+          excluded: c.excluded,
+          adCount: c._count.contentAssets,
+        }))}
+      />
+      {excludedCount > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {excludedCount} excluded ad{excludedCount !== 1 ? "s" : ""} hidden ·{" "}
+          <Link href={buildUrl({ excluded: showExcluded ? "" : "show" })} className="underline underline-offset-2">
+            {showExcluded ? "hide them" : "show them"}
+          </Link>
+        </p>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-base font-semibold tracking-tight">Competitor Ad Intelligence</h2>
@@ -417,6 +451,15 @@ export default async function ContentPage({
                             {asset.rankInOwner}
                           </div>
                         )}
+
+                        <div className="absolute bottom-2 left-2">
+                          <AdCurationButtons
+                            projectId={projectId}
+                            assetId={asset.id}
+                            pinned={asset.pinned}
+                            excluded={asset.excluded}
+                          />
+                        </div>
 
                         <div className="absolute top-2 right-2 flex items-center gap-1">
                           {score !== null && (

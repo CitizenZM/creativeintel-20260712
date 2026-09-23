@@ -272,6 +272,8 @@ model Competitor {
 
   dataSource   DataSource @default(AI_INFERRED)
   rawCrawlData Json?
+  // Removed by the user: skipped by research, hidden from lists and analysis.
+  excluded     Boolean    @default(false)
   createdAt    DateTime   @default(now())
 }
 
@@ -330,6 +332,10 @@ model ContentAsset {
   lastSeenAt     DateTime?
   frameUrls      Json? // string[] — extracted keyframes for vision teardown
   rankInOwner    Int? // Top-N rank within its competitor (or brand) after ranking
+  // User curation: excluded ads are hidden and never analysed; pinned ads are
+  // always torn down and shown first.
+  excluded       Boolean @default(false)
+  pinned         Boolean @default(false)
 
   dataSource DataSource @default(OFFICIAL_API)
   rawData    Json?

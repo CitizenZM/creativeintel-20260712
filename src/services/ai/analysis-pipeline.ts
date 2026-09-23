@@ -624,8 +624,8 @@ export async function runContentScoringStage(
   if (!project) throw new Error("Project not found");
 
   const pending = await prisma.contentAsset.findMany({
-    where: { projectId, overallScore: null },
-    orderBy: [{ rankInOwner: "asc" }, { viewCount: "desc" }],
+    where: { projectId, overallScore: null, excluded: false },
+    orderBy: [{ pinned: "desc" }, { rankInOwner: "asc" }, { viewCount: "desc" }],
   });
   if (pending.length === 0) return { count: 0, remaining: 0 };
 
@@ -660,6 +660,8 @@ export async function runContentScoringStage(
       const r = await analyzeWithClaude({
         systemPrompt: p.system, userPrompt: p.user,
         responseSchema: contentScoreSchema, maxTokens: 8192,
+        // Bulk rubric scoring — the fast tier is plenty and runs on every ad.
+        tier: "fast",
       });
 
       for (const score of r.scores) {
@@ -703,7 +705,7 @@ type DeepAsset = Awaited<ReturnType<typeof prisma.contentAsset.findMany>>[number
 
 async function selectDeepAssets(projectId: string): Promise<DeepAsset[]> {
   const assets = await prisma.contentAsset.findMany({
-    where: { projectId },
+    where: { projectId, excluded: false },
     orderBy: [{ rankInOwner: "asc" }, { overallScore: "desc" }],
   });
   const byOwner = new Map<string, DeepAsset[]>();
@@ -721,7 +723,10 @@ async function selectDeepAssets(projectId: string): Promise<DeepAsset[]> {
       if (rx !== ry) return rx - ry;
       return (y.overallScore ?? 0) - (x.overallScore ?? 0);
     });
-    selected.push(...ranked.slice(0, TOP_N_DEEP));
+    // Pinned ads are always torn down, on top of the owner's Top-N.
+    const top = ranked.slice(0, TOP_N_DEEP);
+    const extraPinned = ranked.slice(TOP_N_DEEP).filter((a) => a.pinned);
+    selected.push(...top, ...extraPinned);
   }
   return selected;
 }
@@ -866,6 +871,8 @@ export async function runAdTeardownStage(
             responseSchema: teardownSchema,
             maxTokens: 4096,
             model: evidence.frameUrls.length > 0 ? getVisionModel() : undefined,
+            // Only the top-N ads get torn down; this is where quality pays off.
+            tier: "deep",
           });
         }
       );
@@ -1130,7 +1137,7 @@ export async function runPatternMiningStage(projectId: string): Promise<number> 
   const [project, assets, context] = await Promise.all([
     prisma.project.findUnique({ where: { id: projectId }, select: { brandName: true } }),
     prisma.contentAsset.findMany({
-      where: { projectId, overallScore: { not: null } },
+      where: { projectId, overallScore: { not: null }, excluded: false },
       orderBy: { overallScore: "desc" },
       take: 30,
     }),
@@ -1201,7 +1208,7 @@ export async function runAudienceResearchStage(projectId: string): Promise<numbe
     prisma.project.findUnique({ where: { id: projectId } }),
     prisma.brand.findUnique({ where: { projectId } }),
     prisma.contentAsset.findMany({
-      where: { projectId, overallScore: { not: null } },
+      where: { projectId, overallScore: { not: null }, excluded: false },
       orderBy: { overallScore: "desc" },
       take: 5,
     }),
@@ -1244,7 +1251,7 @@ export async function runDeepAnalysisStage(projectId: string): Promise<number> {
     prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null),
     prisma.audienceProfile.findUnique({ where: { projectId } }).catch(() => null),
     prisma.contentAsset.findMany({
-      where: { projectId, overallScore: { not: null } },
+      where: { projectId, overallScore: { not: null }, excluded: false },
       orderBy: { overallScore: "desc" },
       take: 12,
     }),
@@ -1306,6 +1313,7 @@ export async function runDeepAnalysisStage(projectId: string): Promise<number> {
   const deep = await analyzeWithClaude({
     systemPrompt: prompt.system, userPrompt: prompt.user,
     responseSchema: deepSchema, maxTokens: 4096,
+    tier: "deep",
   });
 
   await prisma.deepAnalysis.upsert({

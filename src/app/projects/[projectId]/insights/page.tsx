@@ -155,7 +155,7 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
     prisma.brand.findUnique({ where: { projectId } }),
     prisma.project.findUnique({ where: { id: projectId }, select: { campaignGoal: true, brandName: true, category: true, goalType: true } }),
     prisma.competitor.findMany({
-      where: { projectId },
+      where: { projectId, excluded: false },
       include: {
         rollup: true,
         _count: { select: { contentAssets: true, adTeardowns: true, insights: true } },
@@ -164,7 +164,7 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
     }),
     prisma.campaignSelection.findUnique({ where: { projectId }, select: { styleCategories: true } }),
     prisma.contentAsset.findMany({
-      where: { projectId, narrativeType: { not: null } },
+      where: { projectId, narrativeType: { not: null }, excluded: false, NOT: { competitor: { is: { excluded: true } } } },
       orderBy: { overallScore: "desc" },
       take: 300,
       select: { id: true, title: true, url: true, thumbnailUrl: true, overallScore: true, platform: true, narrativeType: true },

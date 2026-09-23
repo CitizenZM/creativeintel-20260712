@@ -2,14 +2,22 @@ import OpenAI from "openai";
 import { jsonrepair } from "jsonrepair";
 import { ZodSchema } from "zod";
 
-// Route priority: OpenAI → Gemini → OpenRouter. Each provider is tried in order
-// while its key is present and not disabled; the first 401/403 from a provider
-// permanently disables it for this process (module-level, not persisted) so a
-// rotated/revoked key degrades to the next provider instead of failing every
-// call. Set AI_PROVIDER=openai|gemini|openrouter to force a single provider
-// (no fallthrough to the others).
+// Route priority: OpenAI → Gemini → Anthropic → OpenRouter. Each provider is
+// tried in order while its key is present and not disabled; the first 401/403
+// from a provider permanently disables it for this process (module-level, not
+// persisted) so a rotated/revoked key degrades to the next provider instead of
+// failing every call. Set AI_PROVIDER=openai|gemini|anthropic|openrouter to
+// force a single provider (no fallthrough to the others).
+//
+// Every call also names a tier — fast (classification, bulk checks),
+// standard (writing), deep (teardowns, synthesis) — and each provider maps
+// tiers to models, overridable per tier by env. Cheap work stops paying for
+// the big model.
 
-type ProviderName = "openai" | "gemini" | "openrouter";
+type ProviderName = "openai" | "gemini" | "anthropic" | "openrouter";
+export type ModelTier = "fast" | "standard" | "deep";
+
+const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
 const GEMINI_DEFAULT_MODEL = "gemini-3.8-flash";
@@ -23,6 +31,13 @@ const _disabledProviders = new Set<ProviderName>();
 let _openai: OpenAI | null = null;
 let _gemini: OpenAI | null = null;
 let _openrouter: OpenAI | null = null;
+let _anthropic: OpenAI | null = null;
+
+function anthropicClient(): OpenAI | null {
+  if (_disabledProviders.has("anthropic") || !process.env.ANTHROPIC_API_KEY) return null;
+  if (!_anthropic) _anthropic = new OpenAI({ apiKey: process.env.ANTHROPIC_API_KEY, baseURL: ANTHROPIC_BASE_URL });
+  return _anthropic;
+}
 
 function geminiApiKey(): string | undefined {
   return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -59,19 +74,20 @@ function openrouterClient(): OpenAI | null {
 function clientFor(provider: ProviderName): OpenAI | null {
   if (provider === "openai") return openaiClient();
   if (provider === "gemini") return geminiClient();
+  if (provider === "anthropic") return anthropicClient();
   return openrouterClient();
 }
 
 function forcedProvider(): ProviderName | null {
   const v = process.env.AI_PROVIDER;
-  return v === "openai" || v === "gemini" || v === "openrouter" ? v : null;
+  return v === "openai" || v === "gemini" || v === "anthropic" || v === "openrouter" ? v : null;
 }
 
 /** Ordered list of providers to try. AI_PROVIDER, if set, forces a single entry. */
 function providerOrder(): ProviderName[] {
   const forced = forcedProvider();
   if (forced) return [forced];
-  return ["openai", "gemini", "openrouter"];
+  return ["openai", "gemini", "anthropic", "openrouter"];
 }
 
 /** Best-guess active provider for label/vision-model resolution. Never throws. */
@@ -103,9 +119,25 @@ function adaptModelForProvider(model: string, provider: ProviderName): string {
   return provider === "openrouter" ? toOpenRouterModel(model) : model;
 }
 
-function modelFor(provider: ProviderName): string {
-  if (provider === "openai") return process.env.AI_MODEL || "gpt-4o";
-  if (provider === "gemini") return process.env.AI_GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
+function modelFor(provider: ProviderName, tier: ModelTier = "standard"): string {
+  const env = process.env;
+  if (provider === "openai") {
+    const standard = env.AI_MODEL || "gpt-4o";
+    if (tier === "fast") return env.AI_MODEL_FAST || "gpt-4o-mini";
+    if (tier === "deep") return env.AI_MODEL_DEEP || standard;
+    return standard;
+  }
+  if (provider === "gemini") {
+    const standard = env.AI_GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
+    if (tier === "fast") return env.AI_GEMINI_MODEL_FAST || standard;
+    if (tier === "deep") return env.AI_GEMINI_MODEL_DEEP || standard;
+    return standard;
+  }
+  if (provider === "anthropic") {
+    if (tier === "fast") return env.ANTHROPIC_MODEL_FAST || "claude-haiku-4-5-20251001";
+    if (tier === "deep") return env.ANTHROPIC_MODEL_DEEP || "claude-opus-5-5";
+    return env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  }
   // openrouter
   if (process.env.AI_FALLBACK_MODEL) return process.env.AI_FALLBACK_MODEL;
   if (process.env.AI_MODEL) return toOpenRouterModel(process.env.AI_MODEL);
@@ -128,6 +160,7 @@ export function getVisionModel(): string {
     return process.env.AI_GEMINI_VISION_MODEL || process.env.AI_GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
   }
   if (process.env.AI_VISION_MODEL) return process.env.AI_VISION_MODEL;
+  if (provider === "anthropic") return process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
   if (provider === "openrouter") return "openai/gpt-4o";
   return "gpt-4o";
 }
@@ -297,7 +330,8 @@ async function createOnRoute(
 async function callModel(
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
   maxTokens: number,
-  modelOverride?: string
+  modelOverride?: string,
+  tier: ModelTier = "standard"
 ) {
   const order = providerOrder();
   let lastErr: unknown;
@@ -307,7 +341,7 @@ async function callModel(
     const client = clientFor(provider);
     if (!client) continue;
     tried = true;
-    const modelToUse = modelOverride ? adaptModelForProvider(modelOverride, provider) : modelFor(provider);
+    const modelToUse = modelOverride ? adaptModelForProvider(modelOverride, provider) : modelFor(provider, tier);
     try {
       return await createOnRoute(client, provider, messages, modelToUse, maxTokens);
     } catch (err) {
@@ -328,7 +362,7 @@ async function callModel(
 
   if (!tried) {
     throw new Error(
-      "No AI key configured — set OPENAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, or OPENROUTER_API_KEY"
+      "No AI key configured — set OPENAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY"
     );
   }
   throw lastErr;
@@ -341,8 +375,10 @@ export async function analyzeWithClaude<T>(options: {
   maxTokens?: number;
   /** Optional per-call model override, e.g. to route heavy tasks to a stronger model. */
   model?: string;
+  /** Which model class this task needs; default "standard". Ignored when `model` is set. */
+  tier?: ModelTier;
 }): Promise<T> {
-  const { systemPrompt, userPrompt, responseSchema, maxTokens = 4096, model: modelOverride } = options;
+  const { systemPrompt, userPrompt, responseSchema, maxTokens = 4096, model: modelOverride, tier } = options;
 
   if (process.env.MOCK_AI === "true") {
     try {
@@ -368,7 +404,8 @@ export async function analyzeWithClaude<T>(options: {
       { role: "user", content: userContent },
     ],
     maxTokens,
-    modelOverride
+    modelOverride,
+    tier
   );
 
   const text = response.choices[0]?.message?.content || "";
@@ -398,7 +435,8 @@ export async function analyzeWithClaude<T>(options: {
         },
       ],
       maxTokens,
-      modelOverride
+      modelOverride,
+      tier
     );
 
     const retryText = retryResponse.choices[0]?.message?.content || "";
