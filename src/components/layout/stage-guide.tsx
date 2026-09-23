@@ -1,5 +1,6 @@
 import { getProjectStages, type ProjectStage } from "@/services/project-stages";
 import { NextStepHint } from "./next-step-hint";
+import { StageChecklist } from "./stage-checklist";
 
 const STEP_NUMBER: Record<ProjectStage["id"], number> = {
   setup: 1,
@@ -28,11 +29,9 @@ export async function StageGuide({
   if (!stages?.next || stages.next.id !== stage) return null;
 
   return (
-    <NextStepHint
-      step={`Step ${STEP_NUMBER[stage]}`}
-      title={stages.next.action}
-      detail={detail}
-      className="mb-4"
-    />
+    <div className="mb-4">
+      <NextStepHint step={`Step ${STEP_NUMBER[stage]}`} title={stages.next.action} detail={detail} />
+      <StageChecklist criteria={stages.next.criteria} />
+    </div>
   );
 }

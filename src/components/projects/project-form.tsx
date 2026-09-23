@@ -155,7 +155,7 @@ export function ProjectForm() {
         return;
       }
 
-      router.push(projectPath(project.id, brandName.trim(), "/research"));
+      router.push(projectPath(project.id, brandName.trim(), "/content"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -420,7 +420,7 @@ export function ProjectForm() {
             </button>
             <button
               type="button"
-              onClick={() => router.push(`/projects/${scrapeWarning.projectId}/research`)}
+              onClick={() => router.push(`/projects/${scrapeWarning.projectId}/content`)}
               className="rounded-md border border-amber-300 px-2.5 py-1 text-[11px] font-medium"
             >
               Continue anyway

@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
+import { createJob, failJob, runJobItems, runningJob } from "@/services/jobs";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { buildScriptWritingPrompt } from "@/services/ai/prompts/script-writing";
 import {
@@ -44,6 +45,8 @@ export async function POST(
     videoType?: string;
     totalDurationSec?: number;
     customBrief?: string;
+    /** Return a job id at once and write the scripts in the background. */
+    background?: boolean;
   };
 
   try {
@@ -72,9 +75,7 @@ export async function POST(
 
     const claimsAudit = auditContext(ctx);
 
-    const settled = await pMapSettled(
-      templates,
-      async (template, i) => {
+    const writeOne = async (template: ScriptTemplate, i: number) => {
         const videoType = overrideType ?? template.videoType;
         const angle = angles.length ? angles[i % angles.length] : undefined;
 
@@ -126,9 +127,32 @@ export async function POST(
         });
 
         return audit.ok ? script : { ...script, complianceWarnings: audit.violations };
-      },
-      { concurrency: CONCURRENCY }
-    );
+    };
+
+    if (body.background) {
+      const running = await runningJob(projectId, "scripts");
+      if (running) return NextResponse.json({ jobId: running.id, reused: true }, { status: 202 });
+      const job = await createJob(
+        projectId,
+        "scripts",
+        templates.map((t) => ({ key: t.id, label: t.name })),
+        { templateIds: templates.map((t) => t.id), customBrief: body.customBrief ?? null }
+      );
+      after(() =>
+        runJobItems(
+          job.id,
+          templates,
+          (t) => ({ key: t.id, label: t.name }),
+          (t, i) => writeOne(t, i),
+          { concurrency: CONCURRENCY }
+        ).catch((err) => failJob(job.id, err))
+      );
+      const payload = { jobId: job.id, requested: templates.length };
+      await idem.commit?.(payload, 202);
+      return NextResponse.json(payload, { status: 202 });
+    }
+
+    const settled = await pMapSettled(templates, writeOne, { concurrency: CONCURRENCY });
 
     type PersistedScript = Awaited<ReturnType<typeof persistScript>>;
     type ScriptWithWarnings = PersistedScript & { complianceWarnings?: ScriptClaimsViolation[] };

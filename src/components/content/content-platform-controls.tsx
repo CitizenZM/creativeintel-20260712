@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Search, RefreshCw, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { RESEARCH_STARTED_EVENT } from "@/components/research/research-progress";
 import { CAMPAIGN_PLATFORMS, adaptersFor } from "@/lib/campaign-platform";
 
 interface PlatformOption {
@@ -89,8 +90,10 @@ export function ContentPlatformControls({
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error || "Could not start research");
 
-      // 3) Hand off to the progress screen.
-      router.push(`/projects/${projectId}/research`);
+      // 3) The progress panel at the top of this page takes it from here.
+      window.dispatchEvent(new CustomEvent(RESEARCH_STARTED_EVENT, { detail: { jobId: data?.jobId } }));
+      router.refresh();
+      setBusy(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
       setBusy(false);

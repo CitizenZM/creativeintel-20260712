@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
+import { createJob, failJob, runJobItems, runningJob } from "@/services/jobs";
 import { prisma } from "@/lib/db";
 import { buildStoryboardCreateData } from "@/services/ai/storyboard-generator";
 import { getBrandTruthForPrompts } from "@/services/brand-kit";
@@ -23,9 +24,10 @@ export async function POST(
   if (idem.replay && idem.response) return idem.response;
 
   const body = await request.json().catch(() => ({}));
-  const { scriptIds, visualDirection } = body as {
+  const { scriptIds, visualDirection, background } = body as {
     scriptIds?: string[];
     visualDirection?: { lighting?: string; style?: string; notes?: string };
+    background?: boolean;
   };
 
   if (!scriptIds || !Array.isArray(scriptIds) || scriptIds.length === 0) {
@@ -55,14 +57,27 @@ export async function POST(
       visualDirection: renderVisualDirection(visualDirection) || undefined,
     };
 
-    const settled = await pMapSettled(
-      scripts,
-      async (script) => {
-        const data = await buildStoryboardCreateData(projectId, script, project, campaignSel, extras);
-        return createStoryboardVersion(data);
-      },
-      { concurrency: CONCURRENCY }
-    );
+    const boardOne = async (script: (typeof scripts)[number]) => {
+      const data = await buildStoryboardCreateData(projectId, script, project, campaignSel, extras);
+      return createStoryboardVersion(data);
+    };
+
+    if (background) {
+      const running = await runningJob(projectId, "storyboards");
+      if (running) return NextResponse.json({ jobId: running.id, reused: true }, { status: 202 });
+      const describe = (s: (typeof scripts)[number]) => ({ key: s.id, label: s.title });
+      const job = await createJob(projectId, "storyboards", scripts.map(describe), { scriptIds, visualDirection });
+      after(() =>
+        runJobItems(job.id, scripts, describe, boardOne, { concurrency: CONCURRENCY }).catch((err) =>
+          failJob(job.id, err)
+        )
+      );
+      const payload = { jobId: job.id, requested: scripts.length };
+      await idem.commit?.(payload, 202);
+      return NextResponse.json(payload, { status: 202 });
+    }
+
+    const settled = await pMapSettled(scripts, boardOne, { concurrency: CONCURRENCY });
 
     const storyboards = settled
       .filter((r) => r.status === "fulfilled")

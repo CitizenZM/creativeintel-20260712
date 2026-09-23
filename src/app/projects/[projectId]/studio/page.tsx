@@ -4,11 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Palette } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { VideoLibraryPanel } from "@/components/video/video-library-panel";
 import { StoryboardTimeline } from "@/components/studio/storyboard-timeline";
 import { LibtvRunPanel } from "@/components/studio/libtv-run-panel";
 import { NextStepHint } from "@/components/layout/next-step-hint";
-import { LegacyApiRender } from "@/components/studio/legacy-api-render";
 import type {
   BrandKitReadiness,
   BudgetMode,
@@ -242,10 +240,6 @@ export default function StudioPage() {
           />
         </>
       )}
-
-      <VideoLibraryPanel projectId={projectId} />
-
-      <LegacyApiRender projectId={projectId} scriptId={storyboard?.scriptId ?? null} />
     </div>
   );
 }

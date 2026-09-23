@@ -15,6 +15,8 @@ interface ActionButtonProps {
   variant?: "default" | "outline";
   className?: string;
   onComplete?: () => void;
+  /** Navigate here once the request is accepted (e.g. to where its progress shows). */
+  redirectTo?: string;
   /**
    * Keep re-posting while the response reports work still outstanding
    * (`{ done: false }`). Analysis stages are time-budgeted per request, and
@@ -43,6 +45,7 @@ export function ActionButton({
   className,
   onComplete,
   autoContinue,
+  redirectTo,
 }: ActionButtonProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -66,7 +69,8 @@ export function ActionButton({
         // progress, so a permanently-stuck item cannot loop forever.
         if (!data || data.done !== false) break;
       }
-      router.refresh();
+      if (redirectTo) router.push(redirectTo);
+      else router.refresh();
       onComplete?.();
     } catch {
       // ignore
