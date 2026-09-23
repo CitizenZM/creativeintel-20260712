@@ -42,6 +42,8 @@ export interface LibtvRunView {
   creditCap: number | null;
   approvedAt: string | null;
   masterMp4Url: string | null;
+  isFinal?: boolean;
+  parentRunId?: string | null;
   previewMp4Url: string | null;
   contactSheetUrl: string | null;
   error: string | null;

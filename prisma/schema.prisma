@@ -684,6 +684,10 @@ model LibtvRun {
   creditCap        Int?
   approvedAt       DateTime?
   masterMp4Url     String?
+  // The deliverable for its script, picked by the user (one per script).
+  isFinal          Boolean   @default(false)
+  // Set when this run re-renders chosen scenes of an earlier run.
+  parentRunId      String?
   previewMp4Url    String?
   contactSheetUrl  String?
   error            String?

@@ -228,8 +228,53 @@ export function LibtvRunPanel({
     }
   }
 
+  const [rerenderShots, setRerenderShots] = useState<Set<number>>(new Set());
+  const [showRerender, setShowRerender] = useState(false);
+
+  async function rerender() {
+    if (!activeRun || rerenderShots.size === 0) return;
+    setBusy("rerender");
+    setError(null);
+    try {
+      const data = await post(`/api/projects/${projectId}/studio/libtv-runs/${activeRun.id}/rerender`, {
+        shotIndexes: [...rerenderShots],
+      });
+      onRunsChanged(data.run as LibtvRunView);
+      if (data.run?.id) onSelectRun(data.run.id);
+      setShowRerender(false);
+      setRerenderShots(new Set());
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function toggleFinal() {
+    if (!activeRun) return;
+    setBusy("final");
+    setError(null);
+    try {
+      const data = await post(`/api/projects/${projectId}/studio/libtv-runs/${activeRun.id}/final`, {
+        final: !activeRun.isFinal,
+      });
+      onRunsChanged(data.run as LibtvRunView);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function cancel() {
     if (!activeRun) return;
+    if (
+      isRunActive(activeRun.status) &&
+      activeRun.status !== "awaiting_approval" &&
+      !window.confirm("Stop this run? Scenes already rendered stay paid for; the rest are skipped.")
+    ) {
+      return;
+    }
     setBusy("cancel");
     try {
       const data = await post(`/api/projects/${projectId}/studio/libtv-runs/${activeRun.id}/cancel`);
@@ -549,6 +594,19 @@ export function LibtvRunPanel({
             </p>
           )}
 
+          {isRunActive(activeRun.status) && activeRun.status !== "awaiting_approval" && (
+            <Button
+              onClick={cancel}
+              disabled={busy === "cancel"}
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-md text-xs"
+            >
+              {busy === "cancel" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
+              Stop run
+            </Button>
+          )}
+
           {activeRun.error && !needsLogin && (
             <p className="text-xs text-red-700">{activeRun.error}</p>
           )}
@@ -616,7 +674,79 @@ export function LibtvRunPanel({
                 {activeRun.creditsSpent} credits spent
               </span>
             )}
+            {activeRun.status === "completed" && activeRun.masterMp4Url && (
+              <Button
+                onClick={toggleFinal}
+                disabled={busy === "final"}
+                size="sm"
+                variant={activeRun.isFinal ? "default" : "outline"}
+                className="h-8 rounded-md text-xs"
+                title="The final run is the deliverable for this script — Deliver and exports lead with it"
+              >
+                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                {activeRun.isFinal ? "Final version" : "Mark as final"}
+              </Button>
+            )}
+            {["completed", "failed", "cancelled"].includes(activeRun.status) && (
+              <Button
+                onClick={() => setShowRerender((v) => !v)}
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-md text-xs"
+              >
+                Re-render scenes…
+              </Button>
+            )}
           </div>
+
+          {showRerender && (
+            <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+              <p className="text-xs font-medium">Pick the scenes to render again</p>
+              <p className="text-[11px] text-muted-foreground">
+                Creates a new version of this run. Only the scenes you pick (and any that never finished) are
+                rendered and paid for; the rest are reused. You approve the new estimate before anything is spent.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {[...new Set(activeRun.jobs.filter((j) => j.kind !== "upload").map((j) => j.shotIndex))]
+                  .sort((a, b) => a - b)
+                  .map((shot) => {
+                    const on = rerenderShots.has(shot);
+                    const scene = storyboard?.frames[shot]?.scene;
+                    return (
+                      <button
+                        key={shot}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() =>
+                          setRerenderShots((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(shot)) next.delete(shot);
+                            else next.add(shot);
+                            return next;
+                          })
+                        }
+                        title={scene}
+                        className={cn(
+                          "rounded-md border px-2 py-1 text-xs",
+                          on ? "border-foreground bg-foreground text-background" : "border-border hover:border-foreground/40"
+                        )}
+                      >
+                        Scene {shot + 1}
+                      </button>
+                    );
+                  })}
+              </div>
+              <Button
+                onClick={rerender}
+                disabled={rerenderShots.size === 0 || busy === "rerender"}
+                size="sm"
+                className="h-8 rounded-md text-xs"
+              >
+                {busy === "rerender" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
+                Create re-render ({rerenderShots.size} scene{rerenderShots.size === 1 ? "" : "s"})
+              </Button>
+            </div>
+          )}
 
           {(isPlayable(activeRun.previewMp4Url) || isPlayable(activeRun.masterMp4Url)) && (
             <video
