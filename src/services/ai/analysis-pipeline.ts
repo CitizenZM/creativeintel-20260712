@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { selectionKey } from "@/services/creative-library";
 import { analyzeWithClaude, getVisionModel } from "./claude-client";
 import { buildBrandAnalysisPrompt } from "./prompts/brand-analysis";
 import { buildContentScoringPrompt, type VideoEvidence, type ScoringItem } from "./prompts/content-scoring";
@@ -28,6 +29,25 @@ const SCORING_BATCH_SIZE = Number(process.env.CONTENT_SCORING_BATCH) || 10;
 const STAGE_BUDGET_MS = Number(process.env.ANALYSIS_BUDGET_MS) || 45_000;
 const TEARDOWN_CACHE_TTL_SEC = 30 * 24 * 60 * 60;
 const ROLLUP_CONCURRENCY = 2;
+
+/**
+ * Normalised text of the rows the user sent to script context, read before a
+ * stage deletes and recreates them so the picks can be carried over.
+ */
+async function pickedKeys(
+  kind: "insight" | "sellingPoint",
+  where: { projectId: string } & Record<string, unknown>
+): Promise<Set<string>> {
+  const rows =
+    kind === "insight"
+      ? (await prisma.insight.findMany({ where: { ...where, selected: true }, select: { title: true } })).map(
+          (r) => r.title
+        )
+      : (
+          await prisma.sellingPoint.findMany({ where: { ...where, selected: true }, select: { point: true } })
+        ).map((r) => r.point);
+  return new Set(rows.map(selectionKey));
+}
 
 export type AnalysisStage =
   | "brand"
@@ -522,15 +542,16 @@ Top features: ${(a.productFeatures || []).slice(0, 6).join(", ")}
 CTAs on site: ${(a.ctaLanguage || []).slice(0, 6).join(", ")}
 Social proof: ${(a.socialProof || []).slice(0, 4).join(" / ")}`;
     const ai = await analyzeWithClaude({ systemPrompt: sys, userPrompt: usr, responseSchema: strategicInsightSchema, maxTokens: 1500 });
-    await prisma.insight.deleteMany({
-      where: { projectId, competitorId: null, category: { notIn: [...GAP_CATEGORIES] } },
-    });
+    const oldWhere = { projectId, competitorId: null, category: { notIn: [...GAP_CATEGORIES] } };
+    const keep = await pickedKeys("insight", oldWhere);
+    await prisma.insight.deleteMany({ where: oldWhere });
     for (const ins of ai.insights) {
       await prisma.insight.create({
         data: {
           projectId, category: ins.category, title: ins.title,
           description: ins.description, importance: ins.importance,
           recommendation: ins.recommendation, dataSource: "AI_INFERRED",
+          selected: keep.has(selectionKey(ins.title)),
         },
       }).catch(() => {});
     }
@@ -1035,9 +1056,9 @@ export async function runCompetitiveGapStage(projectId: string): Promise<number>
 
   const byName = new Map(rollups.map((x) => [x.competitor.name.toLowerCase(), x.competitorId]));
 
-  await prisma.insight.deleteMany({
-    where: { projectId, category: { in: [...GAP_CATEGORIES] } },
-  });
+  const gapWhere = { projectId, category: { in: [...GAP_CATEGORIES] } };
+  const keepGaps = await pickedKeys("insight", gapWhere);
+  await prisma.insight.deleteMany({ where: gapWhere });
 
   let count = 0;
   for (const ins of r.insights) {
@@ -1053,6 +1074,7 @@ export async function runCompetitiveGapStage(projectId: string): Promise<number>
         recommendation: ins.recommendation || null,
         evidence: ins.evidence as never,
         dataSource: "AI_INFERRED",
+        selected: keepGaps.has(selectionKey(ins.title)),
       },
     }).catch(() => {});
     count += 1;
@@ -1148,10 +1170,14 @@ export async function runPatternMiningStage(projectId: string): Promise<number> 
       },
     });
   }
+  const keepPoints = await pickedKeys("sellingPoint", { projectId });
   await prisma.sellingPoint.deleteMany({ where: { projectId } });
   for (const sp of r.sellingPoints) {
     await prisma.sellingPoint.create({
-      data: { projectId, point: sp.point, category: sp.category, strength: sp.strength, frequency: sp.frequency, uniqueness: sp.uniqueness },
+      data: {
+        projectId, point: sp.point, category: sp.category, strength: sp.strength, frequency: sp.frequency,
+        uniqueness: sp.uniqueness, selected: keepPoints.has(selectionKey(sp.point)),
+      },
     });
   }
 

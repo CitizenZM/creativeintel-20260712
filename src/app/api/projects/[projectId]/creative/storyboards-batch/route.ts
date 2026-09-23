@@ -5,6 +5,7 @@ import { getBrandTruthForPrompts } from "@/services/brand-kit";
 import { renderVisualDirection } from "@/lib/visual-direction";
 import { withIdempotency } from "@/lib/idempotency";
 import { pMapSettled } from "@/lib/parallel";
+import { LIVE, createStoryboardVersion } from "@/services/creative-library";
 
 export const maxDuration = 300;
 
@@ -36,7 +37,9 @@ export async function POST(
     if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const [scripts, campaignSel, brandKit, brandTruth] = await Promise.all([
-      prisma.script.findMany({ where: { id: { in: scriptIds }, projectId } }),
+      // Deduped: boarding the same script twice in one batch would race on its
+      // version number.
+      prisma.script.findMany({ where: { id: { in: [...new Set(scriptIds)] }, projectId, ...LIVE } }),
       prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null),
       prisma.brandKit.findUnique({ where: { projectId } }).catch(() => null),
       getBrandTruthForPrompts(projectId).catch(() => ""),
@@ -56,14 +59,14 @@ export async function POST(
       scripts,
       async (script) => {
         const data = await buildStoryboardCreateData(projectId, script, project, campaignSel, extras);
-        return prisma.storyboard.create({ data });
+        return createStoryboardVersion(data);
       },
       { concurrency: CONCURRENCY }
     );
 
     const storyboards = settled
       .filter((r) => r.status === "fulfilled")
-      .map((r) => (r as PromiseFulfilledResult<Awaited<ReturnType<typeof prisma.storyboard.create>>>).value);
+      .map((r) => (r as PromiseFulfilledResult<Awaited<ReturnType<typeof createStoryboardVersion>>>).value);
 
     const failures = settled
       .map((r, i) =>

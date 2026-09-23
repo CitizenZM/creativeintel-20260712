@@ -190,6 +190,7 @@ model Project {
   insights          Insight[]
   narrativePatterns NarrativePattern[]
   sellingPoints     SellingPoint[]
+  angles            Angle[]
   scripts           Script[]
   storyboards       Storyboard[]
   creativeVariants  CreativeVariant[]
@@ -411,6 +412,8 @@ model Insight {
   recommendation String?
 
   dataSource DataSource @default(AI_INFERRED)
+  // Sent to script context by the user; read by angle and script generation.
+  selected   Boolean    @default(false)
   createdAt  DateTime   @default(now())
 
   @@index([projectId, category])
@@ -429,6 +432,7 @@ model NarrativePattern {
   avgPerformance Float?
   examples       Json?
   bestPractices  Json?
+  selected       Boolean       @default(false)
 
   createdAt DateTime @default(now())
 
@@ -446,6 +450,7 @@ model SellingPoint {
   frequency       Int     @default(0)
   competitorUsage Boolean @default(false)
   uniqueness      Float?
+  selected        Boolean @default(false)
 
   createdAt DateTime @default(now())
 
@@ -479,9 +484,42 @@ model Script {
   bodyBeats Json? // [{beat, sellingPoint, howExpressed, shot, startSec, endSec, voiceover, textOverlay, proof}]
   cta       Json? // {text, offer, urgency, visual, shot, durationSec}
 
+  // The user's pick of which scripts go on to storyboards and Studio. Kept on
+  // the row so the choice survives a reload instead of living in page state.
+  status    String    @default("draft") // draft | selected
+  deletedAt DateTime? // archived — hidden from lists, never hard-deleted
+
   createdAt DateTime @default(now())
 
   @@index([projectId, videoType])
+  @@index([projectId, deletedAt])
+}
+
+// One generated ad angle. Every generation is kept (grouped by batchId) so a
+// regenerate never throws away angles the user already liked.
+model Angle {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  batchId   String
+
+  title          String
+  description    String
+  targetEmotion  String?
+  narrativeType  String?
+  videoType      String?
+  templateIds    Json? // string[]
+  predictedScore Float?
+  rationale      String?
+  targetAudience String?
+  platform       String?
+
+  status    String    @default("draft") // draft | selected
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([projectId, deletedAt])
+  @@index([projectId, batchId])
 }
 
 model Storyboard {
@@ -496,7 +534,16 @@ model Storyboard {
   style         String?
   frameSeconds  Int     @default(2)
 
+  // Regenerating a script's storyboard adds a new version rather than a
+  // loose row; exactly one version per script is active (the one Studio uses).
+  version      Int       @default(1)
+  isActive     Boolean   @default(true)
+  deletedAt    DateTime?
+  frameHistory Json? // [{frameNumber, frame, editedAt}] — prior frame state, newest last
+
   createdAt DateTime @default(now())
+
+  @@index([projectId, scriptId])
 }
 
 // ─── Brand Kit — the brand truth every generated ad must stay consistent with ──

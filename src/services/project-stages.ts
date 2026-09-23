@@ -30,8 +30,8 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
     prisma.contentAsset.count({ where: { projectId, isPaidMedia: true } }),
     prisma.adTeardown.count({ where: { projectId } }),
     prisma.insight.count({ where: { projectId } }),
-    prisma.script.count({ where: { projectId } }),
-    prisma.storyboard.count({ where: { projectId } }),
+    prisma.script.count({ where: { projectId, deletedAt: null } }),
+    prisma.storyboard.count({ where: { projectId, deletedAt: null } }),
     prisma.libtvRun.findMany({
       where: { projectId },
       select: { status: true, masterMp4Url: true },

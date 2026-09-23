@@ -73,7 +73,7 @@ export async function POST(
     if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const [scripts, campaignSel, brandKit] = await Promise.all([
-      prisma.script.findMany({ where: { projectId }, take: 5, orderBy: { createdAt: "desc" } }),
+      prisma.script.findMany({ where: { projectId, deletedAt: null }, take: 5, orderBy: { createdAt: "desc" } }),
       prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null),
       prisma.brandKit.findUnique({ where: { projectId } }).catch(() => null),
     ]);

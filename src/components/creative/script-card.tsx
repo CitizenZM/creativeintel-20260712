@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { CheckSquare, Square, ChevronDown, ChevronUp } from "lucide-react";
+import { CheckSquare, Square, ChevronDown, ChevronUp, Archive } from "lucide-react";
 import { getScriptTemplate } from "@/services/ai/prompts/script-templates";
 import { SEGMENT_STYLES } from "./segment-styles";
 import { videoTypeBadgeClass, videoTypeLabel } from "./template-picker";
@@ -39,6 +39,7 @@ export interface ScriptCtaData {
 export interface ScriptData {
   id: string;
   createdAt?: string;
+  status?: string;
   title: string;
   angle: string;
   format: string;
@@ -75,6 +76,7 @@ export function ScriptCard({
   expanded,
   onToggleSelect,
   onToggleExpand,
+  onArchive,
 }: {
   script: ScriptData;
   projectId: string;
@@ -82,6 +84,7 @@ export function ScriptCard({
   expanded: boolean;
   onToggleSelect: () => void;
   onToggleExpand: () => void;
+  onArchive?: () => void;
 }) {
   const template = getScriptTemplate(script.template);
   const total = script.totalDurationSec || 30;
@@ -183,6 +186,17 @@ export function ScriptCard({
             )}
           </div>
         </button>
+        {onArchive && (
+          <button
+            type="button"
+            onClick={onArchive}
+            className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Archive script"
+            title="Archive — hides this script and its storyboards"
+          >
+            <Archive className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {expanded && (

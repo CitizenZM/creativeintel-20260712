@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { LIVE, appendFrameHistory } from "@/services/creative-library";
 
 /**
  * PATCH /api/projects/{projectId}/creative/storyboards/{storyboardId}/frames
@@ -52,7 +53,7 @@ export async function PATCH(
   }
 
   const storyboard = await prisma.storyboard.findFirst({
-    where: { id: storyboardId, projectId },
+    where: { id: storyboardId, projectId, ...LIVE },
   });
 
   if (!storyboard) {
@@ -63,7 +64,8 @@ export async function PATCH(
     ? (storyboard.frames as Array<Record<string, unknown>>)
     : [];
 
-  if (!existingFrames.some((f) => f.frameNumber === frameNumber)) {
+  const previous = existingFrames.find((f) => f.frameNumber === frameNumber);
+  if (!previous) {
     return NextResponse.json({ error: `Frame ${frameNumber} not found` }, { status: 404 });
   }
 
@@ -71,9 +73,20 @@ export async function PATCH(
     frame.frameNumber === frameNumber ? { ...frame, ...updates } : frame
   );
 
+  // Keep what the frame said before this edit — an edit must never be the
+  // only copy of the frame's content.
+  const changed = Object.entries(updates).some(
+    ([key, value]) => JSON.stringify(previous[key]) !== JSON.stringify(value)
+  );
+
   const updated = await prisma.storyboard.update({
     where: { id: storyboardId },
-    data: { frames: frames as never },
+    data: {
+      frames: frames as never,
+      ...(changed
+        ? { frameHistory: appendFrameHistory(storyboard.frameHistory, frameNumber, previous) as never }
+        : {}),
+    },
   });
 
   return NextResponse.json({ ok: true, frames: updated.frames });

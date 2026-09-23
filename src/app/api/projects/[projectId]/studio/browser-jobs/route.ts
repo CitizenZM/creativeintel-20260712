@@ -16,6 +16,7 @@
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { findActiveStoryboard } from "@/services/creative-library";
 import {
   enqueueBrowserJob,
   findExistingShotJob,
@@ -157,10 +158,7 @@ async function handleFromScript(projectId: string, body: FromScriptBody) {
       orderBy: { strength: "desc" },
       take: 5,
     }),
-    prisma.storyboard.findFirst({
-      where: { projectId, scriptId },
-      orderBy: { createdAt: "desc" },
-    }),
+    findActiveStoryboard(projectId, scriptId),
   ]);
 
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });

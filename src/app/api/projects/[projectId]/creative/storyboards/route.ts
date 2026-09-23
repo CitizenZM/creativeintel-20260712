@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { buildStoryboardCreateData } from "@/services/ai/storyboard-generator";
 import { getBrandTruthForPrompts } from "@/services/brand-kit";
 import { withIdempotency } from "@/lib/idempotency";
+import { LIVE, createStoryboardVersion, listStoryboards } from "@/services/creative-library";
 
 export const maxDuration = 300;
 
@@ -11,11 +12,7 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
-  const storyboards = await prisma.storyboard.findMany({
-    where: { projectId },
-    orderBy: { createdAt: "desc" },
-  });
-  return NextResponse.json(storyboards);
+  return NextResponse.json(await listStoryboards(projectId));
 }
 
 export async function POST(
@@ -37,8 +34,8 @@ export async function POST(
       return NextResponse.json({ error: "scriptId required" }, { status: 400 });
     }
 
-    const script = await prisma.script.findUnique({ where: { id: scriptId } });
-    if (!script || script.projectId !== projectId) {
+    const script = await prisma.script.findFirst({ where: { id: scriptId, projectId, ...LIVE } });
+    if (!script) {
       return NextResponse.json({ error: "Script not found" }, { status: 404 });
     }
 
@@ -55,7 +52,7 @@ export async function POST(
       brandTruth: brandTruth || undefined,
       approvedOffer: brandKit?.offerText || undefined,
     });
-    const storyboard = await prisma.storyboard.create({ data });
+    const storyboard = await createStoryboardVersion(data);
 
     await idem.commit?.(storyboard, 200);
     return NextResponse.json(storyboard);

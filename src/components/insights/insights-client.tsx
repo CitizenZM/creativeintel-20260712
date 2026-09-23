@@ -37,6 +37,7 @@ interface Insight {
   description: string;
   importance: number;
   recommendation?: string | null;
+  selected?: boolean;
 }
 interface SellingPoint {
   id: string;
@@ -45,6 +46,7 @@ interface SellingPoint {
   strength: number;
   uniqueness: number;
   frequency: number;
+  selected?: boolean;
 }
 interface NarrativePattern {
   id: string;
@@ -54,6 +56,54 @@ interface NarrativePattern {
   frequency: number;
   avgPerformance: number | null;
   bestPractices: unknown;
+  selected?: boolean;
+}
+
+type SelectionKind = "insight" | "sellingPoint" | "pattern";
+
+/**
+ * "In script" picks, saved on the rows themselves. Angle and script generation
+ * read them, so the state here is only a mirror of what the server holds.
+ */
+function useSavedSelection(projectId: string, kind: SelectionKind, initial: string[]) {
+  const [ids, setIds] = useState<Set<string>>(() => new Set(initial));
+  const [error, setError] = useState<string | null>(null);
+
+  const set = useCallback(
+    async (targets: string[], selected: boolean) => {
+      if (targets.length === 0) return;
+      setError(null);
+      const apply = (on: boolean) =>
+        setIds((prev) => {
+          const next = new Set(prev);
+          for (const id of targets) {
+            if (on) next.add(id);
+            else next.delete(id);
+          }
+          return next;
+        });
+      apply(selected);
+      try {
+        const res = await fetch(`/api/projects/${projectId}/insights/selection`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind, ids: targets, selected }),
+        });
+        if (!res.ok) throw new Error(`Save failed (${res.status})`);
+      } catch {
+        apply(!selected);
+        setError("Couldn't save that change — try again.");
+      }
+    },
+    [projectId, kind]
+  );
+
+  return { ids, set, error };
+}
+
+function SaveError({ message }: { message: string | null }) {
+  if (!message) return null;
+  return <p className="text-xs text-red-600">{message}</p>;
 }
 
 // ─── Inline editable text ────────────────────────────────────────────────────
@@ -106,20 +156,23 @@ function InlineEdit({
 
 // ─── "Send to script" selector ────────────────────────────────────────────────
 
-function SendToScriptBadge({ label, onSend }: { label: string; onSend: () => void }) {
-  const [sent, setSent] = useState(false);
+/** Saved toggle: "→ Script" adds to script context, "In script" removes it. */
+function SendToScriptBadge({ active, onToggle }: { active: boolean; onToggle: () => void }) {
   return (
     <button
-      onClick={() => { onSend(); setSent(true); setTimeout(() => setSent(false), 2000); }}
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      aria-pressed={active}
+      title={active ? "Used when writing angles and scripts — click to remove" : "Use this when writing angles and scripts"}
       className={cn(
         "inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors",
-        sent
-          ? "bg-emerald-50 border-emerald-300 text-emerald-700"
+        active
+          ? "bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
           : "bg-muted border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
       )}
     >
-      {sent ? <Check className="h-2.5 w-2.5" /> : <ArrowRight className="h-2.5 w-2.5" />}
-      {sent ? "Added" : `→ ${label}`}
+      {active ? <Check className="h-2.5 w-2.5" /> : <ArrowRight className="h-2.5 w-2.5" />}
+      {active ? "In script" : "→ Script"}
     </button>
   );
 }
@@ -402,9 +455,14 @@ function getCatConfig(cat: string) {
   return CATEGORY_CONFIG[cat.toLowerCase()] || { color: "text-muted-foreground", bg: "bg-muted border-border", icon: Lightbulb };
 }
 
-export function InsightsSelectableSection({ insights }: { insights: Insight[] }) {
+export function InsightsSelectableSection({ projectId, insights }: { projectId: string; insights: Insight[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [sentToScript, setSentToScript] = useState<Set<string>>(new Set());
+  const saved = useSavedSelection(
+    projectId,
+    "insight",
+    insights.filter((i) => i.selected).map((i) => i.id)
+  );
+  const sentToScript = saved.ids;
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   function toggle(id: string) {
@@ -417,9 +475,7 @@ export function InsightsSelectableSection({ insights }: { insights: Insight[] })
   }
 
   function sendSelected() {
-    const newSent = new Set(sentToScript);
-    selected.forEach(id => newSent.add(id));
-    setSentToScript(newSent);
+    void saved.set([...selected], true);
     setSelected(new Set());
   }
 
@@ -433,6 +489,7 @@ export function InsightsSelectableSection({ insights }: { insights: Insight[] })
 
   return (
     <div className="space-y-4">
+      <SaveError message={saved.error} />
       {selected.size > 0 && (
         <div className="sticky top-0 z-10 rounded-xl border border-foreground bg-foreground text-background px-4 py-2.5 flex items-center justify-between gap-3 shadow-lg">
           <p className="text-sm font-semibold">{selected.size} insight{selected.size > 1 ? "s" : ""} selected</p>
@@ -483,7 +540,7 @@ export function InsightsSelectableSection({ insights }: { insights: Insight[] })
                       <div className="flex items-start justify-between gap-2">
                         <p className="text-sm font-semibold leading-snug">{ins.title}</p>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {isSent && <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-0.5"><Check className="h-3 w-3" /> In Script</span>}
+                          {isSent && <SendToScriptBadge active onToggle={() => void saved.set([ins.id], false)} />}
                           <span className="text-[10px] num text-muted-foreground">{ins.importance}</span>
                         </div>
                       </div>
@@ -510,8 +567,7 @@ export function InsightsSelectableSection({ insights }: { insights: Insight[] })
                         </div>
                       )}
                       <div className="flex gap-2 pt-1">
-                        <SendToScriptBadge label="Script" onSend={() => { setSentToScript(prev => new Set([...prev, ins.id])); }} />
-                        <SendToScriptBadge label="Ideation" onSend={() => { setSentToScript(prev => new Set([...prev, ins.id])); }} />
+                        <SendToScriptBadge active={isSent} onToggle={() => void saved.set([ins.id], !isSent)} />
                       </div>
                     </div>
                   )}
@@ -527,11 +583,22 @@ export function InsightsSelectableSection({ insights }: { insights: Insight[] })
 
 // ─── Selling Points with send-to-script ──────────────────────────────────────
 
-export function SellingPointsSection({ sellingPoints }: { sellingPoints: SellingPoint[] }) {
-  const [sent, setSent] = useState<Set<string>>(new Set());
+export function SellingPointsSection({
+  projectId,
+  sellingPoints,
+}: {
+  projectId: string;
+  sellingPoints: SellingPoint[];
+}) {
+  const saved = useSavedSelection(
+    projectId,
+    "sellingPoint",
+    sellingPoints.filter((sp) => sp.selected).map((sp) => sp.id)
+  );
 
   return (
     <div className="space-y-2">
+      <SaveError message={saved.error} />
       {sellingPoints.map(sp => (
         <div key={sp.id} className="rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3">
           {/* Strength bar on left */}
@@ -548,10 +615,9 @@ export function SellingPointsSection({ sellingPoints }: { sellingPoints: Selling
             </div>
           </div>
           <SendToScriptBadge
-            label="Script"
-            onSend={() => setSent(prev => new Set([...prev, sp.id]))}
+            active={saved.ids.has(sp.id)}
+            onToggle={() => void saved.set([sp.id], !saved.ids.has(sp.id))}
           />
-          {sent.has(sp.id) && <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" />}
         </div>
       ))}
     </div>
@@ -560,7 +626,13 @@ export function SellingPointsSection({ sellingPoints }: { sellingPoints: Selling
 
 // ─── Narrative Patterns with send-to-script ───────────────────────────────────
 
-export function NarrativePatternsSection({ patterns }: { patterns: NarrativePattern[] }) {
+export function NarrativePatternsSection({
+  projectId,
+  patterns,
+}: {
+  projectId: string;
+  patterns: NarrativePattern[];
+}) {
   const NARRATIVE_LABELS: Record<string, string> = {
     PROBLEM_SOLUTION: "Problem / Solution", TESTIMONIAL: "Testimonial",
     DEMONSTRATION: "Demonstration", LIFESTYLE: "Lifestyle",
@@ -568,10 +640,15 @@ export function NarrativePatternsSection({ patterns }: { patterns: NarrativePatt
     STORY_ARC: "Story Arc", UGC_STYLE: "UGC Style",
     TREND_RIDING: "Trend Riding", BEFORE_AFTER: "Before / After",
   };
-  const [, setSent] = useState<Set<string>>(new Set());
+  const saved = useSavedSelection(
+    projectId,
+    "pattern",
+    patterns.filter((p) => p.selected).map((p) => p.id)
+  );
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      {saved.error && <div className="lg:col-span-2"><SaveError message={saved.error} /></div>}
       {patterns.map(p => (
         <div key={p.id} className="rounded-xl border border-border bg-card p-4 space-y-3">
           <div className="flex items-start justify-between gap-2">
@@ -590,7 +667,10 @@ export function NarrativePatternsSection({ patterns }: { patterns: NarrativePatt
           </div>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>Used {p.frequency}× in top content</span>
-            <SendToScriptBadge label="Script" onSend={() => setSent(prev => new Set([...prev, p.id]))} />
+            <SendToScriptBadge
+              active={saved.ids.has(p.id)}
+              onToggle={() => void saved.set([p.id], !saved.ids.has(p.id))}
+            />
           </div>
           {(p.bestPractices as string[])?.length > 0 && (
             <div className="rounded-lg bg-muted/50 p-2.5 space-y-1">

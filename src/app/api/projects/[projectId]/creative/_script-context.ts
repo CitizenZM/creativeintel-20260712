@@ -86,9 +86,11 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
 
   const [sellingPoints, campaignSel, deepAnal, audienceData, brandKit, brandTruth] =
     await Promise.all([
+      // Points the user sent to script context lead; the strongest others fill
+      // the remaining slots.
       prisma.sellingPoint.findMany({
         where: { projectId },
-        orderBy: { strength: "desc" },
+        orderBy: [{ selected: "desc" }, { strength: "desc" }],
         take: 5,
       }),
       prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null),
@@ -119,6 +121,19 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
       if (i.avoidPatterns?.length) lines.push(`Avoid: ${i.avoidPatterns.slice(0, 2).join("; ")}`);
     }
     if (lines.length) nicheResearch = lines.join("\n").slice(0, 1500);
+  }
+
+  const pickedInsights = await prisma.insight.findMany({
+    where: { projectId, selected: true },
+    orderBy: { importance: "desc" },
+    take: 6,
+    select: { title: true, description: true, recommendation: true },
+  });
+  if (pickedInsights.length) {
+    const picked = `User-prioritised insights:\n${pickedInsights
+      .map((i) => `- ${i.title}: ${i.recommendation || i.description}`)
+      .join("\n")}`;
+    nicheResearch = [picked, nicheResearch].filter(Boolean).join("\n\n").slice(0, 2200);
   }
 
   const teardowns = await loadTeardownHighlights(projectId);
