@@ -113,6 +113,10 @@ export default function CreativePage() {
 
   const [angles, setAngles] = useState<Angle[]>([]);
   const [showAllAngles, setShowAllAngles] = useState(false);
+  const [castOptions, setCastOptions] = useState<{ roles: string[]; environments: string[] }>({
+    roles: [],
+    environments: [],
+  });
   const [scripts, setScripts] = useState<ScriptData[]>([]);
   const [selectedScriptIds, setSelectedScriptIds] = useState<Set<string>>(new Set());
   const [storyboards, setStoryboards] = useState<Storyboard[]>([]);
@@ -173,14 +177,24 @@ export default function CreativePage() {
     if (loaded) return;
     async function loadSaved() {
       try {
-        const [anglesRes, scriptsRes, storyboardsRes, matrixRes, campaignRes, kitRes] = await Promise.all([
+        const [anglesRes, scriptsRes, storyboardsRes, matrixRes, campaignRes, kitRes, brandRes] = await Promise.all([
           fetch(`/api/projects/${projectId}/creative/angles`),
           fetch(`/api/projects/${projectId}/creative/scripts`),
           fetch(`/api/projects/${projectId}/creative/storyboards`),
           fetch(`/api/projects/${projectId}/creative/test-matrix`),
           fetch(`/api/projects/${projectId}/campaign-selection`),
           fetch(`/api/projects/${projectId}/brand-kit`),
+          fetch(`/api/projects/${projectId}/brand`),
         ]);
+        const brand = await brandRes.json().catch(() => null);
+        if (brand) {
+          setCastOptions({
+            roles: ((brand.actorSettings ?? []) as { role?: string }[]).map((a) => a.role).filter((r): r is string => !!r),
+            environments: ((brand.useEnvironments ?? []) as { name?: string }[])
+              .map((e) => e.name)
+              .filter((n): n is string => !!n),
+          });
+        }
         const kit = await kitRes.json().catch(() => null);
         if (kit?.kit?.updatedAt) setKitUpdatedAt(kit.kit.updatedAt as string);
         const savedScripts = await scriptsRes.json().catch(() => []);
@@ -1009,6 +1023,7 @@ export default function CreativePage() {
                   expanded={expandedScript === script.id}
                   onToggleSelect={() => toggleScript(script.id)}
                   onArchive={() => archiveScript(script.id)}
+                  castOptions={castOptions}
                   onToggleExpand={() =>
                     setExpandedScript(expandedScript === script.id ? null : script.id)
                   }

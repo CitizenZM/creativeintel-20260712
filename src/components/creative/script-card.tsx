@@ -40,6 +40,10 @@ export interface ScriptData {
   id: string;
   createdAt?: string;
   status?: string;
+  selectedHookIdx?: number | null;
+  selectedCtaIdx?: number | null;
+  roleName?: string | null;
+  environmentName?: string | null;
   title: string;
   angle: string;
   format: string;
@@ -57,6 +61,134 @@ export interface ScriptData {
   narrativeType: string;
   targetEmotion: string;
   predictedScore: number;
+}
+
+type Picks = Pick<ScriptData, "selectedHookIdx" | "selectedCtaIdx" | "roleName" | "environmentName">;
+
+/**
+ * The choices that shape this script's storyboard: which generated hook and
+ * CTA to lead with, who is on camera and where. Saved on change.
+ */
+function ScriptPicks({
+  projectId,
+  script,
+  castOptions,
+}: {
+  projectId: string;
+  script: ScriptData;
+  castOptions?: { roles: string[]; environments: string[] };
+}) {
+  const hooks = Array.isArray(script.hookVariants) ? script.hookVariants : [];
+  const ctas = Array.isArray(script.ctaVariants) ? script.ctaVariants : [];
+  const [picks, setPicks] = useState<Picks>({
+    selectedHookIdx: script.selectedHookIdx ?? null,
+    selectedCtaIdx: script.selectedCtaIdx ?? null,
+    roleName: script.roleName ?? null,
+    environmentName: script.environmentName ?? null,
+  });
+  const [note, setNote] = useState<string | null>(null);
+
+  async function save(patch: Partial<Picks>) {
+    const prev = picks;
+    setPicks({ ...picks, ...patch });
+    setNote(null);
+    const res = await fetch(`/api/projects/${projectId}/creative/scripts/${script.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).catch(() => null);
+    if (!res?.ok) {
+      setPicks(prev);
+      setNote("Couldn't save that pick — try again.");
+    } else {
+      setNote("Saved — used the next time this script is storyboarded.");
+    }
+  }
+
+  const roles = castOptions?.roles ?? [];
+  const environments = castOptions?.environments ?? [];
+  if (hooks.length < 2 && ctas.length < 2 && roles.length === 0 && environments.length === 0) return null;
+
+  const chip = (on: boolean) =>
+    cn(
+      "rounded-md border px-2 py-1 text-left text-xs transition-colors",
+      on ? "border-foreground bg-foreground/5 font-medium" : "border-border text-muted-foreground hover:border-foreground/40"
+    );
+
+  return (
+    <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Your picks for this script</p>
+      {hooks.length > 1 && (
+        <div role="radiogroup" aria-label="Hook" className="space-y-1">
+          <p className="text-xs font-medium">Opening hook</p>
+          <div className="flex flex-col gap-1">
+            {hooks.map((h, i) => (
+              <button
+                key={i}
+                type="button"
+                role="radio"
+                aria-checked={(picks.selectedHookIdx ?? 0) === i}
+                onClick={() => save({ selectedHookIdx: i })}
+                className={chip((picks.selectedHookIdx ?? 0) === i)}
+              >
+                {h}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {ctas.length > 1 && (
+        <div role="radiogroup" aria-label="Call to action" className="space-y-1">
+          <p className="text-xs font-medium">Call to action</p>
+          <div className="flex flex-wrap gap-1">
+            {ctas.map((c, i) => (
+              <button
+                key={i}
+                type="button"
+                role="radio"
+                aria-checked={(picks.selectedCtaIdx ?? 0) === i}
+                onClick={() => save({ selectedCtaIdx: i })}
+                className={chip((picks.selectedCtaIdx ?? 0) === i)}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {(roles.length > 0 || environments.length > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="space-y-1 text-xs">
+            <span className="font-medium">On camera</span>
+            <select
+              value={picks.roleName ?? ""}
+              onChange={(e) => save({ roleName: e.target.value || null })}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+            >
+              <option value="">Campaign default</option>
+              {roles.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1 text-xs">
+            <span className="font-medium">Setting</span>
+            <select
+              value={picks.environmentName ?? ""}
+              onChange={(e) => save({ environmentName: e.target.value || null })}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+            >
+              <option value="">Campaign default</option>
+              {environments.map((env) => (
+                <option key={env} value={env}>{env}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+      {note && <p className="text-[11px] text-muted-foreground">{note}</p>}
+    </div>
+  );
 }
 
 function Field({ label, value }: { label: string; value?: string | null }) {
@@ -77,6 +209,7 @@ export function ScriptCard({
   onToggleSelect,
   onToggleExpand,
   onArchive,
+  castOptions,
 }: {
   script: ScriptData;
   projectId: string;
@@ -85,6 +218,8 @@ export function ScriptCard({
   onToggleSelect: () => void;
   onToggleExpand: () => void;
   onArchive?: () => void;
+  /** Brand roles and settings this script can be cast with. */
+  castOptions?: { roles: string[]; environments: string[] };
 }) {
   const template = getScriptTemplate(script.template);
   const total = script.totalDurationSec || 30;
@@ -201,6 +336,7 @@ export function ScriptCard({
 
       {expanded && (
         <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
+          <ScriptPicks projectId={projectId} script={script} castOptions={castOptions} />
           {structured ? (
             <div className="space-y-3">
               {/* HOOK */}

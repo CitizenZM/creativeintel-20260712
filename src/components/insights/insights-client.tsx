@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import {
   MapPin, Users, Pencil, Check, X, Plus, Trash2,
   ChevronDown, ChevronUp, ArrowRight, Lightbulb, Target,
-  Zap, CheckCircle2, XCircle, Sparkles,
+  Zap, CheckCircle2, XCircle, Sparkles, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -234,6 +234,55 @@ function SendToScriptBadge({ active, onToggle }: { active: boolean; onToggle: ()
   );
 }
 
+/**
+ * Ask the AI for more settings or roles; they are appended to the brand's
+ * list (and saved) so scripts can be cast from them.
+ */
+function GenerateMoreButton<T>({
+  projectId,
+  kind,
+  onAdded,
+}: {
+  projectId: string;
+  kind: "environment" | "actor";
+  onAdded: (all: T[]) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/brand/options`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, count: 3 }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !Array.isArray(data.all)) throw new Error(data.error || "Could not generate options");
+      onAdded(data.all as T[]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate options");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <span className="inline-flex flex-col items-start gap-1">
+      <button
+        type="button"
+        onClick={run}
+        disabled={busy}
+        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-60 px-1 py-2"
+      >
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+        {busy ? `Generating 3 ${kind === "environment" ? "settings" : "roles"}…` : `Generate 3 more ${kind === "environment" ? "settings" : "roles"}`}
+      </button>
+      {error && <span className="text-[11px] text-red-600 px-1">{error}</span>}
+    </span>
+  );
+}
+
 // ─── SECTION 1: Environments (editable, priority top) ─────────────────────────
 
 export function EnvironmentsSection({
@@ -271,9 +320,12 @@ export function EnvironmentsSection({
       <MapPin className="h-7 w-7 mx-auto mb-2 text-muted-foreground/40" />
       <p className="text-sm text-muted-foreground">No environments defined</p>
       <p className="text-xs text-muted-foreground mt-1 mb-3">Run research or add environments manually</p>
-      <Button size="sm" variant="outline" onClick={addEnv} className="h-7 text-xs gap-1">
-        <Plus className="h-3 w-3" /> Add Environment
-      </Button>
+      <div className="flex items-center justify-center gap-3 flex-wrap">
+        <Button size="sm" variant="outline" onClick={addEnv} className="h-7 text-xs gap-1">
+          <Plus className="h-3 w-3" /> Add Environment
+        </Button>
+        <GenerateMoreButton<UseEnvironment> projectId={projectId} kind="environment" onAdded={setEnvs} />
+      </div>
     </div>
   );
 
@@ -331,9 +383,12 @@ export function EnvironmentsSection({
           )}
         </div>
       ))}
-      <button onClick={addEnv} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-1 py-2">
-        <Plus className="h-3.5 w-3.5" /> Add environment
-      </button>
+      <div className="flex items-center gap-4 flex-wrap">
+        <button onClick={addEnv} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-1 py-2">
+          <Plus className="h-3.5 w-3.5" /> Add environment
+        </button>
+        <GenerateMoreButton<UseEnvironment> projectId={projectId} kind="environment" onAdded={setEnvs} />
+      </div>
     </div>
   );
 }
@@ -370,9 +425,12 @@ export function ActorSettingsSection({
     <div className="rounded-xl border border-dashed border-border p-5 text-center">
       <Users className="h-7 w-7 mx-auto mb-2 text-muted-foreground/40" />
       <p className="text-sm text-muted-foreground">No actor roles defined</p>
-      <Button size="sm" variant="outline" onClick={addActor} className="h-7 text-xs gap-1 mt-3">
-        <Plus className="h-3 w-3" /> Add Actor Role
-      </Button>
+      <div className="flex items-center justify-center gap-3 flex-wrap mt-3">
+        <Button size="sm" variant="outline" onClick={addActor} className="h-7 text-xs gap-1">
+          <Plus className="h-3 w-3" /> Add Actor Role
+        </Button>
+        <GenerateMoreButton<ActorSetting> projectId={projectId} kind="actor" onAdded={setActors} />
+      </div>
     </div>
   );
 
@@ -438,9 +496,12 @@ export function ActorSettingsSection({
           )}
         </div>
       ))}
-      <button onClick={addActor} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-1 py-2">
-        <Plus className="h-3.5 w-3.5" /> Add actor role
-      </button>
+      <div className="flex items-center gap-4 flex-wrap">
+        <button onClick={addActor} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-1 py-2">
+          <Plus className="h-3.5 w-3.5" /> Add actor role
+        </button>
+        <GenerateMoreButton<ActorSetting> projectId={projectId} kind="actor" onAdded={setActors} />
+      </div>
     </div>
   );
 }

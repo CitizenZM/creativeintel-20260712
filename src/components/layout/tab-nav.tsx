@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Film, Lightbulb, Wand2, Palette, PackageCheck } from "lucide-react";
+import { LayoutDashboard, Film, Lightbulb, Wand2, Palette, PackageCheck, Library } from "lucide-react";
 
 interface TabNavProps {
   projectId: string;
@@ -48,6 +48,19 @@ export function TabNav({ projectId }: TabNavProps) {
               </Link>
             );
           })}
+          {/* Not a stage — the archive of everything generated, so no step number. */}
+          <Link
+            href={`/projects/${projectId}/library`}
+            className={cn(
+              "ml-auto flex items-center gap-1.5 border-b-2 py-3 text-sm font-medium transition-colors whitespace-nowrap",
+              pathname.startsWith(`/projects/${projectId}/library`)
+                ? "border-foreground text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Library className="h-4 w-4" />
+            Library
+          </Link>
         </nav>
       </div>
     </div>

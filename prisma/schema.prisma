@@ -496,6 +496,12 @@ model Script {
   status    String    @default("draft") // draft | selected
   deletedAt DateTime? // archived — hidden from lists, never hard-deleted
 
+  // The user's picks among the generated options, carried into the storyboard.
+  selectedHookIdx Int? // index into hookVariants
+  selectedCtaIdx  Int? // index into ctaVariants
+  roleName        String? // Brand.actorSettings[].role cast for this script
+  environmentName String? // Brand.useEnvironments[].name used as its setting
+
   createdAt DateTime @default(now())
 
   @@index([projectId, videoType])
