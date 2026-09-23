@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && prisma db push && next build",
+    "build:check": "prisma generate && next build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "worker:libtv": "node workers/libtv-worker/worker.mjs",
     "postinstall": "prisma generate",

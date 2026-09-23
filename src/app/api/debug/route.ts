@@ -4,7 +4,14 @@ import OpenAI from "openai";
 
 export const maxDuration = 30;
 
+// Dev-only diagnostics endpoint. Never expose in production: it leaks
+// partial env/config state and makes a live billed OpenAI call on every
+// request, so gate hard on NODE_ENV rather than trusting a header/token.
 export async function GET() {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const results: Record<string, unknown> = {
     env: {
       hasOpenAIKey: !!process.env.OPENAI_API_KEY,

@@ -2,10 +2,9 @@
 
 import { useState, useCallback } from "react";
 import {
-  MapPin, Users, Eye, Pencil, Check, X, Plus, Trash2,
+  MapPin, Users, Pencil, Check, X, Plus, Trash2,
   ChevronDown, ChevronUp, ArrowRight, Lightbulb, Target,
-  Zap, CheckCircle2, XCircle, Film, Camera, Sparkles,
-  BarChart3, TrendingUp, AlertCircle, Clock,
+  Zap, CheckCircle2, XCircle, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -120,36 +119,8 @@ function SendToScriptBadge({ label, onSend }: { label: string; onSend: () => voi
       )}
     >
       {sent ? <Check className="h-2.5 w-2.5" /> : <ArrowRight className="h-2.5 w-2.5" />}
-      {sent ? "Added" : "→ Script"}
+      {sent ? "Added" : `→ ${label}`}
     </button>
-  );
-}
-
-// ─── Section header ───────────────────────────────────────────────────────────
-
-function SectionHeader({
-  icon: Icon, color = "text-foreground", title, subtitle, count, children,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  color?: string; title: string; subtitle?: string; count?: number;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
-      <div className="flex items-center gap-2.5">
-        <Icon className={cn("h-4 w-4 shrink-0", color)} />
-        <div>
-          <p className="text-sm font-semibold tracking-tight flex items-center gap-2">
-            {title}
-            {count !== undefined && (
-              <span className="text-[10px] font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{count}</span>
-            )}
-          </p>
-          {subtitle && <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>}
-        </div>
-      </div>
-      {children}
-    </div>
   );
 }
 
@@ -439,7 +410,8 @@ export function InsightsSelectableSection({ insights }: { insights: Insight[] })
   function toggle(id: string) {
     setSelected(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
@@ -596,7 +568,7 @@ export function NarrativePatternsSection({ patterns }: { patterns: NarrativePatt
     STORY_ARC: "Story Arc", UGC_STYLE: "UGC Style",
     TREND_RIDING: "Trend Riding", BEFORE_AFTER: "Before / After",
   };
-  const [sent, setSent] = useState<Set<string>>(new Set());
+  const [, setSent] = useState<Set<string>>(new Set());
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">

@@ -137,32 +137,6 @@ export function getVideoModel(model: string): VideoModelDef | undefined {
   return VIDEO_MODELS[model];
 }
 
-export function isKnownVideoModel(model: string): boolean {
-  return Object.prototype.hasOwnProperty.call(VIDEO_MODELS, model);
-}
-
-/**
- * Splits a cinematic-prompt-builder output into { positive, negative } based
- * on the "negative:" marker used throughout cinematic-prompt-builder.ts
- * (case-insensitive, optionally wrapped in a trailing "[...]" block).
- * Returns negative === "" when no marker is found.
- */
-export function splitNegativePrompt(prompt: string): { positive: string; negative: string } {
-  const match = /negative\s*:/i.exec(prompt);
-  if (!match) return { positive: prompt, negative: "" };
-
-  const idx = match.index;
-  let positive = prompt.slice(0, idx).trim();
-  let negative = prompt.slice(idx + match[0].length).trim();
-
-  // Strip a leading "[" from positive (if the marker was preceded by "[negative:")
-  // and a trailing "]" from negative.
-  if (positive.endsWith("[")) positive = positive.slice(0, -1).trim();
-  if (negative.endsWith("]")) negative = negative.slice(0, -1).trim();
-
-  return { positive, negative };
-}
-
 /** Trims text to maxChars at the last sentence boundary (. ! ? or newline) at or before the limit. */
 function trimAtSentenceBoundary(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
