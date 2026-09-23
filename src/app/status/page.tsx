@@ -90,11 +90,10 @@ export default async function StatusPage() {
       if (!latest.has(s.name)) latest.set(s.name, s);
     }
   }
-  // A run's report is a snapshot taken while worker tasks were still queued.
-  // Showing "pending worker" when the queue is empty is simply wrong, so
-  // reconcile those rows against the live queue.
-  // An empty queue only means the worker finished — if its recent tasks
-  // failed, the source did not actually run.
+  // A run's report is a snapshot taken while worker tasks were still queued,
+  // so reconcile "pending worker" rows against the live queue. An empty queue
+  // only means the worker finished — if its recent tasks failed, the source
+  // did not actually run.
   const sources = [...latest.values()]
     .map((s) =>
       s.status === "pending_worker" && queued === 0
