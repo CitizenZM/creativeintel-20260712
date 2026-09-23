@@ -26,6 +26,7 @@
     "cloudinary": "^2.10.0",
     "clsx": "^2.1.1",
     "googleapis": "^171.4.0",
+    "jose": "^6.2.12",
     "jsonrepair": "^3.15.0",
     "lucide-react": "^1.8.0",
     "mammoth": "^1.12.0",
