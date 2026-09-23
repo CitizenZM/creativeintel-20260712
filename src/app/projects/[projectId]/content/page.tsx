@@ -4,6 +4,8 @@ import Link from "next/link";
 import { NARRATIVE_TYPE_LABELS, CONTENT_TYPE_LABELS } from "@/lib/constants";
 import { getCampaignPlatform } from "@/lib/campaign-platform";
 import { ContentPlatformControls } from "@/components/content/content-platform-controls";
+import { ResearchProgress } from "@/components/research/research-progress";
+import { VideoLibraryPanel } from "@/components/video/video-library-panel";
 import { OpenOnPlatform } from "@/components/content/open-on-platform";
 import { ScoreBar } from "@/components/dashboard/status-badge";
 import { LoadMoreButton } from "@/components/dashboard/action-buttons";
@@ -226,6 +228,7 @@ export default async function ContentPage({
   return (
     <div className="space-y-5">
       <StageGuide projectId={projectId} stage="research" detail="These are the competitor ads we collected. Skim the top performers before writing creative." />
+      <ResearchProgress projectId={projectId} />
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-base font-semibold tracking-tight">Competitor Ad Intelligence</h2>
@@ -518,6 +521,19 @@ export default async function ContentPage({
           <LoadMoreButton projectId={projectId} currentCount={assets.length} />
         </>
       )}
+
+      {/* Reference videos you add yourself (import a URL, cut shorts). This
+          used to sit on the Studio page next to the real render pipeline,
+          which made it look like a third way to make the ad. */}
+      <section className="space-y-2 pt-4 border-t border-border">
+        <div>
+          <h3 className="text-sm font-semibold tracking-tight">Your reference videos</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Import a video you like by URL to keep it with this project’s research.
+          </p>
+        </div>
+        <VideoLibraryPanel projectId={projectId} />
+      </section>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
+import { createJob, failJob, runJobItems, runningJob } from "@/services/jobs";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { LIVE } from "@/services/creative-library";
@@ -45,17 +46,44 @@ export async function GET(
 }
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
+  const body = (await request.json().catch(() => ({}))) as { background?: boolean };
+
+  const exists = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
+  if (!exists) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  if (body.background) {
+    const running = await runningJob(projectId, "angles");
+    if (running) return NextResponse.json({ jobId: running.id, reused: true }, { status: 202 });
+    const item = { key: "angles", label: "Generate 10 ad angles" };
+    const job = await createJob(projectId, "angles", [item]);
+    after(() =>
+      runJobItems(job.id, [item], (i) => i, async () => {
+        const saved = await generateAngles(projectId);
+        return { id: saved.batchId };
+      }).catch((err) => failJob(job.id, err))
+    );
+    return NextResponse.json({ jobId: job.id }, { status: 202 });
+  }
 
   try {
+    return NextResponse.json(await generateAngles(projectId));
+  } catch (err) {
+    console.error("Angle generation failed:", err);
+    return NextResponse.json({ error: "Failed to generate angles" }, { status: 500 });
+  }
+}
+
+/** Generate one batch of angles and save it. Throws on failure. */
+async function generateAngles(projectId: string) {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       include: { brand: true },
     });
-    if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!project) throw new Error("Project not found");
 
     // What the user sent to script context on the Insights page outranks the
     // score-ordered defaults; fall back to top-N only when nothing is picked.
@@ -162,12 +190,5 @@ export async function POST(
       )
     );
 
-    return NextResponse.json({ angles: saved, batchId });
-  } catch (err) {
-    console.error("Angle generation failed:", err);
-    return NextResponse.json(
-      { error: "Failed to generate angles" },
-      { status: 500 }
-    );
-  }
+    return { angles: saved, batchId };
 }

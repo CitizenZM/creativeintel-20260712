@@ -191,6 +191,7 @@ model Project {
   narrativePatterns NarrativePattern[]
   sellingPoints     SellingPoint[]
   angles            Angle[]
+  jobs              Job[]
   scripts           Script[]
   storyboards       Storyboard[]
   creativeVariants  CreativeVariant[]
@@ -493,6 +494,34 @@ model Script {
 
   @@index([projectId, videoType])
   @@index([projectId, deletedAt])
+}
+
+// A long-running AI operation (angles, scripts, storyboards, analysis). Runs
+// server-side after the request returns, so progress survives a reload and
+// every page reads the same shape: done/total, per-item steps, ETA.
+model Job {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  kind        String // angles | scripts | storyboards | analysis
+  status      String  @default("queued") // queued | running | completed | failed | cancelled
+  total       Int     @default(0)
+  done        Int     @default(0)
+  failed      Int     @default(0)
+  currentStep String?
+  steps       Json? // [{key, label, status: queued|running|done|failed|cancelled, error?, resultId?}]
+  input       Json?
+  result      Json? // {ids: string[], failures: [{key,label,error}]}
+  error       String?
+
+  cancelRequested Boolean   @default(false)
+  startedAt       DateTime?
+  heartbeatAt     DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([projectId, kind, createdAt])
 }
 
 // One generated ad angle. Every generation is kept (grouped by batchId) so a

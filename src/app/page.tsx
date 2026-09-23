@@ -86,7 +86,7 @@ export default async function HomePage() {
               {needsAttention.map((r) => (
                 <Link
                   key={r.project.id}
-                  href={projectPath(r.project.id, r.project.brandName, "/research")}
+                  href={projectPath(r.project.id, r.project.brandName, "/content")}
                   className="rounded-md border border-[var(--status-urgent)] bg-background px-2.5 py-1 text-[11px] font-medium"
                 >
                   {r.project.brandName} →

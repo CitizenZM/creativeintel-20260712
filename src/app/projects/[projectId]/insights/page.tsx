@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/db";
 import { StageGuide } from "@/components/layout/stage-guide";
-import { ActionButton } from "@/components/dashboard/action-buttons";
 import {
   Film, Zap, MousePointerClick, Megaphone, TrendingDown,
   Lightbulb, AlertCircle, Clock, MapPin, Users, Eye,
@@ -17,6 +16,7 @@ import {
   NarrativePatternsSection,
 } from "@/components/insights/insights-client";
 import { CompetitorsSection, type CompetitorSummaryView } from "@/components/insights/competitors-section";
+import { AnalysisRunner } from "@/components/insights/analysis-runner";
 import { getConfiguredModelLabel } from "@/services/ai/claude-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -213,19 +213,13 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
             <span className="font-mono">{aiModel}</span>
           </p>
         </div>
-        <ActionButton
-          endpoint={`/api/projects/${projectId}/insights/reanalyze`}
-          label="Re-analyze"
-          loadingLabel="Analyzing…"
-          icon="brain"
-          autoContinue
-          className={
+        <AnalysisRunner
+          projectId={projectId}
+          attention={
             // Only worth pointing at once research has actually collected ads
             // to tear down — otherwise this competes with the real next step.
             competitorSummaries.some((c) => c.adCount > 0) &&
             competitorSummaries.every((c) => c.teardownCount === 0)
-              ? "cta-attention"
-              : undefined
           }
         />
       </div>

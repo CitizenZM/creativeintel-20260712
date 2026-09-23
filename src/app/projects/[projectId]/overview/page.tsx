@@ -91,6 +91,7 @@ export default async function OverviewPage({
         <ActionButton
           endpoint={`/api/projects/${projectId}/research`}
           label="Re-run research"
+          redirectTo={`/projects/${projectId}/content`}
           loadingLabel="Researching..."
           icon="refresh"
         />

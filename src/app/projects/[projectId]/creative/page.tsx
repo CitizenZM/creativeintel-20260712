@@ -28,8 +28,12 @@ import { ScriptCard, type ScriptData } from "@/components/creative/script-card";
 import { StoryboardTimeline } from "@/components/creative/storyboard-timeline";
 import { LookControls } from "@/components/creative/look-controls";
 import { NextStepHint } from "@/components/layout/next-step-hint";
+import { StageGuideClient } from "@/components/layout/stage-guide-client";
 import { Textarea } from "@/components/ui/textarea";
 import { defaultTemplateBatch, getScriptTemplate } from "@/services/ai/prompts/script-templates";
+import { useJob } from "@/components/jobs/use-job";
+import { JobProgress } from "@/components/jobs/job-progress";
+import type { JobView } from "@/services/jobs";
 
 // A saved angle row (see prisma model Angle). Every generation is kept and
 // grouped by batchId; status "selected" marks the ones scripts are written from.
@@ -101,12 +105,6 @@ interface TestVariant {
 
 const STUDIO_CTA = "Send to Studio";
 
-// Requests to the custom domain pass through Cloudflare, which drops the
-// connection at ~100s regardless of Vercel's own maxDuration. Both batch
-// generators fan out N AI calls, so they are sent in chunks that comfortably
-// finish inside that window.
-const SCRIPT_CHUNK = 4;
-const BOARD_CHUNK = 3;
 
 export default function CreativePage() {
   const params = useParams();
@@ -125,9 +123,38 @@ export default function CreativePage() {
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
   const [scriptCount, setScriptCount] = useState(10);
 
-  const [loadingAngles, setLoadingAngles] = useState(false);
-  const [loadingScripts, setLoadingScripts] = useState(false);
-  const [loadingStoryboards, setLoadingStoryboards] = useState(false);
+  // Angles, scripts and storyboards run as server-side jobs (see
+  // src/services/jobs.ts): the request returns at once, so Cloudflare's ~100s
+  // origin timeout no longer forces chunking, and a reload resumes the bar.
+  const reloadAngles = useCallback(async () => {
+    const data = await fetch(`/api/projects/${projectId}/creative/angles`)
+      .then((r) => r.json())
+      .catch(() => null);
+    const rows: Angle[] = Array.isArray(data?.angles) ? data.angles : [];
+    setAngles(rows);
+    return rows;
+  }, [projectId]);
+  const reloadScripts = useCallback(async () => {
+    const rows: ScriptData[] = await fetch(`/api/projects/${projectId}/creative/scripts`)
+      .then((r) => r.json())
+      .catch(() => []);
+    if (Array.isArray(rows)) setScripts(rows);
+    return Array.isArray(rows) ? rows : [];
+  }, [projectId]);
+  const reloadStoryboards = useCallback(async () => {
+    const rows: Storyboard[] = await fetch(`/api/projects/${projectId}/creative/storyboards`)
+      .then((r) => r.json())
+      .catch(() => []);
+    if (Array.isArray(rows)) setStoryboards(rows);
+    return Array.isArray(rows) ? rows : [];
+  }, [projectId]);
+
+  const anglesJob = useJob(projectId, "angles", () => void reloadAngles());
+  const scriptsJob = useJob(projectId, "scripts", () => void reloadScripts());
+  const boardsJob = useJob(projectId, "storyboards", () => void reloadStoryboards());
+  const loadingAngles = anglesJob.running;
+  const loadingScripts = scriptsJob.running;
+  const loadingStoryboards = boardsJob.running;
   const [loadingMatrix, setLoadingMatrix] = useState(false);
   const [sendingMatrixRow, setSendingMatrixRow] = useState<number | null>(null);
   const [loadingAll, setLoadingAll] = useState(false);
@@ -263,28 +290,30 @@ export default function CreativePage() {
     await generateScripts(undefined, ids);
   }
 
+  function jobError(job: JobView, what: string): string | null {
+    if (job.status === "failed") return job.error || `${what} failed`;
+    if (job.status === "cancelled") return `${what} cancelled.`;
+    return null;
+  }
+
   async function generateAngles(): Promise<Angle[]> {
-    setLoadingAngles(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/creative/angles`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Angle generation failed (${res.status})`);
+      const job = await anglesJob.start(`/api/projects/${projectId}/creative/angles`);
+      const failed = jobError(job, "Angle generation");
+      if (failed) throw new Error(failed);
       // Saved server-side as a new batch; earlier batches stay in the list.
-      const result: Angle[] = data.angles || [];
-      setAngles((prev) => [...result, ...prev]);
+      const batchId = job.result?.ids[0];
+      const rows = await reloadAngles();
       setShowAllAngles(false);
-      return result;
+      return rows.filter((a) => a.batchId === batchId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Angle generation failed");
       return [];
-    } finally {
-      setLoadingAngles(false);
     }
   }
 
   async function generateScripts(fromAngles?: Angle[], onlyTemplateIds?: string[]): Promise<ScriptData[]> {
-    setLoadingScripts(true);
     setError(null);
     try {
       // Starred angles win; otherwise the latest generation is used.
@@ -294,39 +323,28 @@ export default function CreativePage() {
         .sort((a, b) => (b.predictedScore ?? 0) - (a.predictedScore ?? 0))
         .map(toScriptAngle);
 
-      // Chunked for the same reason as generateStoryboards — 10 scripts in one
-      // call runs ~100s, which is exactly Cloudflare's origin timeout.
       const explicit =
         onlyTemplateIds && onlyTemplateIds.length > 0
           ? onlyTemplateIds
           : selectedTemplateIds.length > 0
             ? selectedTemplateIds
             : null;
-      const total = explicit ? explicit.length : scriptCount;
-      const newScripts: ScriptData[] = [];
 
-      for (let i = 0; i < total; i += SCRIPT_CHUNK) {
-        const chunkTemplates = explicit ? explicit.slice(i, i + SCRIPT_CHUNK) : undefined;
-        const chunkCount = explicit ? chunkTemplates!.length : Math.min(SCRIPT_CHUNK, total - i);
+      const job = await scriptsJob.start(`/api/projects/${projectId}/creative/scripts-batch`, {
+        templateIds: explicit ?? undefined,
+        count: explicit ? explicit.length : scriptCount,
+        angles: sourceAngles.length ? sourceAngles : undefined,
+        customBrief: customBrief.trim() || undefined,
+      });
+      noteFailures(
+        "Script",
+        (job.result?.failures ?? []).map((f) => ({ templateId: f.key, error: f.error }))
+      );
+      const failed = jobError(job, "Script generation");
+      if (failed && !job.result?.ids.length) throw new Error(failed);
 
-        const res = await fetch(`/api/projects/${projectId}/creative/scripts-batch`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            templateIds: chunkTemplates,
-            count: chunkCount,
-            angles: sourceAngles.length ? sourceAngles : undefined,
-            customBrief: customBrief.trim() || undefined,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `Script generation failed (${res.status})`);
-
-        noteFailures("Script", data.failures);
-        const chunkScripts: ScriptData[] = data.scripts || [];
-        newScripts.push(...chunkScripts);
-        setScripts((prev) => [...chunkScripts, ...prev]);
-      }
+      const ids = new Set(job.result?.ids ?? []);
+      const newScripts = (await reloadScripts()).filter((s) => ids.has(s.id));
       // Deliberately not auto-selected: picking which scripts get boarded is
       // the decision this step exists for, and selecting all of them by
       // default quietly turns it into "board everything".
@@ -335,54 +353,33 @@ export default function CreativePage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Script generation failed");
       return [];
-    } finally {
-      setLoadingScripts(false);
     }
   }
 
   async function generateStoryboards(scriptIds: string[]): Promise<Storyboard[]> {
     if (scriptIds.length === 0) return [];
-    setLoadingStoryboards(true);
     setError(null);
-    const all: Storyboard[] = [];
     try {
-      // One request per chunk. Boarding 15 scripts in a single call took >100s
-      // and was killed by Cloudflare (524) before Vercel's own limit — and the
-      // custom domain sits behind Cloudflare, so the request budget is theirs,
-      // not ours. Chunks also mean a mid-run failure keeps what already landed.
-      for (let i = 0; i < scriptIds.length; i += BOARD_CHUNK) {
-        const slice = scriptIds.slice(i, i + BOARD_CHUNK);
-        const res = await fetch(`/api/projects/${projectId}/creative/storyboards-batch`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            scriptIds: slice,
-            visualDirection: {
-              lighting: lighting || undefined,
-              style: visualStyle || undefined,
-              notes: styleNotes.trim() || undefined,
-            },
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `Storyboard generation failed (${res.status})`);
-
-        noteFailures("Storyboard", data.failures);
-        const newBoards: Storyboard[] = data.storyboards || [];
-        all.push(...newBoards);
-        // A new board becomes its script's active version; older ones are kept.
-        const replaced = new Set(newBoards.map((b) => b.scriptId).filter(Boolean));
-        setStoryboards((prev) => [
-          ...newBoards,
-          ...prev.map((sb) => (sb.scriptId && replaced.has(sb.scriptId) ? { ...sb, isActive: false } : sb)),
-        ]);
-      }
-      return all;
+      const job = await boardsJob.start(`/api/projects/${projectId}/creative/storyboards-batch`, {
+        scriptIds,
+        visualDirection: {
+          lighting: lighting || undefined,
+          style: visualStyle || undefined,
+          notes: styleNotes.trim() || undefined,
+        },
+      });
+      noteFailures(
+        "Storyboard",
+        (job.result?.failures ?? []).map((f) => ({ scriptTitle: f.label, error: f.error }))
+      );
+      const failed = jobError(job, "Storyboard generation");
+      if (failed && !job.result?.ids.length) throw new Error(failed);
+      // Each new board is its script's active version; older ones are kept.
+      const ids = new Set(job.result?.ids ?? []);
+      return (await reloadStoryboards()).filter((b) => ids.has(b.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Storyboard generation failed");
-      return all;
-    } finally {
-      setLoadingStoryboards(false);
+      return [];
     }
   }
 
@@ -605,6 +602,15 @@ export default function CreativePage() {
 
   return (
     <div className="space-y-6">
+      <StageGuideClient
+        projectId={projectId}
+        stage="creative"
+        detail="Write scripts from your starred angles, select the ones worth producing, then approve every frame of their storyboards."
+        refreshKey={`${scripts.length}:${selectedScriptIds.size}:${storyboards
+          .map((b) => `${b.id}${b.isActive ? "*" : ""}${b.frames.filter((f) => f.approved === true).length}`)
+          .join(",")}`}
+      />
+
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-base font-semibold tracking-tight">Creative Generator</h2>
@@ -761,6 +767,18 @@ export default function CreativePage() {
             step="Step 1"
             title="Start with ad angles"
             detail="Angles are the distinct arguments your ads can make. Generate them first — the scripts below are written against whichever angles score best."
+          />
+        )}
+
+        {anglesJob.job && (
+          <JobProgress
+            job={anglesJob.job}
+            title="Generating ad angles"
+            unit="batch"
+            onCancel={anglesJob.cancel}
+            onRetry={() => void generateAngles()}
+            retryLabel="Try again"
+            onDismiss={anglesJob.dismiss}
           />
         )}
 
@@ -932,6 +950,22 @@ export default function CreativePage() {
           </Button>
         )}
 
+        {scriptsJob.job && (
+          <JobProgress
+            job={scriptsJob.job}
+            title="Writing scripts"
+            unit="script"
+            onCancel={scriptsJob.cancel}
+            onRetry={() => {
+              const failed = (scriptsJob.job?.result?.failures ?? []).map((f) => f.key);
+              setWarnings([]);
+              setFailedTemplateIds([]);
+              void generateScripts(undefined, failed.length ? failed : undefined);
+            }}
+            onDismiss={scriptsJob.dismiss}
+          />
+        )}
+
         {scripts.length > 0 && (
           <>
             {activeStep === "select" && (
@@ -1031,6 +1065,20 @@ export default function CreativePage() {
           </>
         )}
       </section>
+
+      {boardsJob.job && (
+        <JobProgress
+          job={boardsJob.job}
+          title="Building storyboards"
+          unit="storyboard"
+          onCancel={boardsJob.cancel}
+          onRetry={() => {
+            const failed = (boardsJob.job?.result?.failures ?? []).map((f) => f.key);
+            void generateStoryboards(failed.length ? failed : Array.from(selectedScriptIds));
+          }}
+          onDismiss={boardsJob.dismiss}
+        />
+      )}
 
       {/* STEP 3: Storyboards */}
       {storyboards.length > 0 && (
