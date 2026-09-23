@@ -8,6 +8,7 @@ import {
   extractSearchKeywords,
 } from "./keyword-extractor";
 import { searchVerifiedVideos } from "./video-search";
+import { classifyAdCandidateGroups, type ClassifyGroup } from "./video-relevance";
 import { fetchTikTokForYouFeed } from "./adapters/tiktok-creative-center";
 import { getCampaignPlatform } from "@/lib/campaign-platform";
 import { rankAndSaveCandidates } from "./persist";
@@ -52,7 +53,8 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
   try {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
-      include: { brand: true, competitors: true },
+      // Competitors the user removed are not researched again.
+      include: { brand: true, competitors: { where: { excluded: false } } },
     });
     if (!project) throw new Error("Project not found");
 
@@ -173,6 +175,8 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
       })),
     ];
 
+    // Fetch every owner's candidates first, then classify them together —
+    // one shared batch per ~40 candidates instead of one LLM call per owner.
     const perOwner = await pMapSettled(
       owners,
       async (owner, i) => {
@@ -183,24 +187,57 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
           campaign,
           countries: ["US"],
           limit: 20,
+          skipClassifier: true,
         });
         await recordStepSources(jobId, AD_DISCOVERY_STEP, toJobSources(reports));
-        const paid = candidates.filter((c) => c.isPaidAd).length;
         await updateStep(
           jobId,
           AD_DISCOVERY_STEP,
-          Math.round(((i + 1) / Math.max(owners.length, 1)) * 100),
-          `${paid}/${candidates.length} paid candidates for ${owner.name}`
+          Math.round(((i + 1) / Math.max(owners.length, 1)) * 90),
+          `${candidates.length} candidates found for ${owner.name}`
         );
         return candidates;
       },
       { concurrency: Math.min(CONCURRENCY, 3) }
     );
 
-    const allCandidates: AdCandidate[] = [];
-    perOwner.forEach((r) => {
-      if (r.status === "fulfilled") allCandidates.push(...r.value);
+    const groups: ClassifyGroup[] = owners.flatMap((owner, i) => {
+      const r = perOwner[i];
+      return r.status === "fulfilled"
+        ? [
+            {
+              key: String(i),
+              candidates: r.value,
+              ctx: { brandName: owner.name, productName: owner.productName, keywords },
+            },
+          ]
+        : [];
     });
+    const shared = await classifyAdCandidateGroups(groups);
+    await recordStepSources(jobId, AD_DISCOVERY_STEP, toJobSources([
+      shared.degraded
+        ? {
+            name: "ad_classifier",
+            status: "failed",
+            count: 0,
+            note: "LLM unavailable for some candidates — fell back to deterministic ad-intent scoring",
+          }
+        : {
+            name: "ad_classifier",
+            status: "ran",
+            count: shared.classifiedCount,
+            note: `${shared.classifiedCount} candidates across ${groups.length} brands in ${shared.calls} shared call${shared.calls === 1 ? "" : "s"}`,
+          },
+    ]));
+
+    const allCandidates: AdCandidate[] = [];
+    const summary: string[] = [];
+    for (const g of groups) {
+      const classified = shared.byKey.get(g.key) ?? [];
+      allCandidates.push(...classified);
+      summary.push(`${g.ctx.brandName} ${classified.filter((c) => c.isPaidAd).length}/${classified.length}`);
+    }
+    await updateStep(jobId, AD_DISCOVERY_STEP, 95, `Paid candidates: ${summary.join(" · ")}`);
 
     // Brand-agnostic TikTok top-ads feed: stored as unowned corpus, never
     // allowed to occupy a competitor's Top-N slot.

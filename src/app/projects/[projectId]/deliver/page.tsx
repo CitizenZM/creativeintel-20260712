@@ -6,12 +6,27 @@ import { Download, ExternalLink, Film, FileText, Clapperboard } from "lucide-rea
 
 export const dynamic = "force-dynamic";
 
+type RunLike = { status: string; masterMp4Url: string | null; isFinal: boolean };
+
+// Final deliverables first, then other finished cuts, then work still
+// rendering, then failures — so the thing to ship is never buried.
+const RUN_GROUPS: { id: string; label: string; match: (r: RunLike) => boolean }[] = [
+  { id: "final", label: "Final", match: (r) => r.isFinal },
+  { id: "ready", label: "Ready", match: (r) => !r.isFinal && r.status === "completed" },
+  {
+    id: "progress",
+    label: "In progress",
+    match: (r) => ["draft", "awaiting_approval", "approved", "claimed", "running", "assembling"].includes(r.status),
+  },
+  { id: "failed", label: "Failed or cancelled", match: (r) => r.status === "failed" || r.status === "cancelled" },
+];
+
 export default async function DeliverPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const [runs, scripts, storyboards] = await Promise.all([
     prisma.libtvRun.findMany({
       where: { projectId },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ isFinal: "desc" }, { createdAt: "desc" }],
       include: { jobs: { select: { status: true, kind: true } } },
     }),
     prisma.script.findMany({
@@ -78,8 +93,17 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
             </Link>
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {runs.map((run) => {
+          <div className="space-y-6">
+            {RUN_GROUPS.map((group) => {
+              const list = runs.filter(group.match);
+              if (list.length === 0) return null;
+              return (
+                <div key={group.id} className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {group.label} <span className="num">({list.length})</span>
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {list.map((run) => {
               const script = run.scriptId ? scriptById.get(run.scriptId) : null;
               const done = run.jobs.filter((j) => j.status === "completed").length;
               const playable = isPlayable(run.previewMp4Url)
@@ -109,7 +133,19 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
                     )}
                   </div>
                   <div className="p-3 space-y-1.5">
-                    <p className="text-sm font-semibold truncate">{script?.title ?? run.canvasName ?? run.id}</p>
+                    <p className="text-sm font-semibold truncate flex items-center gap-1.5">
+                      {run.isFinal && (
+                        <span className="shrink-0 rounded bg-foreground px-1.5 py-0.5 text-[10px] font-semibold text-background">
+                          FINAL
+                        </span>
+                      )}
+                      {run.parentRunId && (
+                        <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                          re-render
+                        </span>
+                      )}
+                      <span className="truncate">{script?.title ?? run.canvasName ?? run.id}</span>
+                    </p>
                     <p className="text-[11px] text-muted-foreground">
                       {script?.videoType ?? "—"} · {script?.template ?? "—"} · {script?.totalDurationSec ?? "?"}s ·{" "}
                       {run.creditsSpent || run.creditsEstimated} credits
@@ -143,7 +179,19 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
                           Contact sheet
                         </a>
                       )}
+                      {(run.status === "failed" || run.status === "cancelled" || (run.status === "completed" && !run.isFinal)) && (
+                        <Link
+                          href={`/projects/${projectId}/studio${run.storyboardId ? `?storyboardId=${run.storyboardId}` : ""}`}
+                          className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] font-medium hover:bg-muted"
+                        >
+                          {run.status === "completed" ? "Review in Studio" : "Fix in Studio"} →
+                        </Link>
+                      )}
                     </div>
+                  </div>
+                </div>
+              );
+            })}
                   </div>
                 </div>
               );

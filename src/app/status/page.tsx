@@ -50,7 +50,7 @@ function stamp(d: Date | null) {
 }
 
 export default async function StatusPage() {
-  const [recentJobs, lastAdTask, lastFetchTask, queued, failedTasks, freshRows] = await Promise.all([
+  const [recentJobs, lastAdTask, lastFetchTask, queued, failedTasks, freshRows, recentFailedRows] = await Promise.all([
     prisma.researchJob.findMany({
       where: { status: "complete" },
       orderBy: { createdAt: "desc" },
@@ -75,7 +75,12 @@ export default async function StatusPage() {
       SELECT count(*) AS fresh FROM "WorkerTask"
       WHERE "completedAt" > now() - interval '6 hours'
     `,
+    prisma.$queryRaw<{ failed: bigint }[]>`
+      SELECT count(*) AS failed FROM "WorkerTask"
+      WHERE kind = 'ad_library_fetch' AND status = 'failed' AND "completedAt" > now() - interval '6 hours'
+    `,
   ]);
+  const recentFailed = Number(recentFailedRows[0]?.failed ?? 0);
 
   // Roll every recent run's per-source outcome into one row per source, keeping
   // the most recent note so the page says why something is not working.
@@ -85,17 +90,24 @@ export default async function StatusPage() {
       if (!latest.has(s.name)) latest.set(s.name, s);
     }
   }
-  // A run's report is a snapshot taken while worker tasks were still queued.
-  // Showing "pending worker" when the queue is empty is simply wrong, so
-  // reconcile those rows against the live queue.
+  // A run's report is a snapshot taken while worker tasks were still queued,
+  // so reconcile "pending worker" rows against the live queue. An empty queue
+  // only means the worker finished — if its recent tasks failed, the source
+  // did not actually run.
   const sources = [...latest.values()]
     .map((s) =>
       s.status === "pending_worker" && queued === 0
-        ? {
-            ...s,
-            status: "ran" as const,
-            note: "the local worker has since drained the queue — re-run research to pull its results into the report",
-          }
+        ? recentFailed > 0
+          ? {
+              ...s,
+              status: "failed" as const,
+              note: `the local worker finished, but ${recentFailed} ad-library task${recentFailed === 1 ? "" : "s"} failed in the last 6 hours — check the worker log`,
+            }
+          : {
+              ...s,
+              status: "ran" as const,
+              note: "the local worker has since drained the queue — re-run research to pull its results into the report",
+            }
         : s
     )
     .sort((a, b) => a.name.localeCompare(b.name));

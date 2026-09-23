@@ -1,6 +1,44 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
+/** Add a competitor by hand; it is researched on the next run. */
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  const { projectId } = await params;
+  const body = (await request.json().catch(() => ({}))) as { name?: unknown; url?: unknown };
+  const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
+  if (!name) return NextResponse.json({ error: "name is required" }, { status: 400 });
+  let url: string | null = null;
+  if (typeof body.url === "string" && body.url.trim()) {
+    try {
+      url = new URL(body.url.trim().startsWith("http") ? body.url.trim() : `https://${body.url.trim()}`).toString();
+    } catch {
+      return NextResponse.json({ error: "url is not a valid web address" }, { status: 400 });
+    }
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
+  if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const existing = await prisma.competitor.findFirst({
+    where: { projectId, name: { equals: name, mode: "insensitive" } },
+  });
+  if (existing) {
+    // Re-adding a removed competitor brings it back instead of duplicating it.
+    const competitor = await prisma.competitor.update({
+      where: { id: existing.id },
+      data: { excluded: false, ...(url ? { url } : {}) },
+    });
+    return NextResponse.json({ competitor, restored: existing.excluded }, { status: 200 });
+  }
+  const competitor = await prisma.competitor.create({
+    data: { projectId, name, url, dataSource: "USER_INPUT" },
+  });
+  return NextResponse.json({ competitor }, { status: 201 });
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }

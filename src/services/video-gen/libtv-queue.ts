@@ -132,6 +132,9 @@ export interface ClaimedRunPayload {
     sourceUrl: string | null;
     creditsEstimated: number;
     status: string;
+    /** Completed/skipped nodes carry their outputs so assembly includes them. */
+    localPath?: string | null;
+    resultUrl?: string | null;
   }>;
 }
 
@@ -202,9 +205,10 @@ async function buildClaimPayload(runId: string): Promise<ClaimedRunPayload | nul
     scriptTitle: script?.title ?? null,
     storyboardTitle: storyboard?.title ?? null,
     frames: Array.isArray(storyboard?.frames) ? (storyboard.frames as unknown[]) : [],
-    jobs: orderJobs(
-      run.jobs.filter((j) => j.status === "queued" || j.status === "running" || j.status === "failed")
-    ).map((j) => ({
+    // Every node, including ones already rendered: the worker keeps completed
+    // nodes as-is (not re-paid) but needs their outputs to assemble the cut —
+    // without them a resumed or re-rendered run would drop those clips.
+    jobs: orderJobs(run.jobs).map((j) => ({
       id: j.id,
       kind: j.kind,
       shotIndex: j.shotIndex,
@@ -216,8 +220,128 @@ async function buildClaimPayload(runId: string): Promise<ClaimedRunPayload | nul
       sourceUrl: j.sourceUrl,
       creditsEstimated: j.creditsEstimated,
       status: j.status,
+      localPath: j.localPath,
+      resultUrl: j.resultUrl,
     })),
   };
+}
+
+// ─── Re-render and final pick ─────────────────────────────────────────────────────
+
+const RERENDERABLE = ["completed", "failed", "cancelled"];
+
+export type RerenderResult =
+  | { ok: true; run: Awaited<ReturnType<typeof getRunWithJobs>> }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Re-render chosen scenes as a new run (a new version — the original stays).
+ * Nodes of untouched scenes are copied as already rendered, so only the
+ * chosen scenes (and anything that never finished) are paid for again. The
+ * redone nodes get fresh names because the originals still exist on the
+ * LibTV canvas. The new run waits for approval like any other.
+ */
+export async function cloneRunForRerender(runId: string, shotIndexes: number[]): Promise<RerenderResult> {
+  const run = await prisma.libtvRun.findUnique({ where: { id: runId }, include: { jobs: true } });
+  if (!run) return { ok: false, status: 404, error: "Run not found" };
+  if (!RERENDERABLE.includes(run.status)) {
+    return { ok: false, status: 409, error: `A ${run.status} run cannot be re-rendered — wait for it to finish or cancel it` };
+  }
+  const shots = new Set(shotIndexes);
+  const known = new Set(run.jobs.filter((j) => j.kind !== "upload").map((j) => j.shotIndex));
+  if (shots.size === 0 || ![...shots].every((s) => known.has(s))) {
+    return { ok: false, status: 400, error: "Pick at least one scene that exists in this run" };
+  }
+
+  const finished = (status: string) => status === "completed" || status === "skipped";
+  const redo = (j: (typeof run.jobs)[number]) =>
+    j.kind !== "upload" && (shots.has(j.shotIndex) || !finished(j.status));
+  const suffix = `-r${Date.now().toString(36).slice(-4)}`;
+  const renamed = new Map<string, string>();
+  for (const j of run.jobs) if (redo(j)) renamed.set(j.nodeName, `${j.nodeName}${suffix}`);
+  const mapRef = (ref: string) => {
+    const m = /^(FF\s+)?(.+)$/.exec(ref);
+    const base = m?.[2] ?? ref;
+    return renamed.has(base) ? `${m?.[1] ?? ""}${renamed.get(base)}` : ref;
+  };
+  const refs = (value: unknown) => (Array.isArray(value) ? (value as string[]).map(mapRef) : []);
+
+  const jobs = run.jobs.map((j) => {
+    const base = {
+      projectId: j.projectId,
+      shotIndex: j.shotIndex,
+      kind: j.kind,
+      prompt: j.prompt,
+      modelName: j.modelName,
+      settings: (j.settings ?? undefined) as never,
+      sourceUrl: j.sourceUrl,
+      creditsEstimated: j.creditsEstimated,
+    };
+    if (redo(j) || (j.kind === "upload" && !finished(j.status))) {
+      return { ...base, nodeName: renamed.get(j.nodeName) ?? j.nodeName, leftRefs: refs(j.leftRefs) as never, status: "queued" };
+    }
+    return {
+      ...base,
+      nodeName: j.nodeName,
+      leftRefs: refs(j.leftRefs) as never,
+      status: j.status,
+      nodeId: j.nodeId,
+      resultUrl: j.resultUrl,
+      remoteUrl: j.remoteUrl,
+      localPath: j.localPath,
+      completedAt: j.completedAt,
+    };
+  });
+  const creditsEstimated = jobs
+    .filter((j) => j.status === "queued")
+    .reduce((sum, j) => sum + (j.creditsEstimated ?? 0), 0);
+
+  const created = await prisma.libtvRun.create({
+    data: {
+      projectId: run.projectId,
+      scriptId: run.scriptId,
+      storyboardId: run.storyboardId,
+      parentRunId: run.id,
+      status: "awaiting_approval",
+      canvasUuid: run.canvasUuid,
+      canvasUrl: run.canvasUrl,
+      canvasName: run.canvasName,
+      imageModel: run.imageModel,
+      videoModel: run.videoModel,
+      aspectRatio: run.aspectRatio,
+      clipDurationSec: run.clipDurationSec,
+      creditsEstimated,
+      jobs: { create: jobs },
+    },
+  });
+  return { ok: true, run: await getRunWithJobs(created.id) };
+}
+
+/**
+ * Mark (or unmark) a finished run as the deliverable for its script. Only one
+ * run per script is final, so picking one clears the others.
+ */
+export async function setRunFinal(runId: string, final: boolean) {
+  const run = await prisma.libtvRun.findUnique({
+    where: { id: runId },
+    select: { id: true, projectId: true, scriptId: true, status: true, masterMp4Url: true },
+  });
+  if (!run) return { ok: false as const, status: 404, error: "Run not found" };
+  if (final && (run.status !== "completed" || !run.masterMp4Url)) {
+    return { ok: false as const, status: 409, error: "Only a completed run with a master video can be final" };
+  }
+  await prisma.$transaction([
+    ...(final
+      ? [
+          prisma.libtvRun.updateMany({
+            where: { projectId: run.projectId, scriptId: run.scriptId, isFinal: true, NOT: { id: run.id } },
+            data: { isFinal: false },
+          }),
+        ]
+      : []),
+    prisma.libtvRun.update({ where: { id: run.id }, data: { isFinal: final } }),
+  ]);
+  return { ok: true as const };
 }
 
 // ─── Canvas binding ──────────────────────────────────────────────────────────

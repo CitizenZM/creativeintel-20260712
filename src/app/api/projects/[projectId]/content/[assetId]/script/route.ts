@@ -65,11 +65,24 @@ Generate a realistic ~300 word script/transcript that this video likely contains
         ? (asset.rawData as Record<string, unknown>)
         : {};
 
+    // Keep earlier reconstructions instead of overwriting them (last 5).
+    const previous = rawData.reconstructedScript
+      ? [
+          {
+            script: rawData.reconstructedScript,
+            summary: rawData.reconstructedScriptSummary ?? null,
+            at: rawData.reconstructedScriptAt ?? null,
+          },
+          ...(Array.isArray(rawData.reconstructedScriptHistory) ? rawData.reconstructedScriptHistory : []),
+        ].slice(0, 5)
+      : rawData.reconstructedScriptHistory;
+
     await prisma.contentAsset.update({
       where: { id: assetId },
       data: {
         rawData: {
           ...rawData,
+          reconstructedScriptHistory: previous ?? [],
           reconstructedScript: result.reconstructedScript,
           reconstructedScriptSummary: result.summary,
           reconstructedScriptKeyMoments: result.keyMoments,

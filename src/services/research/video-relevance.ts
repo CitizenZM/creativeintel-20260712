@@ -137,6 +137,7 @@ ${list}`;
     userPrompt: user,
     responseSchema: adVerdictSchema,
     maxTokens: Math.min(4000, 600 + candidates.length * 120),
+    tier: "fast",
   }).catch((err) => {
     throw new Error(
       `Ad classification unavailable: ${err instanceof Error ? err.message : String(err)}`
@@ -181,10 +182,27 @@ export async function classifyAdCandidates(
   ctx: RelevanceContext,
   opts: ClassifyOptions = {}
 ): Promise<ClassifyResult> {
-  const minRelevance = opts.minRelevance ?? 0.3;
   const classifier = opts.classifier ?? llmAdClassifier;
-  const maxToClassify = opts.maxToClassify ?? 40;
+  const { fromLibrary, batch } = prepareForClassification(candidates, ctx, opts);
 
+  let verdicts: AdVerdict[] | null;
+  try {
+    verdicts = await classifier(batch, ctx);
+  } catch {
+    verdicts = null;
+  }
+
+  return {
+    candidates: [...fromLibrary, ...applyVerdicts(batch, verdicts)],
+    degraded: verdicts === null,
+    classifiedCount: batch.length,
+  };
+}
+
+/** Split ad-library candidates (already known ads) from the relevance-filtered rest. */
+function prepareForClassification(candidates: AdCandidate[], ctx: RelevanceContext, opts: ClassifyOptions) {
+  const minRelevance = opts.minRelevance ?? 0.3;
+  const maxToClassify = opts.maxToClassify ?? 40;
   const fromLibrary: AdCandidate[] = [];
   const needsClassification: AdCandidate[] = [];
 
@@ -201,17 +219,13 @@ export async function classifyAdCandidates(
   const batch = needsClassification
     .sort((a, b) => (b.adConfidence ?? 0) - (a.adConfidence ?? 0))
     .slice(0, maxToClassify);
+  return { fromLibrary, batch };
+}
 
-  let verdicts: AdVerdict[];
-  let degraded = false;
-  try {
-    verdicts = await classifier(batch, ctx);
-  } catch {
-    degraded = true;
-    verdicts = [];
-  }
-
-  const classified: AdCandidate[] = batch.map((c, i) => {
+/** Verdicts (index-aligned) onto candidates; null = LLM unavailable, use the deterministic fallback. */
+function applyVerdicts(batch: AdCandidate[], verdicts: AdVerdict[] | null): AdCandidate[] {
+  const degraded = verdicts === null;
+  return batch.map((c, i) => {
     if (degraded) {
       // Deterministic fallback: only a strong ad-intent signal counts as paid.
       const text = `${c.title} ${c.description ?? ""}`.toLowerCase();
@@ -232,10 +246,112 @@ export async function classifyAdCandidates(
       advertiserName: v.advertiserGuess || c.advertiserName,
     };
   });
+}
 
-  return {
-    candidates: [...fromLibrary, ...classified],
-    degraded,
-    classifiedCount: batch.length,
-  };
+// ─── Shared multi-brand batch ───────────────────────────────────────────────────────────
+
+export interface ClassifyGroup {
+  key: string;
+  candidates: AdCandidate[];
+  ctx: RelevanceContext;
+}
+
+/** Candidates per LLM call in the shared batch — keeps output well under the token cap. */
+const SHARED_CHUNK = 40;
+
+/**
+ * Classify every owner's candidates together: one prompt names all the
+ * brands and tags each candidate with the brand it was found for, so the
+ * system prompt and business context are paid once per chunk instead of
+ * once per competitor.
+ */
+export async function classifyAdCandidateGroups(
+  groups: ClassifyGroup[],
+  opts: ClassifyOptions & { chunkSize?: number } = {}
+): Promise<{ byKey: Map<string, AdCandidate[]>; degraded: boolean; classifiedCount: number; calls: number }> {
+  const prepared = groups.map((g) => ({ group: g, ...prepareForClassification(g.candidates, g.ctx, opts) }));
+  const flat = prepared.flatMap((p, gi) => p.batch.map((c) => ({ gi, c })));
+  const verdicts: (AdVerdict | null)[] = new Array(flat.length).fill(null);
+  const chunkSize = opts.chunkSize ?? SHARED_CHUNK;
+  let degraded = false;
+  let calls = 0;
+
+  for (let start = 0; start < flat.length; start += chunkSize) {
+    const chunk = flat.slice(start, start + chunkSize);
+    calls += 1;
+    try {
+      const out = await llmMultiBrandClassifier(
+        chunk.map((x) => ({ candidate: x.c, brand: prepared[x.gi].group.ctx })),
+        prepared.map((p) => p.group.ctx)
+      );
+      out.forEach((v, i) => (verdicts[start + i] = v));
+    } catch {
+      degraded = true;
+    }
+  }
+
+  const byKey = new Map<string, AdCandidate[]>();
+  let cursor = 0;
+  prepared.forEach((p) => {
+    const mine = verdicts.slice(cursor, cursor + p.batch.length);
+    cursor += p.batch.length;
+    // A chunk that failed falls back to deterministic scoring for its items only.
+    const classified = p.batch.map((c, i) => applyVerdicts([c], mine[i] ? [mine[i]!] : null)[0]);
+    byKey.set(p.group.key, [...p.fromLibrary, ...classified]);
+  });
+
+  return { byKey, degraded, classifiedCount: flat.length, calls };
+}
+
+async function llmMultiBrandClassifier(
+  items: { candidate: AdCandidate; brand: RelevanceContext }[],
+  brands: RelevanceContext[]
+): Promise<AdVerdict[]> {
+  if (items.length === 0) return [];
+  const bc = brands[0]?.keywords.brandContext;
+  const brandIndex = new Map(brands.map((b, i) => [b.brandName, i]));
+  const brandList = brands
+    .map((b, i) => `B${i}. "${b.brandName}"${b.productName ? ` — product: ${b.productName}` : ""}`)
+    .join("\n");
+  const list = items
+    .map(({ candidate: c, brand }, i) => {
+      const b = brandIndex.get(brand.brandName) ?? 0;
+      return `${i}. {B${b}} [${c.platform}${c.durationSec ? ` ${Math.round(c.durationSec)}s` : ""}] "${c.title}" — by: ${c.channelTitle || c.advertiserName || "unknown"} — ${(c.description || "").slice(0, 200)}`;
+    })
+    .join("\n");
+
+  const system = `You classify short video creatives. Each candidate is tagged {B#} with the brand it was found for. For each, decide ONE thing: is it a BRAND-PAID ADVERTISEMENT for THAT tagged brand (produced or commissioned by the brand and run as paid media — TV/YouTube pre-roll, in-feed social ad, branded spot, official product film) rather than creator-made organic content (review, unboxing, haul, comparison, reaction, tutorial, news coverage, fan edit)?
+
+An influencer post is only an ad when it is clearly a paid partnership for the tagged brand. A video on that brand's own official channel that reads as advertising counts as an ad. Anything about a different brand, another brand in this list, or a homonym is NOT an ad for the tagged brand — return isAd=false with a low confidence.`;
+
+  const user = `Brands (all in the same market):
+${brandList}
+Market: ${bc?.businessType ?? "?"} / ${bc?.industry ?? "?"}
+The market IS about: ${(bc?.disambiguationKeywords ?? []).join(", ") || "(n/a)"}
+The market is NOT: ${(bc?.notRelatedTo ?? []).join(", ") || "(n/a)"}
+
+Return JSON: {"verdicts":[{"index":0,"isAd":true,"adConfidence":0.0-1.0,"advertiserGuess":"who paid for it","reason":"short"}]}
+One verdict per candidate index. Be strict — a review that praises the product is still not an ad.
+
+Candidates:
+${list}`;
+
+  const res = await analyzeWithClaude({
+    systemPrompt: system,
+    userPrompt: user,
+    responseSchema: adVerdictSchema,
+    maxTokens: Math.min(6000, 600 + items.length * 120),
+    tier: "fast",
+  });
+
+  const byIndex = new Map(res.verdicts.map((v) => [v.index, v]));
+  return items.map((_, i) => {
+    const v = byIndex.get(i);
+    return {
+      isAd: v?.isAd ?? false,
+      adConfidence: v?.adConfidence ?? 0,
+      advertiserGuess: v?.advertiserGuess ?? "",
+      reason: v?.reason ?? "no verdict",
+    };
+  });
 }

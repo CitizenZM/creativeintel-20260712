@@ -195,9 +195,9 @@ async function reanalyzePass(projectId: string, deadline: number) {
   // moving.
   const [pendingTeardowns, competitorsWithoutRollup] = await Promise.all([
     prisma.contentAsset.count({
-      where: { projectId, overallScore: { not: null }, teardown: { is: null } },
+      where: { projectId, overallScore: { not: null }, excluded: false, teardown: { is: null } },
     }),
-    prisma.competitor.count({ where: { projectId, rollup: { is: null } } }),
+    prisma.competitor.count({ where: { projectId, excluded: false, rollup: { is: null } } }),
   ]);
   const remaining = pendingTeardowns + competitorsWithoutRollup;
 

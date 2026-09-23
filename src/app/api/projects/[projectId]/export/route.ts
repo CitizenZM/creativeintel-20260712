@@ -50,7 +50,8 @@ export async function GET(
     }),
     prisma.libtvRun.findMany({
       where: { projectId, status: "completed" },
-      orderBy: { completedAt: "desc" },
+      // The run marked final for each script leads the package.
+      orderBy: [{ isFinal: "desc" }, { completedAt: "desc" }],
       include: { jobs: { orderBy: [{ shotIndex: "asc" }, { nodeName: "asc" }] } },
     }),
   ]);
