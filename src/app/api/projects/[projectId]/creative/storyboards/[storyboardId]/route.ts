@@ -12,12 +12,22 @@ export async function PATCH(
   const { projectId, storyboardId } = await params;
   const body = (await request.json().catch(() => ({}))) as { isActive?: unknown; restore?: unknown };
   if (body.restore === true) {
-    const { count } = await prisma.storyboard.updateMany({
+    const board = await prisma.storyboard.findFirst({
       where: { id: storyboardId, projectId, deletedAt: { not: null } },
-      data: { deletedAt: null },
+      select: { scriptId: true },
     });
-    if (!count) return NextResponse.json({ error: "No archived storyboard with that id" }, { status: 404 });
-    return NextResponse.json({ ok: true });
+    if (!board) return NextResponse.json({ error: "No archived storyboard with that id" }, { status: 404 });
+    // If its script has no live active version, the restored one takes that role.
+    const activeSibling = board.scriptId
+      ? await prisma.storyboard.count({
+          where: { projectId, scriptId: board.scriptId, deletedAt: null, isActive: true },
+        })
+      : 0;
+    await prisma.storyboard.update({
+      where: { id: storyboardId },
+      data: { deletedAt: null, isActive: activeSibling === 0 },
+    });
+    return NextResponse.json({ ok: true, isActive: activeSibling === 0 });
   }
   if (body.isActive !== true) {
     return NextResponse.json({ error: "Send { isActive: true } or { restore: true }" }, { status: 400 });
