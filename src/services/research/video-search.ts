@@ -95,13 +95,28 @@ export function dispatchPlan(campaign: CampaignPlatform | null): {
 }
 
 /** Run every adapter for one owner (brand or a single competitor). */
+// One slow source must never stall the whole run past the function limit —
+// a source that overruns is reported as failed and the others still count.
+const ADAPTER_DEADLINE_MS = 60_000;
+
+function withDeadline<T>(work: Promise<T>, ms: number, name: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${name} timed out after ${Math.round(ms / 1000)}s`)),
+      ms
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
 export async function runAdapters(
   adapterIds: AdapterId[],
   ctx: AdapterContext
 ): Promise<DispatchResult> {
   const settled = await pMapSettled(
     adapterIds,
-    (id) => REGISTRY[id](ctx),
+    (id) => withDeadline(REGISTRY[id](ctx), ADAPTER_DEADLINE_MS, id),
     { concurrency: 3 }
   );
 
