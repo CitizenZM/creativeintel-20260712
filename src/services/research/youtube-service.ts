@@ -32,6 +32,10 @@ export interface YouTubeSearchOptions {
 
 const youtube = google.youtube("v3");
 
+// googleapis applies no timeout by default; one stalled request would hang the
+// whole research run until the function limit. Match fetchWithRetry's budget.
+const YOUTUBE_API_TIMEOUT_MS = 12_000;
+
 /**
  * Search YouTube. Quality filters (`brandName` / `mustContain` /
  * `mustNotContain`) are applied on BOTH the API and the scrape path — having
@@ -131,7 +135,7 @@ async function searchViaAPI(
     maxResults,
     order: "relevance",
     ...(videoDuration && videoDuration !== "any" ? { videoDuration } : {}),
-  });
+   }, { timeout: YOUTUBE_API_TIMEOUT_MS });
 
   const videoIds = (searchResponse.data.items || [])
     .map((item) => item.id?.videoId)
@@ -145,7 +149,7 @@ async function searchViaAPI(
     key: process.env.YOUTUBE_API_KEY,
     id: videoIds,
     part: ["statistics", "snippet", "contentDetails"],
-  });
+   }, { timeout: YOUTUBE_API_TIMEOUT_MS });
 
   return (statsResponse.data.items || []).map((item) => ({
     videoId: item.id || "",
