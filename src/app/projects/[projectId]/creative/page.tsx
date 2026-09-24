@@ -1234,10 +1234,14 @@ export default function CreativePage() {
                         setStoryboards((prev) =>
                           prev.map((sb) => {
                             if (sb.id !== storyboard.id) return sb;
-                            // The server snapshots the frame before every change.
+                            // The server snapshots the frame before every change
+                            // except a generated image being attached.
+                            const isEdit = Object.keys(updates).some((k) => k !== "imageUrl");
                             return {
                               ...sb,
-                              frameHistory: [...(sb.frameHistory ?? []), { frameNumber }],
+                              frameHistory: isEdit
+                                ? [...(sb.frameHistory ?? []), { frameNumber }]
+                                : sb.frameHistory,
                               frames: sb.frames.map((f) =>
                                 f.frameNumber === frameNumber ? { ...f, ...updates } : f
                               ),

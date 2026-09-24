@@ -132,8 +132,10 @@ export async function PATCH(
 
   // Keep what the frame said before this edit — an edit must never be the
   // only copy of the frame's content.
+  // A generated keyframe image being attached is not an edit a person would
+  // want to undo, so image-only updates leave the history alone.
   const changed = Object.entries(updates).some(
-    ([key, value]) => JSON.stringify(previous[key]) !== JSON.stringify(value)
+    ([key, value]) => key !== "imageUrl" && JSON.stringify(previous[key]) !== JSON.stringify(value)
   );
 
   const updated = await prisma.storyboard.update({
