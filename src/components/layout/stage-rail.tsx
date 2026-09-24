@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Check, Circle, CircleDot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ProjectStages } from "@/services/project-stages";
+import { STAGES_FRESH, STAGES_STALE } from "@/lib/stage-events";
 
 const STAGE_SEGMENTS: Record<string, string[]> = {
   setup: ["overview"],
@@ -30,10 +31,19 @@ export function StageRail({ projectId, compact = false }: { projectId: string; c
         })
         .catch(() => {});
     load();
+    // Poll as a fallback; changes made on the page refresh the rail at once.
     const t = setInterval(load, 15000);
+    const onFresh = (e: Event) => {
+      const d = (e as CustomEvent<ProjectStages>).detail;
+      if (!cancelled && d?.projectId === projectId) setData(d);
+    };
+    window.addEventListener(STAGES_STALE, load);
+    window.addEventListener(STAGES_FRESH, onFresh);
     return () => {
       cancelled = true;
       clearInterval(t);
+      window.removeEventListener(STAGES_STALE, load);
+      window.removeEventListener(STAGES_FRESH, onFresh);
     };
   }, [projectId, pathname]);
 

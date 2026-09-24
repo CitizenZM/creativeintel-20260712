@@ -65,6 +65,7 @@ interface Storyboard {
   frames: StoryboardFrame[];
   version?: number;
   isActive?: boolean;
+  frameHistory?: { frameNumber: number }[] | null;
 }
 
 /** All versions of one script's storyboard, newest first, plus the one shown. */
@@ -1228,15 +1229,33 @@ export default function CreativePage() {
                       projectId={projectId}
                       autoLoad={true}
                       isLast={idx === storyboard.frames.length - 1}
+                      undoCount={(storyboard.frameHistory ?? []).filter((h) => h.frameNumber === frame.frameNumber).length}
                       onUpdate={(frameNumber, updates) => {
                         setStoryboards((prev) =>
                           prev.map((sb) => {
                             if (sb.id !== storyboard.id) return sb;
+                            // The server snapshots the frame before every change.
                             return {
                               ...sb,
+                              frameHistory: [...(sb.frameHistory ?? []), { frameNumber }],
                               frames: sb.frames.map((f) =>
                                 f.frameNumber === frameNumber ? { ...f, ...updates } : f
                               ),
+                            };
+                          })
+                        );
+                      }}
+                      onUndo={(frameNumber, restored) => {
+                        setStoryboards((prev) =>
+                          prev.map((sb) => {
+                            if (sb.id !== storyboard.id) return sb;
+                            const history = [...(sb.frameHistory ?? [])];
+                            const idx = history.map((h) => h.frameNumber).lastIndexOf(frameNumber);
+                            if (idx >= 0) history.splice(idx, 1);
+                            return {
+                              ...sb,
+                              frameHistory: history,
+                              frames: sb.frames.map((f) => (f.frameNumber === frameNumber ? restored : f)),
                             };
                           })
                         );

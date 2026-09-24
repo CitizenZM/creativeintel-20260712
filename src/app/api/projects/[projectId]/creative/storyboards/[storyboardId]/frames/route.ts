@@ -1,6 +1,60 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { LIVE, appendFrameHistory } from "@/services/creative-library";
+import { LIVE, appendFrameHistory, type FrameHistoryEntry } from "@/services/creative-library";
+
+// Grid-owned fields keep their current values on undo — only content reverts.
+const GRID_FIELDS = ["frameNumber", "startSec", "endSec", "duration", "segment"];
+
+/**
+ * POST {frameNumber} — undo the last edit to one frame: restore its most
+ * recent history snapshot and drop that snapshot. Returns how many earlier
+ * edits can still be undone.
+ */
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ projectId: string; storyboardId: string }> }
+) {
+  const { projectId, storyboardId } = await params;
+  const body = (await request.json().catch(() => ({}))) as { frameNumber?: unknown };
+  if (typeof body.frameNumber !== "number") {
+    return NextResponse.json({ error: "frameNumber required" }, { status: 400 });
+  }
+  const frameNumber = body.frameNumber;
+
+  const storyboard = await prisma.storyboard.findFirst({ where: { id: storyboardId, projectId, ...LIVE } });
+  if (!storyboard) return NextResponse.json({ error: "Storyboard not found" }, { status: 404 });
+
+  const history = Array.isArray(storyboard.frameHistory)
+    ? (storyboard.frameHistory as unknown as FrameHistoryEntry[])
+    : [];
+  let lastIdx = -1;
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].frameNumber === frameNumber) {
+      lastIdx = i;
+      break;
+    }
+  }
+  if (lastIdx === -1) return NextResponse.json({ error: "Nothing to undo for this frame" }, { status: 409 });
+
+  const frames = Array.isArray(storyboard.frames) ? (storyboard.frames as Array<Record<string, unknown>>) : [];
+  const current = frames.find((f) => f.frameNumber === frameNumber);
+  if (!current) return NextResponse.json({ error: `Frame ${frameNumber} not found` }, { status: 404 });
+
+  const snapshot: Record<string, unknown> = { ...history[lastIdx].frame };
+  for (const key of GRID_FIELDS) snapshot[key] = current[key];
+  const nextFrames = frames.map((f) => (f.frameNumber === frameNumber ? snapshot : f));
+  const nextHistory = history.filter((_, i) => i !== lastIdx);
+
+  await prisma.storyboard.update({
+    where: { id: storyboardId },
+    data: { frames: nextFrames as never, frameHistory: nextHistory as never },
+  });
+  return NextResponse.json({
+    ok: true,
+    frame: snapshot,
+    remaining: nextHistory.filter((h) => h.frameNumber === frameNumber).length,
+  });
+}
 
 /**
  * PATCH /api/projects/{projectId}/creative/storyboards/{storyboardId}/frames

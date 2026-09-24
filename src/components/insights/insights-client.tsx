@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { markStagesStale } from "@/lib/stage-events";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ function useSavedSelection(projectId: string, kind: SelectionKind, initial: stri
           body: JSON.stringify({ kind, ids: targets, selected }),
         });
         if (!res.ok) throw new Error(`Save failed (${res.status})`);
+        markStagesStale();
       } catch {
         apply(!selected);
         setError("Couldn't save that change — try again.");

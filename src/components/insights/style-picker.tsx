@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { markStagesStale } from "@/lib/stage-events";
 import { GOAL_TYPE_INFO, isGoalType, type StyleCategory } from "@/lib/style-categories";
 
 export interface StyleEvidence {
@@ -62,6 +63,7 @@ export function StylePicker({
       return;
     }
     router.refresh();
+    markStagesStale();
   }
 
   return (

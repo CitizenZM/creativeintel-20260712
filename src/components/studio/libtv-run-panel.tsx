@@ -26,6 +26,7 @@ import type {
   StoryboardView,
 } from "./types";
 import { isPlayable, isRunActive } from "./types";
+import { LibtvBalance } from "./libtv-balance";
 
 const POLL_MS = 5000;
 
@@ -435,20 +436,14 @@ export function LibtvRunPanel({
             of {maxCredits} allowed
           </p>
           <p className="text-muted-foreground">
-            {/* LibTV shows the balance only in its own web UI, so the honest
-                thing to surface here is what this project has already spent. */}
             Spent on this project so far:{" "}
             <span className="font-semibold text-foreground">{spentSoFar} credits</span>
-            {" "}across {runs.length} run{runs.length === 1 ? "" : "s"} · balance is only visible at{" "}
-            <a
-              href="https://www.liblib.tv/"
-              target="_blank"
-              rel="noreferrer"
-              className="underline hover:text-foreground"
-            >
-              liblib.tv
-            </a>
+            {" "}across {runs.length} run{runs.length === 1 ? "" : "s"}
           </p>
+          <LibtvBalance
+            need={activeRun?.status === "awaiting_approval" ? activeRun.creditsEstimated : estimate}
+            refreshKey={spentSoFar}
+          />
           {overBudget && (
             <label className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-red-700">
               <input

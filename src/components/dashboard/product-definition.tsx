@@ -22,6 +22,7 @@ interface ProductDefinitionData {
   productPageImages: ProductImage[] | null;
   productPageText: string | null;
   userProductImages: ProductImage[] | null;
+  productConfirmedAt?: string | null;
 }
 
 interface AdapterAttempt {
@@ -209,6 +210,19 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
   );
 
   const hasProduct = !!(data?.productUrl || data?.productPageImages?.length || data?.userProductImages?.length);
+  // Scraped automatically and never looked at by a person.
+  const needsConfirm = hasProduct && !!data?.productPageTitle && !data?.productConfirmedAt;
+
+  async function confirmProduct() {
+    setError(null);
+    const res = await fetch(`/api/projects/${projectId}/product`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: true }),
+    }).catch(() => null);
+    if (!res?.ok) return setError("Couldn't save the confirmation — try again.");
+    setData(await res.json());
+  }
   const allImages = [
     ...(data?.productPageImages || []).slice(0, 4),
     ...(data?.userProductImages || []).slice(0, 4),
@@ -237,6 +251,22 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
           </p>
         </div>
       </div>
+
+      {needsConfirm && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3 flex-wrap">
+          <AlertCircle className="h-4 w-4 text-amber-700 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-900">Check the product details we read from your page</p>
+            <p className="text-xs text-amber-800 mt-0.5">
+              Every script and render is held to this name, description and these photos. Fix anything wrong
+              below, or confirm it is right.
+            </p>
+          </div>
+          <Button size="sm" onClick={confirmProduct} className="h-8 text-xs gap-1.5">
+            <Check className="h-3 w-3" /> Looks right
+          </Button>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 space-y-1">
