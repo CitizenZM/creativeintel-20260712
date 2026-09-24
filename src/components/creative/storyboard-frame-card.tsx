@@ -245,7 +245,7 @@ export function StoryboardFrameCard({
       setApproved(restored.approved ?? null);
       setFeedback(restored.feedback || "");
       setTransition(restored.transitionEffect as TransitionId | null | undefined);
-      setImageUrl(restored.imageUrl || null);
+      if (restored.imageUrl) setImageUrl(restored.imageUrl);
       setError(null);
       onUndo?.(frame.frameNumber, restored, data.remaining ?? 0);
     } catch (err) {

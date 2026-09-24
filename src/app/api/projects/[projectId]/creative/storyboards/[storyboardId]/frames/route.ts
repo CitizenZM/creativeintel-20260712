@@ -42,6 +42,9 @@ export async function POST(
 
   const snapshot: Record<string, unknown> = { ...history[lastIdx].frame };
   for (const key of GRID_FIELDS) snapshot[key] = current[key];
+  // Undoing a text edit must not throw away the frame's rendered image —
+  // the card would regenerate it (and pay for it) the moment it disappeared.
+  if (!snapshot.imageUrl && current.imageUrl) snapshot.imageUrl = current.imageUrl;
   const nextFrames = frames.map((f) => (f.frameNumber === frameNumber ? snapshot : f));
   const nextHistory = history.filter((_, i) => i !== lastIdx);
 
