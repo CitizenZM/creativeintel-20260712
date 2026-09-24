@@ -564,9 +564,14 @@ Social proof: ${(a.socialProof || []).slice(0, 4).join(" / ")}`;
 
 // ─── Stage: competitor intel ──────────────────────────────────────────────────
 
-export async function runCompetitorIntelStage(projectId: string, deadline?: number): Promise<number> {
+export async function runCompetitorIntelStage(
+  projectId: string,
+  deadline?: number,
+  opts: { onlyMissing?: boolean } = {}
+): Promise<number> {
   const competitors = await prisma.competitor.findMany({
-    where: { projectId },
+    // onlyMissing: just competitors never profiled (e.g. added by hand since).
+    where: { projectId, excluded: false, ...(opts.onlyMissing ? { brandPromise: null } : {}) },
     include: { adTeardowns: { orderBy: { rank: "asc" }, take: 5, include: { contentAsset: { select: { title: true } } } } },
   });
   if (competitors.length === 0) return 0;

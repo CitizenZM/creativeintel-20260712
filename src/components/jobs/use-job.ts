@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JobView } from "@/services/jobs";
+import { markStagesStale } from "@/lib/stage-events";
 
 const POLL_MS = 2000;
 const TERMINAL = ["completed", "failed", "cancelled"];
@@ -43,6 +44,7 @@ export function useJob(
           if (isTerminal(next)) {
             pollingId.current = null;
             finishedRef.current?.(next);
+            markStagesStale();
             for (const w of waiters.current.splice(0)) w(next);
             return;
           }

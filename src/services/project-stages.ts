@@ -68,6 +68,8 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
       select: {
         productName: true,
         productUrl: true,
+        productPageTitle: true,
+        productConfirmedAt: true,
         campaignGoal: true,
         goalType: true,
         campaignSelection: { select: { styleCategories: true } },
@@ -115,6 +117,11 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
 
   const setupCriteria: StageCriterion[] = [
     { label: "Define the product (name or product URL)", met: !!(project?.productName || project?.productUrl) },
+    {
+      label: "Confirm the product details we read from your page",
+      // Only scraped details need a check; typed-in ones are the user's own.
+      met: !project?.productPageTitle || !!project?.productConfirmedAt,
+    },
     { label: "Set the campaign goal", met: !!project?.campaignGoal },
     { label: "Choose storytelling, conversion or hybrid ads", met: !!project?.goalType },
     { label: `Complete the Brand Kit to 60% (now ${brandKitScore}%)`, met: brandKitScore >= 60 },

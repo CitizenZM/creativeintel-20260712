@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { ProjectStage, ProjectStages } from "@/services/project-stages";
 import { NextStepHint } from "./next-step-hint";
 import { StageChecklist } from "./stage-checklist";
+import { shareFreshStages } from "@/lib/stage-events";
 
 const STEP_NUMBER: Record<ProjectStage["id"], number> = {
   setup: 1,
@@ -36,7 +37,10 @@ export function StageGuideClient({
     fetch(`/api/projects/${projectId}/stages`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled) setStages(data);
+        if (!cancelled && data) {
+          setStages(data);
+          shareFreshStages(data);
+        }
       })
       .catch(() => {});
     return () => {

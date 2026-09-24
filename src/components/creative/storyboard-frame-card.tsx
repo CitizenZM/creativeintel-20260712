@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Loader2, ImageIcon, CheckCircle2, XCircle, RefreshCw,
-  MessageSquare, ChevronDown, Camera, Zap, ChevronRight, Film,
+  MessageSquare, ChevronDown, Camera, Zap, ChevronRight, Film, Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { segmentStyle } from "./segment-styles";
@@ -68,6 +68,10 @@ interface StoryboardFrameCardProps {
   autoLoad?: boolean;
   isLast?: boolean;
   onUpdate?: (frameNumber: number, updates: Partial<StoryboardFrameData>) => void;
+  /** How many earlier versions of this frame are saved (edit history). */
+  undoCount?: number;
+  /** Called with the restored frame after an undo. */
+  onUndo?: (frameNumber: number, restored: StoryboardFrameData, remaining: number) => void;
 }
 
 // ─── Compact transition badge (inline in card footer) ─────────────────────────
@@ -154,6 +158,8 @@ export function StoryboardFrameCard({
   autoLoad = false,
   isLast = false,
   onUpdate,
+  undoCount = 0,
+  onUndo,
 }: StoryboardFrameCardProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(frame.imageUrl || null);
   const [loading, setLoading] = useState(false);
@@ -219,6 +225,31 @@ export function StoryboardFrameCard({
       onUpdate?.(frame.frameNumber, updates);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function undoLastEdit() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/creative/storyboards/${storyboardId}/frames`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ frameNumber: frame.frameNumber }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Undo failed (${res.status})`);
+      const restored = data.frame as StoryboardFrameData;
+      // The card keeps its own copies of these; bring them back in line.
+      setApproved(restored.approved ?? null);
+      setFeedback(restored.feedback || "");
+      setTransition(restored.transitionEffect as TransitionId | null | undefined);
+      if (restored.imageUrl) setImageUrl(restored.imageUrl);
+      setError(null);
+      onUndo?.(frame.frameNumber, restored, data.remaining ?? 0);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Undo failed");
     } finally {
       setSaving(false);
     }
@@ -453,6 +484,17 @@ export function StoryboardFrameCard({
           <MessageSquare className="h-2.5 w-2.5" />
           {feedback ? "Noted" : "Note"}
         </button>
+
+        {undoCount > 0 && (
+          <button
+            onClick={undoLastEdit}
+            disabled={saving}
+            title={`Undo the last change to this frame (${undoCount} saved)`}
+            className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold border border-border text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            <Undo2 className="h-2.5 w-2.5" /> Undo
+          </button>
+        )}
 
         {/* Toggle detail */}
         <button

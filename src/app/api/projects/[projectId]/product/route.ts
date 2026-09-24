@@ -19,6 +19,7 @@ const PROJECT_SELECT = {
   productPageImages: true,
   productPageText: true,
   userProductImages: true,
+  productConfirmedAt: true,
 } as const;
 
 function toScrapeResult(outcome: ScrapeOutcome) {
@@ -34,10 +35,16 @@ function toScrapeResult(outcome: ScrapeOutcome) {
   };
 }
 
-async function commitScrape(projectId: string, productUrl: string, scraped: ProductPageData) {
+/**
+ * `confirmed` is true only when a person saw the scraped result first (the
+ * preview -> commit flow); a scrape run straight from project creation is
+ * saved unconfirmed so Setup asks someone to check it.
+ */
+async function commitScrape(projectId: string, productUrl: string, scraped: ProductPageData, confirmed: boolean) {
   const project = await prisma.project.update({
     where: { id: projectId },
     data: {
+      productConfirmedAt: confirmed ? new Date() : null,
       productUrl,
       productPageTitle: scraped.title,
       productPageImages: scraped.images as never,
@@ -92,7 +99,7 @@ export async function POST(
     );
   }
 
-  const project = await commitScrape(projectId, productUrl, outcome.data);
+  const project = await commitScrape(projectId, productUrl, outcome.data, false);
 
   return NextResponse.json({
     ...project,
@@ -141,8 +148,17 @@ export async function PATCH(
       });
     }
 
-    const project = await commitScrape(projectId, productUrl, outcome.data);
+    const project = await commitScrape(projectId, productUrl, outcome.data, true);
     return NextResponse.json({ mode, scrapeResult, ...project });
+  }
+
+  if ((body as { confirm?: unknown }).confirm === true) {
+    const project = await prisma.project.update({
+      where: { id: projectId },
+      data: { productConfirmedAt: new Date() },
+      select: PROJECT_SELECT,
+    });
+    return NextResponse.json(project);
   }
 
   const allowed = ["productUrl", "productName", "productPageText", "userProductImages", "productPageImages"];
@@ -155,9 +171,10 @@ export async function PATCH(
     return NextResponse.json({ error: "No updatable fields provided" }, { status: 400 });
   }
 
+  // Details typed or edited by a person are confirmed by definition.
   const project = await prisma.project.update({
     where: { id: projectId },
-    data,
+    data: { ...data, productConfirmedAt: new Date() },
     select: PROJECT_SELECT,
   });
 

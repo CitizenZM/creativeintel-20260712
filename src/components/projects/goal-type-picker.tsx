@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { markStagesStale } from "@/lib/stage-events";
 import { GOAL_TYPES, GOAL_TYPE_INFO, type GoalType } from "@/lib/style-categories";
 
 /** Storytelling / conversion / hybrid as three explicit choices. */
@@ -60,6 +61,7 @@ export function GoalTypeSetting({ projectId, initial }: { projectId: string; ini
       });
       if (!res.ok) throw new Error(`Save failed (${res.status})`);
       router.refresh();
+      markStagesStale();
     } catch {
       setValue(prev);
       setError("Couldn't save the goal — try again.");

@@ -1,7 +1,10 @@
 import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db";
 import { createJob, failJob, jobWriter, cancelRequested, runningJob, type JobStep } from "@/services/jobs";
+import { createHash } from "node:crypto";
 import {
+  runContentScoringStage,
+  runCompetitorIntelStage,
   runAdTeardownStage,
   runCompetitorRollupStage,
   runCompetitiveGapStage,
@@ -34,7 +37,7 @@ export async function POST(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
-  const body = (await req.json().catch(() => ({}))) as { background?: boolean };
+  const body = (await req.json().catch(() => ({}))) as { background?: boolean; force?: boolean };
 
   const scored = await prisma.contentAsset.count({
     where: { projectId, overallScore: { not: null } },
@@ -44,6 +47,28 @@ export async function POST(
       { error: "No scored content yet. Run research first." },
       { status: 400 }
     );
+  }
+
+  // Nothing new to analyse since the last complete run: say so instead of
+  // spending model calls to reproduce the same result. `force` overrides.
+  if (!body.force) {
+    const [fingerprint, project, pendingTeardowns, unscored] = await Promise.all([
+      analysisFingerprint(projectId),
+      prisma.project.findUnique({ where: { id: projectId }, select: { analysisFingerprint: true } }),
+      prisma.contentAsset.count({
+        where: { projectId, overallScore: { not: null }, excluded: false, teardown: { is: null } },
+      }),
+      prisma.contentAsset.count({ where: { projectId, overallScore: null, excluded: false } }),
+    ]);
+    if (project?.analysisFingerprint === fingerprint && pendingTeardowns === 0 && unscored === 0) {
+      return NextResponse.json(
+        {
+          code: "unchanged",
+          error: "Nothing has changed since the last analysis \u2014 no new ads, competitors or curation.",
+        },
+        { status: 409 }
+      );
+    }
   }
 
   if (body.background) {
@@ -135,8 +160,13 @@ async function runAnalysisJob(projectId: string, jobId: string) {
   }
 
   const partial = !cancelled && !!last && !last.done;
+  // Only a complete run records what it covered; a partial one must re-run.
+  const fingerprint = !partial && !cancelled && last?.done ? await analysisFingerprint(projectId) : undefined;
   await prisma.project
-    .update({ where: { id: projectId }, data: { status: "ANALYZED" } })
+    .update({
+      where: { id: projectId },
+      data: { status: "ANALYZED", ...(fingerprint ? { analysisFingerprint: fingerprint } : {}) },
+    })
     .catch(() => {});
   await write({
     status: cancelled ? "cancelled" : "completed",
@@ -154,6 +184,27 @@ async function runAnalysisJob(projectId: string, jobId: string) {
 }
 
 /** One time-budgeted pass over every post-scoring stage. */
+/**
+ * What an analysis is computed from: the scored, un-excluded ads (and whether
+ * each is torn down) and the competitors in play. Any change — new research,
+ * a pin/exclude, a competitor added or removed — changes the fingerprint.
+ */
+async function analysisFingerprint(projectId: string): Promise<string> {
+  const [assets, competitors] = await Promise.all([
+    prisma.contentAsset.findMany({
+      where: { projectId, overallScore: { not: null }, excluded: false, NOT: { competitor: { is: { excluded: true } } } },
+      select: { id: true, pinned: true, teardown: { select: { id: true } } },
+      orderBy: { id: "asc" },
+    }),
+    prisma.competitor.findMany({ where: { projectId, excluded: false }, select: { id: true }, orderBy: { id: "asc" } }),
+  ]);
+  const basis = JSON.stringify({
+    a: assets.map((a) => `${a.id}:${a.pinned ? 1 : 0}:${a.teardown ? 1 : 0}`),
+    c: competitors.map((c) => c.id),
+  });
+  return createHash("sha1").update(basis).digest("hex");
+}
+
 async function reanalyzePass(projectId: string, deadline: number) {
   const stages: StageResult[] = [];
   let deep: StageResult | null = null;
@@ -168,6 +219,11 @@ async function reanalyzePass(projectId: string, deadline: number) {
       });
     }
   };
+
+  // Catch up only what is new: ads not yet scored and competitors never
+  // profiled (both no-ops when nothing was added).
+  await run("scoring", async () => (await runContentScoringStage(projectId, deadline)).count);
+  await run("competitor_intel", () => runCompetitorIntelStage(projectId, deadline, { onlyMissing: true }));
 
   const teardown = await runAdTeardownStage(projectId, deadline).catch((err) => {
     stages.push({

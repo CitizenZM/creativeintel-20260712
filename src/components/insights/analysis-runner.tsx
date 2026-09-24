@@ -35,20 +35,27 @@ export function AnalysisRunner({ projectId, attention }: { projectId: string; at
   });
 
   const { start } = analysis;
+  // Resuming a partial run always proceeds — the server's "nothing changed"
+  // check is for fresh clicks, not for finishing work already under way.
   useEffect(() => {
-    if (resumeTick > 0) void start(url).catch(() => {});
+    if (resumeTick > 0) void start(url, { force: true }).catch(() => {});
   }, [resumeTick, start, url]);
 
-  function run() {
+  const [notice, setNotice] = useState<string | null>(null);
+
+  function run(force = false) {
     resumes.current = 0;
     lastPercent.current = 0;
-    void analysis.start(url).catch(() => {});
+    setNotice(null);
+    void analysis.start(url, force ? { force: true } : {}).catch((err: unknown) => {
+      setNotice(err instanceof Error ? err.message : "Could not start the analysis");
+    });
   }
 
   return (
     <>
       <Button
-        onClick={run}
+        onClick={() => run()}
         disabled={analysis.running}
         variant="outline"
         size="sm"
@@ -61,13 +68,27 @@ export function AnalysisRunner({ projectId, attention }: { projectId: string; at
         )}
         {analysis.running ? "Analyzing…" : "Re-analyze"}
       </Button>
+      {notice && !analysis.running && (
+        <p className="basis-full text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
+          {notice}
+          {notice.startsWith("Nothing has changed") && (
+            <button
+              type="button"
+              onClick={() => run(true)}
+              className="font-medium text-foreground underline underline-offset-2"
+            >
+              Re-analyze anyway
+            </button>
+          )}
+        </p>
+      )}
       {analysis.job && (
         <JobProgress
           className="basis-full"
           job={analysis.job}
           title="Analyzing competitor ads"
           onCancel={analysis.cancel}
-          onRetry={run}
+          onRetry={() => run(true)}
           onDismiss={analysis.dismiss}
         />
       )}
