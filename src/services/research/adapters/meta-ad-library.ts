@@ -25,6 +25,25 @@ function platformOf(ad: MetaAd): AdPlatform {
   return "facebook";
 }
 
+// The public ads_archive endpoint only serves non-political ads delivered to
+// the UK or EU — a US query is refused with code 10 even for a verified token.
+// Keep any UK/EU countries the caller asked for; otherwise search the largest
+// EU/UK markets, where US brands that advertise abroad show up.
+const AD_LIBRARY_COUNTRIES = new Set([
+  "GB", "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
+  "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI",
+  "ES", "SE",
+]);
+const DEFAULT_AD_LIBRARY_COUNTRIES = ["GB", "DE", "FR", "IE", "NL"];
+
+export function adLibraryCountries(requested?: string[]): string[] {
+  const allowed = (requested ?? [])
+    .map((c) => c.toUpperCase())
+    .map((c) => (c === "UK" ? "GB" : c))
+    .filter((c) => AD_LIBRARY_COUNTRIES.has(c));
+  return allowed.length ? allowed : DEFAULT_AD_LIBRARY_COUNTRIES;
+}
+
 export function metaAdToCandidate(ad: MetaAd, ctx: AdapterContext): AdCandidate {
   const platform = platformOf(ad);
   // Ad Library never reports aspect/duration; the browser worker fills them in.
@@ -65,7 +84,7 @@ export const metaAdLibraryAdapter: Adapter = async (
   try {
     const ads = await searchMetaAdLibrary({
       brand: ctx.ownerName,
-      countries: ctx.countries ?? ["US"],
+      countries: adLibraryCountries(ctx.countries),
       limit: ctx.limit ?? 25,
     });
     const candidates = ads
