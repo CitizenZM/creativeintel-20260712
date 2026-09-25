@@ -128,6 +128,7 @@ STRUCTURAL RULES (non-negotiable):
 - The hook must apply the template's hook style AND the platform playbook's opening-frame requirements, and must name one platform hook formula.
 - The CTA must respect the platform playbook's CTA rules and, where an approved CTA pool is supplied, must use copy from that pool verbatim.
 - hook.durationSec + every body beat span + cta.durationSec must total exactly ${durationSec} seconds. Body beats are contiguous: beat n's endSec equals beat n+1's startSec.
+- Write in the brand's own tone of voice. No emoji in hooks, voiceover, CTAs or variants — they are spoken or shot, not posted. On-screen text may carry at most one emoji, and only on TikTok/Reels when the brand's tone is explicitly playful.
 - Character actions at millimetre precision (not "she smiles" → "left corner of mouth rises 0.5cm, exhale through nose, eyes soften"). Every environment: room type + lighting source + colour temperature + key props.
 
 OUTPUT JSON (no markdown, no extra keys):

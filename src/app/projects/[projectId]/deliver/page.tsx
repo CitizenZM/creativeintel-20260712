@@ -210,7 +210,10 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
               <li key={s.id} className="px-3 py-2 text-sm">
                 <p className="font-medium truncate">{s.title}</p>
                 <p className="text-[11px] text-muted-foreground">
-                  {s.videoType ?? "legacy"} · {s.template ?? "—"} · {s.platform ?? "—"} · {s.totalDurationSec ?? "?"}s
+                  {/* Older scripts predate these fields — show only what is known. */}
+                  {[s.videoType, s.template, s.platform, s.totalDurationSec ? `${s.totalDurationSec}s` : null]
+                    .filter(Boolean)
+                    .join(" · ") || "Script"}
                 </p>
               </li>
             ))}

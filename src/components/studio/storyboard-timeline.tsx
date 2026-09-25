@@ -79,11 +79,12 @@ function CoverageBrackets({
 
   return (
     <div className="mt-1.5 flex min-w-max items-start">
-      {laid.map(({ span, gap }) => {
+      {laid.map(({ span, gap }, i) => {
+        // "V1"/"V4" node names read like storyboard versions — call them clips.
         const label =
           span.frames.length > 1
-            ? `${span.nodeName} covers F${span.frames[0]}–F${span.frames[span.frames.length - 1]}`
-            : `${span.nodeName} · F${span.frames[0]}`;
+            ? `Clip ${i + 1} · F${span.frames[0]}–F${span.frames[span.frames.length - 1]}`
+            : `Clip ${i + 1} · F${span.frames[0]}`;
         return (
           <div
             key={span.nodeName}
@@ -95,7 +96,7 @@ function CoverageBrackets({
             className="shrink-0"
           >
             <div className="h-1.5 rounded-b-sm border-x border-b border-foreground/30" />
-            <p className="truncate pt-0.5 text-center text-[10px] font-medium text-muted-foreground">{label}</p>
+            <p title={`LibTV node ${span.nodeName}`} className="truncate pt-0.5 text-center text-[10px] font-medium text-muted-foreground">{label}</p>
           </div>
         );
       })}

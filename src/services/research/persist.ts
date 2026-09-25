@@ -8,6 +8,7 @@
 import { prisma } from "@/lib/db";
 import { pMap } from "@/lib/parallel";
 import { toContentAssetData } from "./ad-candidate";
+import { isExpiringThumbnail, resolveThumbnail } from "./thumbnails";
 import {
   BRAND_OWNER_KEY,
   UNOWNED_KEY,
@@ -34,6 +35,13 @@ async function upsertAll(
       const data = toContentAssetData(c, { rankInOwner, isBrandOwned });
       const { url, ...rest } = data;
       try {
+        if (isExpiringThumbnail(rest.thumbnailUrl)) {
+          const existing = await prisma.contentAsset.findUnique({
+            where: { projectId_url: { projectId, url } },
+            select: { thumbnailUrl: true },
+          });
+          rest.thumbnailUrl = await resolveThumbnail(rest.thumbnailUrl as string, existing?.thumbnailUrl);
+        }
         await prisma.contentAsset.upsert({
           where: { projectId_url: { projectId, url } },
           create: { projectId, url, ...rest } as never,

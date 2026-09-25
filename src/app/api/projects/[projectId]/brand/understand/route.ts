@@ -191,14 +191,33 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
-  const brand = await prisma.brand.findUnique({ where: { projectId } });
+  const [brand, project] = await Promise.all([
+    prisma.brand.findUnique({ where: { projectId } }),
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: { productPageImages: true, userProductImages: true },
+    }),
+  ]);
   if (!brand) return NextResponse.json({ error: "Brand not found" }, { status: 404 });
+
+  // Product Definition (user uploads + images read from the product page) is
+  // the source of truth for real photos — show them here too, so the two
+  // panels never disagree about whether real product images exist.
+  type Img = { url: string; caption?: string; alt?: string };
+  const stored = (Array.isArray(brand.productImages) ? brand.productImages : []) as unknown as Img[];
+  const seen = new Set(stored.map((i) => i.url));
+  const definition = [
+    ...((project?.userProductImages as Img[] | null) ?? []),
+    ...((project?.productPageImages as Img[] | null) ?? []),
+  ]
+    .filter((i) => i?.url && !seen.has(i.url) && (seen.add(i.url), true))
+    .map((i) => ({ url: i.url, caption: i.caption || i.alt || "Product photo", type: "website", source: "brand-website" }));
 
   return NextResponse.json({
     productCategory: brand.productCategory,
     productDescription: brand.productDescription,
     productVerified: brand.productVerified,
-    productImages: brand.productImages,
+    productImages: [...definition, ...stored],
     useEnvironments: brand.useEnvironments,
     actorSettings: brand.actorSettings,
     displayGuidelines: brand.displayGuidelines,

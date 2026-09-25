@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { CheckSquare, Square, ChevronDown, ChevronUp, Archive } from "lucide-react";
 import { getScriptTemplate } from "@/services/ai/prompts/script-templates";
@@ -321,6 +322,13 @@ export function ScriptCard({
             )}
           </div>
         </button>
+        <Link
+          href={`/projects/${projectId}/library`}
+          title="Script versions, picks and archived scripts"
+          className="shrink-0 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          History
+        </Link>
         {onArchive && (
           <button
             type="button"
