@@ -68,3 +68,19 @@ describe("campaignFieldKey", () => {
     expect(campaignFieldKey("platform")).toBe("campaign.platform");
   });
 });
+
+describe("AISuggestionSchema tolerance", () => {
+  it("normalises case and trims instead of rejecting the whole answer", async () => {
+    const { AISuggestionSchema } = await import("./setup-suggest");
+    const out = AISuggestionSchema.parse({
+      campaignGoal: "x".repeat(400),
+      goalType: "Hybrid",
+      platform: "YouTube",
+      targetAudience: 42,
+    });
+    expect(out.campaignGoal).toHaveLength(280);
+    expect(out.goalType).toBe("hybrid");
+    expect(out.platform).toBe("youtube");
+    expect(out.targetAudience).toBeNull();
+  });
+});
