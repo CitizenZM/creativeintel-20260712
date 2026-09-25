@@ -101,6 +101,23 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
     }),
   ]);
 
+  // A competitor added after the last completed research run has never been
+  // searched — research isn't done until every competitor has been.
+  const [lastResearch, compRows] = await Promise.all([
+    prisma.researchJob.findFirst({
+      where: { projectId, status: "complete" },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+    prisma.competitor.findMany({
+      where: { projectId, excluded: false },
+      select: { name: true, createdAt: true, _count: { select: { contentAssets: true } } },
+    }),
+  ]);
+  const unresearched = compRows.filter(
+    (c) => c._count.contentAssets === 0 && (!lastResearch || c.createdAt > lastResearch.createdAt)
+  );
+
   // A selected script is production-ready once its active storyboard has
   // every frame approved.
   const boards = selectedScripts.length
@@ -147,6 +164,14 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
   const researchCriteria: StageCriterion[] = [
     { id: "research.run", label: "Run competitor research", met: assets > 0, href: `${base}/content` },
     { id: "research.competitors", label: `Find at least ${MIN_COMPETITORS} competitors (now ${competitors})`, met: competitors >= MIN_COMPETITORS, href: `${base}/content#competitors` },
+    {
+      id: "research.coverage",
+      label: unresearched.length
+        ? `Research the new competitor${unresearched.length > 1 ? "s" : ""} (${unresearched.map((c) => c.name).join(", ")})`
+        : "Research every competitor",
+      met: unresearched.length === 0,
+      href: `${base}/content`,
+    },
     { id: "research.ads", label: `Collect at least ${MIN_ADS} ads (now ${assets})`, met: assets >= MIN_ADS, href: `${base}/content` },
     { id: "research.paid", label: "Collect at least one verified paid ad", met: paidAssets > 0, href: `${base}/content` },
   ];

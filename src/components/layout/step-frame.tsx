@@ -74,7 +74,10 @@ export function StagePanel({
   const { data, refresh } = useProjectStages(projectId);
   const s = data?.stages.find((x) => x.id === stage);
   const isNext = data?.next?.id === stage;
-  const autoStarted = useRef(false);
+  // Checks already queued on this page (by id + label, so a new competitor or a
+  // changed requirement queues the step again).
+  const queued = useRef(new Set<string>());
+  const busy = useRef(false);
 
   // Land on the section a cross-page "Show me" pointed at.
   useEffect(() => {
@@ -85,23 +88,34 @@ export function StagePanel({
   }, []);
 
   useEffect(() => {
-    if (!s || !isNext || autoStarted.current) return;
+    if (!s || !isNext || busy.current) return;
+    const sig = (c: StageCriterion) => `${c.id}|${c.label}`;
     const queue = s.criteria.filter(
-      (c) => !c.met && c.id && STEP_ACTIONS[c.id]?.auto && !autoAttempted(projectId, c.id)
+      (c) =>
+        !c.met &&
+        c.id &&
+        STEP_ACTIONS[c.id]?.auto &&
+        !queued.current.has(sig(c)) &&
+        !autoAttempted(projectId, sig(c))
     );
     if (!queue.length) return;
-    autoStarted.current = true;
+    busy.current = true;
+    queue.forEach((c) => queued.current.add(sig(c)));
     void (async () => {
-      for (const c of queue) {
-        // An earlier action may already have satisfied this one.
-        const fresh = await refresh();
-        const now = fresh?.stages.find((x) => x.id === stage)?.criteria.find((x) => x.id === c.id);
-        if (now?.met) continue;
-        markAutoAttempted(projectId, c.id!);
-        const result = await runStep(projectId, c.id!);
-        if (result.status === "error") break;
+      try {
+        for (const c of queue) {
+          // An earlier action may already have satisfied this one.
+          const fresh = await refresh();
+          const now = fresh?.stages.find((x) => x.id === stage)?.criteria.find((x) => x.id === c.id);
+          if (now?.met) continue;
+          markAutoAttempted(projectId, sig(c));
+          const result = await runStep(projectId, c.id!);
+          if (result.status === "error") break;
+        }
+        await refresh();
+      } finally {
+        busy.current = false;
       }
-      await refresh();
     })();
   }, [s, isNext, projectId, stage, refresh]);
 
