@@ -10,9 +10,21 @@ name="${1:?usage: env-from-clipboard.sh NAME PREFIX}"
 prefix="${2:?usage: env-from-clipboard.sh NAME PREFIX}"
 cd "$(dirname "$0")/.."
 
+matches() { [[ "$1" == "$prefix"* ]] && [[ "$1" =~ ^[A-Za-z0-9_.|-]+$ ]]; }
+
+# Wait for the secret to be copied, so nothing can overwrite the clipboard
+# between copying and running this.
 value="$(pbpaste | tr -d '[:space:]')"
-if [[ "$value" != "$prefix"* ]] || [[ ! "$value" =~ ^[A-Za-z0-9_.|-]+$ ]]; then
-  echo "Clipboard does not hold a $name (expected it to start with \"$prefix\"). Copy it again and re-run." >&2
+if ! matches "$value"; then
+  echo "Waiting up to 2 minutes — click Copy on the $name now…"
+  for _ in $(seq 1 120); do
+    sleep 1
+    value="$(pbpaste | tr -d '[:space:]')"
+    matches "$value" && break
+  done
+fi
+if ! matches "$value"; then
+  echo "No $name (starting with \"$prefix\") was copied. Re-run and click Copy." >&2
   exit 1
 fi
 
