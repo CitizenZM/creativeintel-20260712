@@ -22,10 +22,13 @@ export function FieldShell({
   hint,
   onConfirm,
   confirming,
+  optional,
   className,
   children,
 }: {
   status: FieldStatus;
+  /** Nice to have, not required to continue: an empty optional field is neutral, not red. */
+  optional?: boolean;
   label?: ReactNode;
   hint?: ReactNode;
   onConfirm?: () => void;
@@ -33,16 +36,28 @@ export function FieldShell({
   className?: string;
   children: ReactNode;
 }) {
+  const emptyOptional = optional && status === "missing";
   const Icon = ICON[status];
   return (
-    <div data-field-status={status} className={cn("rounded-lg border p-3 space-y-2 transition-colors", FIELD_TONE[status], className)}>
+    <div
+      data-field-status={emptyOptional ? "optional" : status}
+      className={cn(
+        "rounded-lg border p-3 space-y-2 transition-colors",
+        emptyOptional ? "border-dashed border-border bg-muted/30" : FIELD_TONE[status],
+        className
+      )}
+    >
       <div className="flex items-center justify-between gap-2 flex-wrap">
         {label && <div className="text-xs font-medium">{label}</div>}
         <div className="flex items-center gap-2 ml-auto">
-          <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium", FIELD_TEXT[status])}>
-            <Icon className="h-3 w-3" />
-            {FIELD_LABEL[status]}
-          </span>
+          {emptyOptional ? (
+            <span className="text-[11px] font-medium text-muted-foreground">Optional</span>
+          ) : (
+            <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium", FIELD_TEXT[status])}>
+              <Icon className="h-3 w-3" />
+              {FIELD_LABEL[status]}
+            </span>
+          )}
           {status === "suggested" && onConfirm && (
             <button
               type="button"

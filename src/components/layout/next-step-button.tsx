@@ -115,7 +115,7 @@ export function NextStepButton({ projectId, initial }: { projectId: string; init
           <div className="flex items-start justify-between gap-2">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-[var(--status-urgent-fg)]">
               <CircleAlert className="h-4 w-4" />
-              {gaps.stage.label} isn&apos;t finished yet
+              {`${gaps.stage.label} isn't finished yet`}
             </p>
             <button type="button" onClick={() => setGaps(null)} aria-label="Close" className="text-muted-foreground hover:text-foreground">
               <X className="h-4 w-4" />

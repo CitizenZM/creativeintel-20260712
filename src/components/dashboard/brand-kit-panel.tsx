@@ -571,8 +571,10 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
     logo: assetGroupStatus(logos),
     packshots: assetGroupStatus(packshots),
   };
+  // Not needed to continue — shown neutral when empty, and not counted as a gap.
+  const optionalFields = new Set(["offer", "claimsForbidden", "tone", "doNotShow", "skuName", "skuDimensions"]);
   const statusValues = Object.values(fieldStatuses);
-  const missingCount = statusValues.filter((s) => s === "missing").length;
+  const missingCount = Object.entries(fieldStatuses).filter(([k, s]) => s === "missing" && !optionalFields.has(k)).length;
   const suggestedCount = statusValues.filter((s) => s === "suggested").length;
 
   return (
@@ -895,6 +897,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">SKU</p>
           <FieldShell
             status={fieldStatuses.skuName}
+            optional
             onConfirm={fieldStatuses.skuName === "suggested" ? () => confirmField("skuName") : undefined}
             confirming={confirming === "skuName"}
             label={<span className="text-[10px] uppercase tracking-wide text-muted-foreground">SKU name</span>}
@@ -908,6 +911,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
           </FieldShell>
           <FieldShell
             status={fieldStatuses.skuDimensions}
+            optional
             onConfirm={fieldStatuses.skuDimensions === "suggested" ? () => confirmField("skuDimensions") : undefined}
             confirming={confirming === "skuDimensions"}
             label={<span className="text-[10px] uppercase tracking-wide text-muted-foreground">Dimensions</span>}
@@ -988,6 +992,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <FieldShell
             status={fieldStatuses.offer}
+            optional
             onConfirm={fieldStatuses.offer === "suggested" ? () => confirmField("offer") : undefined}
             confirming={confirming === "offer"}
             label={<span className="text-[10px] uppercase tracking-wide text-muted-foreground">Offer</span>}
@@ -1034,6 +1039,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
           </FieldShell>
           <FieldShell
             status={fieldStatuses.claimsForbidden}
+            optional
             onConfirm={fieldStatuses.claimsForbidden === "suggested" ? () => confirmField("claimsForbidden") : undefined}
             confirming={confirming === "claimsForbidden"}
           >
@@ -1049,6 +1055,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
         <div className="rounded-xl border border-border bg-card p-4 space-y-4">
           <FieldShell
             status={fieldStatuses.tone}
+            optional
             onConfirm={fieldStatuses.tone === "suggested" ? () => confirmField("tone") : undefined}
             confirming={confirming === "tone"}
             label={<span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tone guidelines</span>}
@@ -1063,6 +1070,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
           </FieldShell>
           <FieldShell
             status={fieldStatuses.doNotShow}
+            optional
             onConfirm={fieldStatuses.doNotShow === "suggested" ? () => confirmField("doNotShow") : undefined}
             confirming={confirming === "doNotShow"}
           >
