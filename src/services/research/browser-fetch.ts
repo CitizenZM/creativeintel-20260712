@@ -15,6 +15,7 @@ import { prisma } from "@/lib/db";
 import {
   enqueueWorkerTask,
   findRecentCompletedTask,
+  isWorkerOnline,
   payloadHash,
   type BrowserFetchResult,
 } from "@/services/worker-tasks";
@@ -60,6 +61,9 @@ export async function fetchViaWorker(
     const hit = asResult(reusable.result);
     if (hit && accept(hit)) return hit;
   }
+
+  // Nobody would claim the task — waiting would only burn the caller's time.
+  if (!(await isWorkerOnline())) return null;
 
   const { taskId } = await enqueueWorkerTask({
     projectId: opts.projectId ?? null,

@@ -234,12 +234,31 @@ export function toContentAssetData(
 }
 
 /** De-duplicate by sourceId first, then by permalink. */
+// Query params that never change which creative a URL points at. Everything
+// else stays in the key — YouTube (`?v=`) and Meta snapshots (`?id=`) carry
+// their identity in the query string.
+const TRACKING_PARAM = /^(utm_\w+|si|feature|fbclid|gclid|ref|ref_src|access_token|pp|ab_channel)$/i;
+
+function permalinkKey(permalink: string): string {
+  try {
+    const url = new URL(permalink);
+    const params = [...url.searchParams.entries()]
+      .filter(([k]) => !TRACKING_PARAM.test(k))
+      .sort(([a], [b]) => a.localeCompare(b));
+    const query = new URLSearchParams(params).toString();
+    const host = url.hostname.replace(/^(www|m)\./, "");
+    return `${host}${url.pathname.replace(/\/$/, "")}${query ? `?${query}` : ""}`.toLowerCase();
+  } catch {
+    return permalink.toLowerCase();
+  }
+}
+
 export function dedupeCandidates(candidates: AdCandidate[]): AdCandidate[] {
   const seen = new Set<string>();
   const out: AdCandidate[] = [];
   for (const c of candidates) {
     const key = c.sourceId || c.permalink;
-    const urlKey = c.permalink.split("?")[0].toLowerCase();
+    const urlKey = permalinkKey(c.permalink);
     if (seen.has(key) || seen.has(urlKey)) continue;
     seen.add(key);
     seen.add(urlKey);
