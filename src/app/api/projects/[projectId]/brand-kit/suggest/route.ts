@@ -47,7 +47,15 @@ empty. Rules:
   fit the brand's look), doNotShow (3-5 visual do-nots), colors, productSummary, skuName.
 - Only claimsAllowed, offerText and skuDimensionsCm may be omitted, and only when the text does not
   state them.
-Respond with JSON only, using exactly the schema's key names.`;
+Respond with JSON only, using exactly these key names and shapes (include only the requested keys):
+{"colors":[{"hex":"#111111","name":"Ink","usage":"primary"}],
+ "fonts":[{"role":"headline","family":"Inter"},{"role":"body","family":"Inter"}],
+ "ctaOptions":[{"text":"Shop the Note"}],
+ "offerText":"",
+ "claimsAllowed":["..."], "claimsForbidden":["..."],
+ "toneGuidelines":"2-3 sentences",
+ "doNotShow":["..."], "skuName":"...", "skuDimensionsCm":{"height":0,"width":0,"depth":0},
+ "productSummary":"one paragraph"}`;
 
 // emptyFieldKeys() names fields by their UI key; the model answers in the
 // schema's key names, so ask for those.
