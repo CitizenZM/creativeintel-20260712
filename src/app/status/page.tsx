@@ -50,7 +50,7 @@ function stamp(d: Date | null) {
 }
 
 export default async function StatusPage() {
-  const [recentJobs, lastAdTask, lastFetchTask, queued, failedTasks, freshRows, recentFailedRows] = await Promise.all([
+  const [recentJobs, lastAdTask, lastFetchTask, queued, failedTasks, freshRows, recentFailedRows, beatRows] = await Promise.all([
     prisma.researchJob.findMany({
       where: { status: "complete" },
       orderBy: { createdAt: "desc" },
@@ -78,6 +78,12 @@ export default async function StatusPage() {
     prisma.$queryRaw<{ failed: bigint }[]>`
       SELECT count(*) AS failed FROM "WorkerTask"
       WHERE kind = 'ad_library_fetch' AND status = 'failed' AND "completedAt" > now() - interval '6 hours'
+    `,
+    // The worker records a heartbeat on every poll, so this is true liveness —
+    // an idle worker with an empty queue still shows as online.
+    prisma.$queryRaw<{ last: Date | null; online: boolean | null }[]>`
+      SELECT max("lastSeenAt") AS last, max("lastSeenAt") > now() - interval '3 minutes' AS online
+      FROM "WorkerHeartbeat"
     `,
   ]);
   const recentFailed = Number(recentFailedRows[0]?.failed ?? 0);
@@ -116,7 +122,9 @@ export default async function StatusPage() {
   const workerSeen = [lastAdTask?.completedAt ?? null, lastFetchTask?.completedAt ?? null]
     .filter(Boolean)
     .sort((a, b) => (b as Date).getTime() - (a as Date).getTime())[0] as Date | null;
-  const workerFresh = Number(freshRows?.[0]?.fresh ?? 0) > 0;
+  const workerOnline = !!beatRows?.[0]?.online;
+  const lastPolled = beatRows?.[0]?.last ?? null;
+  const workerFresh = workerOnline || Number(freshRows?.[0]?.fresh ?? 0) > 0;
 
   const env = [
     ["OPENAI_API_KEY", !!process.env.OPENAI_API_KEY, "Primary LLM + image model"],
@@ -137,10 +145,12 @@ export default async function StatusPage() {
           <div className="rounded-lg border border-border divide-y divide-border text-sm">
             <div className="flex items-center justify-between gap-3 px-3 py-2.5">
               <span className="flex items-center gap-2">
-                <Dot ok={workerFresh} warn={!!workerSeen} />
+                <Dot ok={workerOnline} warn={!workerOnline && (workerFresh || !!lastPolled)} />
                 Research worker (ego-browser on the operator&apos;s Mac)
               </span>
-              <span className="text-xs text-muted-foreground">last completed a task {stamp(workerSeen)}</span>
+              <span className="text-xs text-muted-foreground">
+                {workerOnline ? "online" : `last polled ${stamp(lastPolled)}`} · last completed a task {stamp(workerSeen)}
+              </span>
             </div>
             <div className="flex items-center justify-between gap-3 px-3 py-2.5">
               <span className="flex items-center gap-2">
@@ -159,9 +169,9 @@ export default async function StatusPage() {
               <span className="text-xs text-muted-foreground">{storage.provider}</span>
             </div>
           </div>
-          {!workerFresh && (
+          {!workerOnline && (
             <p className="text-[11px] text-muted-foreground">
-              No worker activity in the last 6 hours. Ad-library sources stay pending until it runs —
+              The worker is not polling right now. Ad-library sources stay pending and blocked pages are skipped until it runs —
               start it with <code className="font-mono">launchctl load ~/Library/LaunchAgents/com.creativeintel.research-worker.plist</code>.
             </p>
           )}
