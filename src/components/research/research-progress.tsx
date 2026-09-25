@@ -253,7 +253,13 @@ export function ResearchProgress({ projectId }: { projectId: string }) {
         <div className="min-w-0">
           <p className="text-sm font-semibold flex items-center gap-2">
             {running && <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--status-ai-fg)]" />}
-            {running ? "Researching competitors and ads" : status === "error" ? "Research failed" : "Research complete"}
+            {running
+              ? "Researching competitors and ads"
+              : status === "error"
+                ? "Research failed"
+                : pendingWorker.length
+                  ? "Research partly complete"
+                  : "Research complete"}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {running

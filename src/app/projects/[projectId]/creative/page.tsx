@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { NARRATIVE_TYPE_LABELS } from "@/lib/constants";
 import {
@@ -1188,6 +1189,13 @@ export default function CreativePage() {
                         ))}
                       </div>
                     )}
+                    <Link
+                      href={`/projects/${projectId}/library`}
+                      title="All versions, including archived ones"
+                      className="rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground underline-offset-2 hover:underline"
+                    >
+                      History
+                    </Link>
                     <button
                       type="button"
                       onClick={() => archiveStoryboard(storyboard)}
