@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Check, Circle, CircleDot } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ProjectStages } from "@/services/project-stages";
-import { STAGES_FRESH, STAGES_STALE } from "@/lib/stage-events";
+import { useProjectStages } from "./use-project-stages";
 
 const STAGE_SEGMENTS: Record<string, string[]> = {
   setup: ["overview"],
@@ -19,33 +17,7 @@ const STAGE_SEGMENTS: Record<string, string[]> = {
 
 export function StageRail({ projectId, compact = false }: { projectId: string; compact?: boolean }) {
   const pathname = usePathname();
-  const [data, setData] = useState<ProjectStages | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = () =>
-      fetch(`/api/projects/${projectId}/stages`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (!cancelled && d) setData(d);
-        })
-        .catch(() => {});
-    load();
-    // Poll as a fallback; changes made on the page refresh the rail at once.
-    const t = setInterval(load, 15000);
-    const onFresh = (e: Event) => {
-      const d = (e as CustomEvent<ProjectStages>).detail;
-      if (!cancelled && d?.projectId === projectId) setData(d);
-    };
-    window.addEventListener(STAGES_STALE, load);
-    window.addEventListener(STAGES_FRESH, onFresh);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-      window.removeEventListener(STAGES_STALE, load);
-      window.removeEventListener(STAGES_FRESH, onFresh);
-    };
-  }, [projectId, pathname]);
+  const { data } = useProjectStages(projectId);
 
   const stages = data?.stages ?? [];
 
