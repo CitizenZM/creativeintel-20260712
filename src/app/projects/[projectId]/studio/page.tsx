@@ -165,7 +165,7 @@ export default function StudioPage() {
         />
       )}
 
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div id="runs" className="scroll-mt-28 rounded-xl flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold tracking-tight">Create Studio</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">

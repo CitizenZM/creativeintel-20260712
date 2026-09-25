@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ArrowRight, CircleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ProjectStage, ProjectStages } from "@/services/project-stages";
-import { focusSection, stageForPath, useProjectStages } from "./use-project-stages";
+import type { ProjectStage, ProjectStages, StageCriterion } from "@/services/project-stages";
+import { StepItem } from "@/components/autopilot/step-item";
+import { stageForPath, useProjectStages } from "./use-project-stages";
 
-type Gap = { label: string; href?: string };
+type Gap = StageCriterion;
 
 /**
  * The header's Next Step control.
@@ -64,13 +65,7 @@ export function NextStepButton({ projectId, initial }: { projectId: string; init
     if (dest) router.push(dest.href);
   }
 
-  function goToGap(g: Gap) {
-    if (!g.href) return;
-    const [path, anchor] = g.href.split("#");
-    const onPage = stageForPath(pathname, projectId) === stageForPath(path, projectId);
-    if (onPage && anchor && focusSection(anchor)) return;
-    router.push(g.href);
-  }
+
 
   if (!data && !initial) return null;
   const allDone = stages.length > 0 && stages.every((s) => s.state === "done");
@@ -122,20 +117,11 @@ export function NextStepButton({ projectId, initial }: { projectId: string; init
             </button>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">Complete these to continue:</p>
-          <ul className="mt-2 space-y-1.5">
+          <div className="mt-2 max-h-[60vh] space-y-1.5 overflow-y-auto">
             {gaps.items.map((g) => (
-              <li key={g.label}>
-                <button
-                  type="button"
-                  onClick={() => goToGap(g)}
-                  className="flex w-full items-center justify-between gap-2 rounded-md border border-[color-mix(in_oklab,var(--status-urgent)_45%,transparent)] bg-[color-mix(in_oklab,var(--status-urgent-bg)_60%,transparent)] px-2.5 py-1.5 text-left text-xs text-foreground hover:bg-[var(--status-urgent-bg)]"
-                >
-                  <span>{g.label}</span>
-                  {g.href && <span className="shrink-0 font-medium text-[var(--status-urgent-fg)]">Fix →</span>}
-                </button>
-              </li>
+              <StepItem key={g.id ?? g.label} projectId={projectId} criterion={g} compact />
             ))}
-          </ul>
+          </div>
         </div>
       )}
     </div>

@@ -245,7 +245,9 @@ export default async function ContentPage({
   return (
     <div className="space-y-5">
       <StageGuide projectId={projectId} stage="research" detail="These are the competitor ads we collected. Skim the top performers before writing creative." />
-      <ResearchProgress projectId={projectId} />
+      <div id="research-progress" className="scroll-mt-28 rounded-xl">
+        <ResearchProgress projectId={projectId} />
+      </div>
       <StepFrame projectId={projectId} anchor="competitors">
         <CompetitorManager
           projectId={projectId}
@@ -266,7 +268,7 @@ export default async function ContentPage({
           </Link>
         </p>
       )}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div id="ads" className="scroll-mt-28 rounded-xl flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-base font-semibold tracking-tight">Competitor Ad Intelligence</h2>
           <p className="text-xs text-muted-foreground mt-0.5">

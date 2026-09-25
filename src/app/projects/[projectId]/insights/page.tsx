@@ -239,7 +239,7 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
       />
 
       {/* ── Page header ── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div id="analysis" className="scroll-mt-28 rounded-xl flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-base font-semibold tracking-tight">Creative Insights</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -258,12 +258,14 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
         />
       </div>
 
-      <StylePicker
-        projectId={projectId}
-        goalType={project?.goalType ?? null}
-        categories={styleCategories}
-        initial={pickedStyles}
-      />
+      <div id="styles" className="scroll-mt-28 rounded-xl">
+        <StylePicker
+          projectId={projectId}
+          goalType={project?.goalType ?? null}
+          categories={styleCategories}
+          initial={pickedStyles}
+        />
+      </div>
 
       <CompetitorsSection projectId={projectId} competitors={competitorSummaries} />
 
@@ -564,7 +566,7 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
           BLOCK 7: Selling Points Matrix (with send-to-script)
       ══════════════════════════════════════════════════ */}
 
-      <section className="space-y-3">
+      <section id="picks" className="scroll-mt-28 rounded-xl space-y-3">
         <div className="flex items-center gap-2">
           <Megaphone className="h-4 w-4 text-orange-500" />
           <p className="text-sm font-bold">Selling Points</p>

@@ -9,6 +9,8 @@ export interface StageCriterion {
   met: boolean;
   /** Where to fix it: a page, optionally with the #section that holds the input. */
   href?: string;
+  /** Stable key — the client maps it to the AI action that completes it. */
+  id?: string;
 }
 
 export interface ProjectStage {
@@ -124,16 +126,17 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
   const picked = pickedPoints + pickedPatterns + pickedInsights;
 
   const setupCriteria: StageCriterion[] = [
-    { label: "Define the product (name or product URL)", met: !!(project?.productName || project?.productUrl), href: `${base}/overview#product-definition` },
+    { id: "setup.product", label: "Define the product (name or product URL)", met: !!(project?.productName || project?.productUrl), href: `${base}/overview#product-definition` },
     {
-      label: "Confirm the product details we read from your page",
+      id: "setup.confirmProduct", label: "Confirm the product details we read from your page",
       // Only scraped details need a check; typed-in ones are the user's own.
       met: !project?.productPageTitle || !!project?.productConfirmedAt,
       href: `${base}/overview#product-definition`,
     },
-    { label: "Set the campaign goal", met: !!project?.campaignGoal, href: `${base}/overview#goal-type` },
-    { label: "Choose storytelling, conversion or hybrid ads", met: !!project?.goalType, href: `${base}/overview#goal-type` },
+    { id: "setup.goal", label: "Set the campaign goal", met: !!project?.campaignGoal, href: `${base}/overview#goal-type` },
+    { id: "setup.goalType", label: "Choose storytelling, conversion or hybrid ads", met: !!project?.goalType, href: `${base}/overview#goal-type` },
     {
+      id: "setup.brandKit",
       label: kitReady
         ? "Complete the Brand Kit"
         : `Brand Kit: add ${kitMissing.slice(0, 3).join(", ").toLowerCase()}${kitMissing.length > 3 ? ` +${kitMissing.length - 3} more` : ""}`,
@@ -142,32 +145,33 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
     },
   ];
   const researchCriteria: StageCriterion[] = [
-    { label: "Run competitor research", met: assets > 0, href: `${base}/content` },
-    { label: `Find at least ${MIN_COMPETITORS} competitors (now ${competitors})`, met: competitors >= MIN_COMPETITORS, href: `${base}/content#competitors` },
-    { label: `Collect at least ${MIN_ADS} ads (now ${assets})`, met: assets >= MIN_ADS, href: `${base}/content` },
-    { label: "Collect at least one verified paid ad", met: paidAssets > 0, href: `${base}/content` },
+    { id: "research.run", label: "Run competitor research", met: assets > 0, href: `${base}/content` },
+    { id: "research.competitors", label: `Find at least ${MIN_COMPETITORS} competitors (now ${competitors})`, met: competitors >= MIN_COMPETITORS, href: `${base}/content#competitors` },
+    { id: "research.ads", label: `Collect at least ${MIN_ADS} ads (now ${assets})`, met: assets >= MIN_ADS, href: `${base}/content` },
+    { id: "research.paid", label: "Collect at least one verified paid ad", met: paidAssets > 0, href: `${base}/content` },
   ];
   const insightsCriteria: StageCriterion[] = [
-    { label: "Analyse what competitors run (ad teardowns)", met: teardowns > 0, href: `${base}/insights` },
+    { id: "insights.analyze", label: "Analyse what competitors run (ad teardowns)", met: teardowns > 0, href: `${base}/insights` },
     {
+      id: "insights.style",
       label: "Pick at least one ad style",
       met:
         Array.isArray(project?.campaignSelection?.styleCategories) &&
         (project.campaignSelection.styleCategories as unknown[]).length > 0,
       href: `${base}/insights`,
     },
-    { label: "Send at least one insight, selling point or pattern to scripts", met: picked > 0, href: `${base}/insights` },
+    { id: "insights.picks", label: "Send at least one insight, selling point or pattern to scripts", met: picked > 0, href: `${base}/insights` },
   ];
   const creativeCriteria: StageCriterion[] = [
-    { label: "Write scripts", met: scripts > 0, href: `${base}/creative` },
-    { label: "Select the scripts to produce", met: selectedScripts.length > 0, href: `${base}/creative` },
-    { label: "Approve every frame of a selected script's storyboard", met: approvedBoards > 0, href: `${base}/creative` },
+    { id: "creative.scripts", label: "Write scripts", met: scripts > 0, href: `${base}/creative` },
+    { id: "creative.select", label: "Select the scripts to produce", met: selectedScripts.length > 0, href: `${base}/creative` },
+    { id: "creative.approve", label: "Approve every frame of a selected script's storyboard", met: approvedBoards > 0, href: `${base}/creative` },
   ];
   const studioCriteria: StageCriterion[] = [
-    { label: "Compile a production run", met: runs.length > 0, href: `${base}/studio` },
-    { label: "Finish rendering a run", met: completedRuns > 0, href: `${base}/studio` },
+    { id: "studio.compile", label: "Compile a production run", met: runs.length > 0, href: `${base}/studio` },
+    { id: "studio.render", label: "Finish rendering a run", met: completedRuns > 0, href: `${base}/studio` },
   ];
-  const deliverCriteria: StageCriterion[] = [{ label: "Render a master video", met: delivered > 0, href: `${base}/deliver` }];
+  const deliverCriteria: StageCriterion[] = [{ id: "deliver.master", label: "Render a master video", met: delivered > 0, href: `${base}/deliver` }];
 
   const stages: ProjectStage[] = [
     {

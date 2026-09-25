@@ -891,7 +891,7 @@ export default function CreativePage() {
       </section>
 
       {/* STEP 2: Templates → Scripts */}
-      <section className="space-y-3 pt-4 border-t border-border">
+      <section id="scripts" className="scroll-mt-28 rounded-xl space-y-3 pt-4 border-t border-border">
         <h3 className="text-sm font-semibold tracking-tight flex items-center gap-2">
           <FileText className="h-4 w-4" /> 2. Scripts
         </h3>
@@ -1099,7 +1099,7 @@ export default function CreativePage() {
 
       {/* STEP 3: Storyboards */}
       {storyboards.length > 0 && (
-        <section className="space-y-4 pt-4 border-t border-border">
+        <section id="storyboards" className="scroll-mt-28 rounded-xl space-y-4 pt-4 border-t border-border">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <h3 className="text-sm font-semibold tracking-tight flex items-center gap-2">
