@@ -147,6 +147,8 @@ model IdempotencyKey {
 }
 
 model Project {
+  // Review state for setup fields (product, campaign) — see src/lib/field-status.ts.
+  fieldStatus Json?
   id        String        @id @default(cuid())
   name      String
   status    ProjectStatus @default(DRAFT)
@@ -637,6 +639,9 @@ model BrandKit {
   productSummary  String? @db.Text // one-paragraph canonical description for prompts
 
   completenessScore Int          @default(0)
+  // Per-field review state: "suggested" (pre-filled by AI, not yet checked) or
+  // "confirmed". Absent = the user's own value. See src/lib/field-status.ts.
+  fieldStatus       Json?
   assets            BrandAsset[]
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt

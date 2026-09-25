@@ -202,9 +202,33 @@
     50% { opacity: 1; transform: scale(1.01); }
   }
 
+  /* Next Step feedback: a press-and-go when it moves on, a shake when blocked. */
+  .next-step-go { animation: next-step-go 0.6s ease-out; }
+  .next-step-shake { animation: next-step-shake 0.5s ease-in-out; }
+  @keyframes next-step-go {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-healthy) 55%, transparent); }
+    35% { transform: scale(0.94); }
+    100% { transform: scale(1); box-shadow: 0 0 0 14px transparent; }
+  }
+  @keyframes next-step-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+  }
+
+  /* The section a "Fix →" link jumps to flashes so the eye lands on it. */
+  .step-flash { animation: step-flash 2.4s ease-out; }
+  @keyframes step-flash {
+    0%, 30% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--status-urgent) 55%, transparent); }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+
   /* Motion is decoration here; the ring alone still points at the control. */
   @media (prefers-reduced-motion: reduce) {
     .cta-attention { animation: none; }
     .cta-attention::after { animation: none; opacity: 1; }
+    .next-step-go, .next-step-shake, .step-flash { animation: none; }
   }
 }

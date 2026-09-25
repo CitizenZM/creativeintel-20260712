@@ -75,7 +75,7 @@ const SOURCE_STATUS_LABEL: Record<SourceStatus["status"], string> = {
   skipped_no_key: "skipped — no key",
   failed: "failed",
   pending_worker: "pending local worker",
-  blocked: "blocked — login/CAPTCHA",
+  blocked: "not connected",
 };
 
 function StepIcon({ status, small }: { status: JobStep["status"]; small?: boolean }) {

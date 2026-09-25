@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { markStagesStale } from "@/lib/stage-events";
 import { useRouter } from "next/navigation";
 import { Pin, EyeOff, Eye, X, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,7 +38,10 @@ export function AdCurationButtons({
     }).catch(() => null);
     setBusy(false);
     if (!res?.ok) setState(prev);
-    else router.refresh();
+    else {
+      router.refresh();
+      markStagesStale();
+    }
   }
 
   const btn = "inline-flex items-center gap-1 rounded bg-background/90 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-medium disabled:opacity-60";
@@ -100,6 +104,7 @@ export function CompetitorManager({ projectId, competitors }: { projectId: strin
     if (!res?.ok) return setMessage("Couldn't save that change — try again.");
     setMessage(excluded ? `${c.name} removed — its ads are hidden and no longer analysed.` : `${c.name} restored.`);
     router.refresh();
+    markStagesStale();
   }
 
   async function add(e: React.FormEvent) {
@@ -119,6 +124,7 @@ export function CompetitorManager({ projectId, competitors }: { projectId: strin
     setName("");
     setUrl("");
     router.refresh();
+    markStagesStale();
   }
 
   return (

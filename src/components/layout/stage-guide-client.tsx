@@ -1,23 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { ProjectStage, ProjectStages } from "@/services/project-stages";
-import { NextStepHint } from "./next-step-hint";
-import { StageChecklist } from "./stage-checklist";
-import { shareFreshStages } from "@/lib/stage-events";
-
-const STEP_NUMBER: Record<ProjectStage["id"], number> = {
-  setup: 1,
-  research: 2,
-  insights: 3,
-  creative: 4,
-  studio: 5,
-  deliver: 6,
-};
+import { useEffect, useRef } from "react";
+import type { ProjectStage } from "@/services/project-stages";
+import { markStagesStale } from "@/lib/stage-events";
+import { StagePanel } from "./step-frame";
 
 /**
- * StageGuide for client-rendered pages (Creative, Studio). Re-reads the stages
- * whenever `refreshKey` changes so the checklist ticks as the user works.
+ * StageGuide for client-rendered pages (Creative, Studio): a change in
+ * `refreshKey` (new scripts, approvals…) re-reads the stages everywhere.
  */
 export function StageGuideClient({
   projectId,
@@ -30,29 +20,13 @@ export function StageGuideClient({
   detail?: string;
   refreshKey?: unknown;
 }) {
-  const [stages, setStages] = useState<ProjectStages | null>(null);
-
+  const first = useRef(true);
   useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/projects/${projectId}/stages`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled && data) {
-          setStages(data);
-          shareFreshStages(data);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, refreshKey]);
-
-  if (!stages?.next || stages.next.id !== stage) return null;
-  return (
-    <div>
-      <NextStepHint step={`Step ${STEP_NUMBER[stage]}`} title={stages.next.action} detail={detail} />
-      <StageChecklist criteria={stages.next.criteria} />
-    </div>
-  );
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    markStagesStale();
+  }, [refreshKey]);
+  return <StagePanel projectId={projectId} stage={stage} detail={detail} />;
 }

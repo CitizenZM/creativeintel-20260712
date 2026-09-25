@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { StepFrame } from "@/components/layout/step-frame";
 import { StageGuide } from "@/components/layout/stage-guide";
 import { NARRATIVE_TYPE_LABELS, DATA_SOURCE_LABELS } from "@/lib/constants";
 import { OverviewCharts } from "@/components/dashboard/overview-charts";
@@ -99,17 +100,24 @@ export default async function OverviewPage({
         />
       </div>
 
-      <GoalTypeSetting projectId={projectId} initial={isGoalType(project.goalType) ? project.goalType : null} />
+      <StepFrame projectId={projectId} anchor="goal-type">
+        <GoalTypeSetting
+        projectId={projectId}
+        initial={isGoalType(project.goalType) ? project.goalType : null}
+        initialCampaignGoal={project.campaignGoal}
+        initialFieldStatus={project.fieldStatus}
+      />
+      </StepFrame>
 
       {/* Product Definition — user-controlled source of truth */}
-      <section className="space-y-3">
+      <StepFrame projectId={projectId} anchor="product-definition">
         <div className="flex items-center gap-2">
           <Package className="h-4 w-4" />
           <h2 className="text-sm font-semibold">Product Definition</h2>
           <span className="text-xs text-muted-foreground">The exact product this campaign is about — set the URL or upload photos</span>
         </div>
         <ProductDefinition projectId={projectId} />
-      </section>
+      </StepFrame>
 
       {/* Product Intelligence — AI verification and environments */}
       <section className="space-y-3">
@@ -122,7 +130,7 @@ export default async function OverviewPage({
       </section>
 
       {/* Brand Kit — approved logo, colours, CTAs, claims and SKU truth */}
-      <section className="space-y-3">
+      <StepFrame projectId={projectId} anchor="brand-kit">
         <div className="flex items-center gap-2">
           <Palette className="h-4 w-4" />
           <h2 className="text-sm font-semibold">Brand Kit</h2>
@@ -131,31 +139,11 @@ export default async function OverviewPage({
           </span>
         </div>
 
-        <div
-          className={`rounded-xl border px-4 py-2.5 flex items-center gap-3 ${
-            brandKit.ready.creative ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"
-          }`}
-        >
-          {brandKit.ready.creative ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-          ) : (
-            <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
-          )}
-          <p className={`text-xs font-semibold ${brandKit.ready.creative ? "text-emerald-800" : "text-amber-800"}`}>
-            Brand kit {brandKit.score}% complete
-          </p>
-          <p className="text-[11px] text-muted-foreground truncate">
-            {brandKit.missing.length > 0
-              ? `Still missing: ${brandKit.missing.join(" · ")}`
-              : "Creative and studio generation are unblocked"}
-          </p>
-        </div>
-
         <BrandKitPanel projectId={projectId} />
-      </section>
+      </StepFrame>
 
       {/* Campaign Selection — user confirms context before script generation */}
-      <section className="space-y-3">
+      <StepFrame projectId={projectId} anchor="campaign">
         <div className="flex items-center gap-2">
           <Target className="h-4 w-4" />
           <h2 className="text-sm font-semibold">Campaign Context Selection</h2>
@@ -170,7 +158,7 @@ export default async function OverviewPage({
           sellingPoints={sellingPoints.map(sp => ({ id: sp.id, point: sp.point, category: sp.category, strength: sp.strength || 0 }))}
           deepTimeline={(deepAnalysis?.videoTimeline as {recommendedDurationSec:number;platform:string;segments:Array<{segment:string;startSec:number;endSec:number;label:string;description:string;cameraNote?:string;voiceover?:string;purpose?:string}>;rationale?:string}) || null}
         />
-      </section>
+      </StepFrame>
 
       {/* Hero metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
