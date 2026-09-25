@@ -704,6 +704,9 @@ model LibtvRun {
   canvasUuid       String?
   canvasUrl        String?
   canvasName       String?
+  // Who renders it: "libtv" (local Mac worker, LibTV credits) or "glm"
+  // (server-side Zhipu CogView/CogVideoX Flash — free). Picked by the models.
+  executor         String    @default("libtv")
   imageModel       String    @default("Seedream 4.0")
   videoModel       String    @default("Hailuo 2.3 Fast")
   aspectRatio      String    @default("9:16")

@@ -17,6 +17,7 @@
  * can poll it individually.
  */
 import { NextResponse } from "next/server";
+import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
 import { prisma } from "@/lib/db";
 import { pMap } from "@/lib/parallel";
 import {
@@ -41,6 +42,9 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  if (isStrictFree()) {
+    return NextResponse.json({ error: new PaidFeatureDisabledError("fal / Veo video generation").message }, { status: 402 });
+  }
   try {
     return await handlePost(request, params);
   } catch (err) {

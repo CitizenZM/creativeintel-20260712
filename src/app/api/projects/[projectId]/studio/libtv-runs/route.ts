@@ -4,6 +4,7 @@
  *        the Studio pickers render.
  */
 import { NextResponse } from "next/server";
+import { isStrictFree } from "@/lib/cost-mode";
 import {
   compileRunFromStoryboard,
   LibtvCompileError,
@@ -26,7 +27,7 @@ export async function GET(
   ]);
   return NextResponse.json({
     runs,
-    models: modelOptions(),
+    models: modelOptions(isStrictFree()),
     brandKit: completeness,
     limits: { maxRunCredits: maxRunCredits(), defaultBudgetMode: DEFAULT_BUDGET_MODE },
   });

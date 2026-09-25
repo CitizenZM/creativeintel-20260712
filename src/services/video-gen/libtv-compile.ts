@@ -36,7 +36,11 @@ import {
   videoCredits,
   videoSettings,
   type BudgetMode,
+  GLM_IMAGE_MODEL,
+  GLM_VIDEO_MODEL,
+  engineFor,
 } from "./libtv-pricing";
+import { isStrictFree } from "@/lib/cost-mode";
 
 export const PRODUCT_LOCK_CLAUSE =
   "product stays exactly the same size, shape and label throughout — it must not grow, warp or re-letter";
@@ -257,10 +261,12 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
   const {
     projectId,
     storyboardId,
-    imageModel = DEFAULT_IMAGE_MODEL,
-    videoModel = DEFAULT_VIDEO_MODEL,
+    // Strict free mode defaults to (and only renders with) the free GLM models.
+    imageModel = isStrictFree() ? GLM_IMAGE_MODEL : DEFAULT_IMAGE_MODEL,
+    videoModel = isStrictFree() ? GLM_VIDEO_MODEL : DEFAULT_VIDEO_MODEL,
     aspectRatio = "9:16",
   } = input;
+  const executor = engineFor(videoModel);
   const budgetMode: BudgetMode = isBudgetMode(input.budgetMode) ? input.budgetMode : DEFAULT_BUDGET_MODE;
 
   const [project, storyboard, kit] = await Promise.all([
@@ -450,6 +456,7 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
       scriptId: input.scriptId ?? storyboard.scriptId ?? null,
       storyboardId,
       status: "awaiting_approval",
+      executor,
       canvasUuid: project.libtvCanvasUuid ?? null,
       canvasUrl: project.libtvCanvasUuid ? canvasUrlFor(project.libtvCanvasUuid) : null,
       canvasName,

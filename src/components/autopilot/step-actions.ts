@@ -308,6 +308,39 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
       throw new Error("No storyboard to compile — finish the Creative step first.");
     },
   },
+  "studio.render": {
+    label: "Render for free",
+    explain: "Free GLM runs render on the server at 0 credits. Runs that spend LibTV credits still wait for your approval.",
+    auto: true,
+    run: async (projectId, onProgress) => {
+      type Run = { id: string; status: string; creditsEstimated: number; executor?: string; error?: string | null; jobs?: { status: string }[] };
+      const { runs } = await api<{ runs: Run[] }>(`/api/projects/${projectId}/studio/libtv-runs`);
+      const active = runs.find((r) => ["approved", "claimed", "running", "assembling"].includes(r.status));
+      let target = active;
+      if (!target) {
+        const pending = runs.find((r) => r.status === "awaiting_approval");
+        if (!pending) throw new Error("No compiled run yet — compile one first.");
+        if (pending.executor !== "glm" || pending.creditsEstimated > 0) {
+          throw new Error(`This run spends ${pending.creditsEstimated} LibTV credits — approve it yourself in Studio.`);
+        }
+        await api(`/api/projects/${projectId}/studio/libtv-runs/${pending.id}/approve`, { json: {} });
+        target = pending;
+      }
+      for (;;) {
+        await wait(10_000);
+        const { run } = await api<{ run: Run }>(`/api/projects/${projectId}/studio/libtv-runs/${target.id}`);
+        const jobs = run.jobs ?? [];
+        const done = jobs.filter((j) => j.status === "completed" || j.status === "skipped").length;
+        onProgress({
+          percent: jobs.length ? Math.round((done / jobs.length) * 95) : null,
+          etaSeconds: null,
+          message: run.status === "assembling" ? "Assembling the master video" : `Rendering with GLM (free) — ${done}/${jobs.length} steps`,
+        });
+        if (run.status === "completed") return "Rendered the master video for free — it's in Deliver.";
+        if (run.status === "failed" || run.status === "cancelled") throw new Error(run.error || `Render ${run.status}`);
+      }
+    },
+  },
 };
 
 /** The one step the user must do by hand, with where to do it. */
@@ -315,7 +348,7 @@ export const MANUAL_HINTS: Record<string, string> = {
   "setup.product": "Enter the product name or paste the product page URL.",
   "setup.confirmProduct": "Check the product details we read from your page, then click Confirm.",
   "creative.approve": "Open the storyboard and approve each frame (✓), or use “Approve all frames”.",
-  "studio.render": "Approve the compiled run — rendering spends LibTV credits and runs on the local LibTV worker.",
+  "studio.render": "Free GLM runs render automatically. A LibTV run spends credits — approve it in Studio.",
   "deliver.master": "Appears here once a studio run finishes rendering.",
 };
 

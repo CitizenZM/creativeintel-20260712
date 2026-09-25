@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pollAllActiveJobs } from "@/services/video-gen/poll";
+import { advanceActiveGlmRuns } from "@/services/video-gen/glm-executor";
 
 export const maxDuration = 60;
 
@@ -24,5 +25,7 @@ export async function GET(request: Request) {
   }
 
   const summary = await pollAllActiveJobs();
-  return NextResponse.json(summary);
+  // Also advance free GLM Studio runs (they render on the server, not the Mac).
+  const glmRuns = await advanceActiveGlmRuns(40_000).catch(() => 0);
+  return NextResponse.json({ ...summary, glmRuns });
 }
