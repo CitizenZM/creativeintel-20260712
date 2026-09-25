@@ -89,61 +89,30 @@ node worker.mjs
 
 ## launchd (keep it running)
 
-Write `~/Library/LaunchAgents/com.creativeintel.research-worker.plist`:
+`run.sh` reads `WORKER_TOKEN` from the login Keychain, so the secret never sits
+in the plist or the repo. Store it once:
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.creativeintel.research-worker</string>
-
-  <key>ProgramArguments</key>
-  <array>
-    <string>/opt/homebrew/bin/node</string>
-    <string>/Users/xiaozuo/Projects/creativeintel-20260712/workers/research-worker/worker.mjs</string>
-  </array>
-
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>APP_URL</key>
-    <string>https://creativeintel.vercel.app</string>
-    <key>WORKER_TOKEN</key>
-    <string>REPLACE_WITH_THE_APP_WORKER_TOKEN</string>
-    <key>POLL_INTERVAL_MS</key>
-    <string>30000</string>
-    <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-  </dict>
-
-  <key>WorkingDirectory</key>
-  <string>/Users/xiaozuo/Projects/creativeintel-20260712/workers/research-worker</string>
-
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-
-  <key>StandardOutPath</key>
-  <string>/tmp/creativeintel-research-worker.log</string>
-  <key>StandardErrorPath</key>
-  <string>/tmp/creativeintel-research-worker.err.log</string>
-</dict>
-</plist>
+```bash
+security add-generic-password -a creativeintel -s creativeintel-worker-token -w '<token>' -U
 ```
 
-Then:
+Then point `~/Library/LaunchAgents/com.creativeintel.research-worker.plist` at
+`/bin/bash <repo>/workers/research-worker/run.sh` (with `RunAtLoad`, `KeepAlive`,
+`APP_URL=https://creativeintel.vercel.app`, and a `PATH` that includes
+`~/.local/bin` for ego-browser) and load it:
 
 ```bash
 launchctl load  ~/Library/LaunchAgents/com.creativeintel.research-worker.plist
-launchctl start com.creativeintel.research-worker
 tail -f /tmp/creativeintel-research-worker.log
 
 # to stop
 launchctl unload ~/Library/LaunchAgents/com.creativeintel.research-worker.plist
 ```
+
+Use `https://creativeintel.vercel.app`, not `creative.xark.io`: Cloudflare Access
+sits in front of the custom domain and would redirect the worker to a login page.
+The app's middleware lets `/api/worker/*` through on the Vercel domain, where the
+worker authenticates with its token.
 
 `PATH` must include the directory holding `ego-browser` — launchd does not read
 your shell profile.
