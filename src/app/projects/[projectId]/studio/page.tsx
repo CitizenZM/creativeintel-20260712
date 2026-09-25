@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { StoryboardTimeline } from "@/components/studio/storyboard-timeline";
 import { LibtvRunPanel } from "@/components/studio/libtv-run-panel";
 import { NextStepHint } from "@/components/layout/next-step-hint";
+import { StageGuideClient } from "@/components/layout/stage-guide-client";
 import type {
   BrandKitReadiness,
   BudgetMode,
@@ -147,6 +148,7 @@ export default function StudioPage() {
 
   return (
     <div className="space-y-6">
+      <StageGuideClient projectId={projectId} stage="studio" refreshKey={activeRun?.status} />
       {storyboards.length > 0 && (
         <NextStepHint
           step="Step 5"

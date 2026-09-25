@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { getBrandKitCompleteness } from "@/services/brand-kit";
 
 export type StageState = "done" | "partial" | "todo";
 
@@ -111,7 +112,12 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
     return frames.length > 0 && frames.every((f) => f.approved === true);
   }).length;
 
-  const brandKitScore = kit?.completenessScore ?? 0;
+  // Setup needs every Brand Kit item scripts are held to; SKU dimensions only
+  // matter for Studio, so they don't block Setup.
+  const kitCheck = await getBrandKitCompleteness(projectId).catch(() => null);
+  const kitReady = !!kitCheck?.ready.creative;
+  const kitMissing = (kitCheck?.missing ?? []).filter((m) => !/SKU dimensions/i.test(m));
+  const brandKitScore = kitCheck?.score ?? kit?.completenessScore ?? 0;
   const base = `/projects/${projectId}`;
   const completedRuns = runs.filter((r) => r.status === "completed").length;
   const delivered = runs.filter((r) => !!r.masterMp4Url).length;
@@ -127,7 +133,13 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
     },
     { label: "Set the campaign goal", met: !!project?.campaignGoal, href: `${base}/overview#goal-type` },
     { label: "Choose storytelling, conversion or hybrid ads", met: !!project?.goalType, href: `${base}/overview#goal-type` },
-    { label: `Complete the Brand Kit to 60% (now ${brandKitScore}%)`, met: brandKitScore >= 60, href: `${base}/overview#brand-kit` },
+    {
+      label: kitReady
+        ? "Complete the Brand Kit"
+        : `Brand Kit: add ${kitMissing.slice(0, 3).join(", ").toLowerCase()}${kitMissing.length > 3 ? ` +${kitMissing.length - 3} more` : ""}`,
+      met: kitReady,
+      href: `${base}/overview#brand-kit`,
+    },
   ];
   const researchCriteria: StageCriterion[] = [
     { label: "Run competitor research", met: assets > 0, href: `${base}/content` },
