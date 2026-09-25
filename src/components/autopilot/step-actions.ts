@@ -227,20 +227,31 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
   },
   "insights.picks": {
     label: "Pick the strongest",
-    explain: "Scripts are built from the selling points and patterns you send. The AI sends the strongest ones.",
+    explain: "Scripts are built from the selling points and patterns you send. The AI finds them and sends the strongest ones.",
     auto: true,
-    run: async (projectId) => {
-      const data = await api<{
-        sellingPoints: { id: string; dismissed?: boolean; selected?: boolean }[];
-        patterns: { id: string; dismissed?: boolean; selected?: boolean }[];
-      }>(`/api/projects/${projectId}/insights`);
+    run: async (projectId, onProgress) => {
+      type Row = { id: string; dismissed?: boolean };
+      type InsightsData = { sellingPoints: Row[]; patterns: Row[]; insights: { general: Row[] } };
+      const load = () => api<InsightsData>(`/api/projects/${projectId}/insights`);
+      let data = await load();
+      // Selling points and patterns come from the full analysis; run it first
+      // when research's quick pass didn't produce them.
+      if (!data.sellingPoints.length && !data.patterns.length) {
+        await runJob(projectId, "analysis", `/api/projects/${projectId}/insights/reanalyze`, { force: true }, onProgress, "Finding selling points and patterns");
+        data = await load();
+      }
       const sp = data.sellingPoints.filter((x) => !x.dismissed).slice(0, 3).map((x) => x.id);
       const pt = data.patterns.filter((x) => !x.dismissed).slice(0, 2).map((x) => x.id);
-      if (!sp.length && !pt.length) throw new Error("No selling points or patterns yet — run the analysis first.");
       const url = `/api/projects/${projectId}/insights/selection`;
       if (sp.length) await api(url, { method: "PATCH", json: { kind: "sellingPoint", ids: sp, selected: true } });
       if (pt.length) await api(url, { method: "PATCH", json: { kind: "pattern", ids: pt, selected: true } });
-      return `Sent ${sp.length} selling point(s) and ${pt.length} pattern(s) to scripts — untick any you disagree with.`;
+      if (sp.length || pt.length) {
+        return `Sent ${sp.length} selling point(s) and ${pt.length} pattern(s) to scripts — untick any you disagree with.`;
+      }
+      const ins = data.insights.general.slice(0, 2).map((x) => x.id);
+      if (!ins.length) throw new Error("The analysis found nothing to send yet — add a selling point by hand below.");
+      await api(url, { method: "PATCH", json: { kind: "insight", ids: ins, selected: true } });
+      return `Sent the ${ins.length} strongest insight(s) to scripts — change them below.`;
     },
   },
   "creative.scripts": {
