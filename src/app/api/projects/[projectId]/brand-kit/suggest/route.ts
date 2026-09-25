@@ -42,7 +42,28 @@ empty. Rules:
 - offerText should be left out unless the supplied text clearly shows a current promotion/discount.
 - Colours: 3-5 plausible brand hex values with a short name and usage (primary/secondary/accent/
   background/text).
-Respond with JSON only, matching the given schema. Omit any field you have no basis for.`;
+- Judgment calls ALWAYS get a best guess when requested — the user reviews every suggestion:
+  ctaOptions (2-3 short CTAs), toneGuidelines (2-3 sentences), fonts (headline + body families that
+  fit the brand's look), doNotShow (3-5 visual do-nots), colors, productSummary, skuName.
+- Only claimsAllowed, offerText and skuDimensionsCm may be omitted, and only when the text does not
+  state them.
+Respond with JSON only, using exactly the schema's key names.`;
+
+// emptyFieldKeys() names fields by their UI key; the model answers in the
+// schema's key names, so ask for those.
+const SCHEMA_KEY: Record<string, string> = {
+  colors: "colors",
+  fonts: "fonts",
+  cta: "ctaOptions",
+  offer: "offerText",
+  claimsAllowed: "claimsAllowed",
+  claimsForbidden: "claimsForbidden",
+  tone: "toneGuidelines",
+  doNotShow: "doNotShow",
+  skuName: "skuName",
+  skuDimensions: "skuDimensionsCm",
+  productSummary: "productSummary",
+};
 
 export async function POST(
   _req: Request,
@@ -108,9 +129,11 @@ export async function POST(
     try {
       const ai = await analyzeWithClaude({
         systemPrompt: SYSTEM_PROMPT,
-        userPrompt: `Fields still needed: ${empty.join(", ") || "(none)"}\n\nContext:\n${context}`,
+        userPrompt: `Fields still needed (schema keys): ${
+          empty.map((k) => SCHEMA_KEY[k]).filter(Boolean).join(", ") || "(none)"
+        }\n\nContext:\n${context}`,
         responseSchema: suggestResponseSchema,
-        tier: "fast",
+        tier: "standard",
         maxTokens: 2000,
       });
       const merged = mergeSuggestions(empty, ai, { landingUrl: fallbackLandingUrl });

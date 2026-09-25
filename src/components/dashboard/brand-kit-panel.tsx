@@ -598,7 +598,9 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
               ? completeness?.ready.studio
                 ? "Brand kit complete — creative and studio unlocked"
                 : "Brand kit ready for creative — add SKU dimensions for studio"
-              : "Brand kit incomplete — AI will have to guess"}
+              : score >= 60
+                ? "Enough to continue — fill the items below so the AI doesn't have to guess them"
+                : "Brand kit incomplete — AI will have to guess"}
           </p>
           {completeness && completeness.missing.length > 0 && (
             <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
