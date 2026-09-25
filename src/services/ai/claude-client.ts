@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 import { jsonrepair } from "jsonrepair";
 import { ZodSchema } from "zod";
+import { isStrictFree } from "@/lib/cost-mode";
+import { ZHIPU_BASE_URL, ZHIPU_FREE, zhipuKey } from "./zhipu";
 
 // Route priority: OpenAI → Gemini → Anthropic → OpenRouter. Each provider is
 // tried in order while its key is present and not disabled; the first 401/403
@@ -14,7 +16,7 @@ import { ZodSchema } from "zod";
 // tiers to models, overridable per tier by env. Cheap work stops paying for
 // the big model.
 
-type ProviderName = "openai" | "gemini" | "anthropic" | "openrouter";
+type ProviderName = "openai" | "gemini" | "anthropic" | "openrouter" | "glm";
 export type ModelTier = "fast" | "standard" | "deep";
 
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/";
@@ -32,6 +34,15 @@ let _openai: OpenAI | null = null;
 let _gemini: OpenAI | null = null;
 let _openrouter: OpenAI | null = null;
 let _anthropic: OpenAI | null = null;
+let _glm: OpenAI | null = null;
+
+// Zhipu BigModel — OpenAI-compatible. GLM-4.7-Flash / GLM-4.6V-Flash are free.
+function glmClient(): OpenAI | null {
+  const apiKey = zhipuKey();
+  if (_disabledProviders.has("glm") || !apiKey) return null;
+  if (!_glm) _glm = new OpenAI({ apiKey, baseURL: ZHIPU_BASE_URL });
+  return _glm;
+}
 
 function anthropicClient(): OpenAI | null {
   if (_disabledProviders.has("anthropic") || !process.env.ANTHROPIC_API_KEY) return null;
@@ -75,19 +86,22 @@ function clientFor(provider: ProviderName): OpenAI | null {
   if (provider === "openai") return openaiClient();
   if (provider === "gemini") return geminiClient();
   if (provider === "anthropic") return anthropicClient();
+  if (provider === "glm") return glmClient();
   return openrouterClient();
 }
 
 function forcedProvider(): ProviderName | null {
   const v = process.env.AI_PROVIDER;
-  return v === "openai" || v === "gemini" || v === "anthropic" || v === "openrouter" ? v : null;
+  return v === "openai" || v === "gemini" || v === "anthropic" || v === "openrouter" || v === "glm" ? v : null;
 }
 
 /** Ordered list of providers to try. AI_PROVIDER, if set, forces a single entry. */
 function providerOrder(): ProviderName[] {
+  // Strict free mode: Zhipu's free models only — never fall through to a paid provider.
+  if (isStrictFree()) return ["glm"];
   const forced = forcedProvider();
   if (forced) return [forced];
-  return ["openai", "gemini", "anthropic", "openrouter"];
+  return ["openai", "gemini", "anthropic", "openrouter", "glm"];
 }
 
 /** Best-guess active provider for label/vision-model resolution. Never throws. */
@@ -138,6 +152,12 @@ function modelFor(provider: ProviderName, tier: ModelTier = "standard"): string 
     if (tier === "deep") return env.ANTHROPIC_MODEL_DEEP || "claude-opus-5-5";
     return env.ANTHROPIC_MODEL || "claude-sonnet-5";
   }
+  if (provider === "glm") {
+    const standard = env.AI_GLM_MODEL || ZHIPU_FREE.text;
+    if (tier === "fast") return env.AI_GLM_MODEL_FAST || standard;
+    if (tier === "deep") return env.AI_GLM_MODEL_DEEP || standard;
+    return standard;
+  }
   // openrouter
   if (process.env.AI_FALLBACK_MODEL) return process.env.AI_FALLBACK_MODEL;
   if (process.env.AI_MODEL) return toOpenRouterModel(process.env.AI_MODEL);
@@ -159,6 +179,7 @@ export function getVisionModel(): string {
   if (provider === "gemini") {
     return process.env.AI_GEMINI_VISION_MODEL || process.env.AI_GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
   }
+  if (provider === "glm") return process.env.AI_GLM_VISION_MODEL || ZHIPU_FREE.vision;
   if (process.env.AI_VISION_MODEL) return process.env.AI_VISION_MODEL;
   if (provider === "anthropic") return process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
   if (provider === "openrouter") return "openai/gpt-4o";
@@ -302,12 +323,16 @@ async function createOnRoute(
 ) {
   const effectiveMaxTokens = provider === "gemini" ? Math.min(maxTokens, GEMINI_MAX_TOKENS) : maxTokens;
   const preparedMessages = await prepareMessagesForRoute(messages, provider);
+  // GLM-4.7-Flash is a hybrid reasoning model; these calls want the JSON
+  // answer, not a thinking trace, so switch thinking off.
+  const extra = provider === "glm" ? ({ thinking: { type: "disabled" } } as Record<string, unknown>) : {};
   try {
     return await client.chat.completions.create({
       model: modelToUse,
       max_tokens: effectiveMaxTokens,
       messages: preparedMessages,
       response_format: { type: "json_object" },
+      ...extra,
     });
   } catch (err) {
     if (isAuthError(err)) throw err;
@@ -316,6 +341,7 @@ async function createOnRoute(
       model: modelToUse,
       max_tokens: effectiveMaxTokens,
       messages: preparedMessages,
+      ...extra,
     });
   }
 }

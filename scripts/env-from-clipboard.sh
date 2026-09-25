@@ -5,12 +5,13 @@
 #
 #   bash scripts/env-from-clipboard.sh OPENAI_API_KEY sk-
 #   bash scripts/env-from-clipboard.sh META_ACCESS_TOKEN EAA
+#   bash scripts/env-from-clipboard.sh ZHIPU_API_KEY ""        # no fixed prefix
 set -euo pipefail
 name="${1:?usage: env-from-clipboard.sh NAME PREFIX}"
-prefix="${2:?usage: env-from-clipboard.sh NAME PREFIX}"
+prefix="${2-}"
 cd "$(dirname "$0")/.."
 
-matches() { [[ "$1" == "$prefix"* ]] && [[ "$1" =~ ^[A-Za-z0-9_.|-]+$ ]]; }
+matches() { [[ "$1" == "$prefix"* ]] && [[ ${#1} -ge 20 ]] && [[ "$1" =~ ^[A-Za-z0-9_.|-]+$ ]]; }
 
 # Wait for the secret to be copied, so nothing can overwrite the clipboard
 # between copying and running this.

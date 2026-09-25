@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import OpenAI from "openai";
+import { isStrictFree } from "@/lib/cost-mode";
+import { generateImagePersisted, isZhipuConfigured } from "@/services/ai/zhipu";
 
 export const maxDuration = 300;
 
@@ -32,7 +34,8 @@ export async function POST(
 
   try {
     // OpenAI client — used only if key is present and valid
-    const openai = process.env.OPENAI_API_KEY
+    const free = isStrictFree();
+    const openai = !free && process.env.OPENAI_API_KEY
       ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
       : null;
 
@@ -57,6 +60,11 @@ export async function POST(
           } catch (openaiErr) {
             console.warn(`Keyframe ${i}: OpenAI failed, using Pollinations:`, openaiErr instanceof Error ? openaiErr.message : openaiErr);
           }
+        }
+
+        // Free mode: Zhipu CogView-3-Flash first.
+        if (!imageUrl && free && isZhipuConfigured()) {
+          imageUrl = await generateImagePersisted(fullPrompt, { aspectRatio: "1:1", folder: "keyframes" }).catch(() => null);
         }
 
         // Fallback: Pollinations.ai (free, no key)

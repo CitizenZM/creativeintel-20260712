@@ -17,8 +17,12 @@ export interface LibtvVideoPrice {
   credits: number;
 }
 
+/** Which executor renders a model: LibTV (credits) or Zhipu GLM (free, server-side). */
+export type RenderEngine = "libtv" | "glm";
+
 export interface LibtvImageModel {
   name: string;
+  engine?: RenderEngine;
   modality: "image";
   modeType: string;
   creditsPerImage: number;
@@ -32,6 +36,7 @@ export interface LibtvImageModel {
 
 export interface LibtvVideoModel {
   name: string;
+  engine?: RenderEngine;
   modality: "video";
   modeType: string;
   prices: LibtvVideoPrice[];
@@ -80,6 +85,19 @@ export const IMAGE_MODELS: LibtvImageModel[] = [
     settingsKeys: ["modeType", "ratio", "resolution", "quality"],
     verified: false,
     note: "~2x Seedream. Prone to false-positive content-rule rejections.",
+  },
+  {
+    name: "GLM CogView-3-Flash",
+    engine: "glm",
+    modality: "image",
+    modeType: "text2image",
+    creditsPerImage: 0,
+    quality: "1344px",
+    qualityKey: "quality",
+    ratios: ["9:16", "16:9", "1:1", "3:4", "4:3"],
+    settingsKeys: ["modeType", "ratio"],
+    verified: false,
+    note: "Zhipu free model, rendered on the server — 0 credits. Text-only: product-accurate frames come from the packshot.",
   },
 ];
 
@@ -172,10 +190,30 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     settingsKeys: ["modeType", "duration", "resolution"],
     verified: false,
   },
+  {
+    name: "GLM CogVideoX-Flash",
+    engine: "glm",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [{ durationSec: 5, resolution: "1080P", credits: 0 }],
+    defaultDurationSec: 5,
+    defaultResolution: "1080P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: false,
+    note: "Zhipu free image-to-video, rendered on the server — 0 credits, watermarked.",
+  },
 ];
 
 export const DEFAULT_IMAGE_MODEL = "Seedream 4.0";
 export const DEFAULT_VIDEO_MODEL = "Hailuo 2.3 Fast";
+
+export const GLM_IMAGE_MODEL = "GLM CogView-3-Flash";
+export const GLM_VIDEO_MODEL = "GLM CogVideoX-Flash";
+
+/** The engine a run needs: GLM only when its video model is a GLM model. */
+export function engineFor(videoModel: string): RenderEngine {
+  return findVideoModel(videoModel)?.engine ?? "libtv";
+}
 
 export function findImageModel(name: string): LibtvImageModel | null {
   return IMAGE_MODELS.find((m) => m.name === name) ?? null;
@@ -407,9 +445,12 @@ export interface ModelOption {
   durations?: number[];
 }
 
-export function modelOptions(): { image: ModelOption[]; video: ModelOption[] } {
+export function modelOptions(freeOnly = false): { image: ModelOption[]; video: ModelOption[] } {
+  // Strict free mode offers only the zero-credit GLM engine.
+  const images = freeOnly ? IMAGE_MODELS.filter((m) => m.engine === "glm") : IMAGE_MODELS;
+  const videos = freeOnly ? VIDEO_MODELS.filter((m) => m.engine === "glm") : VIDEO_MODELS;
   return {
-    image: IMAGE_MODELS.map((m) => ({
+    image: images.map((m) => ({
       name: m.name,
       modality: "image" as const,
       credits: m.creditsPerImage,
@@ -417,7 +458,7 @@ export function modelOptions(): { image: ModelOption[]; video: ModelOption[] } {
       verified: m.verified,
       note: m.note,
     })),
-    video: VIDEO_MODELS.map((m) => {
+    video: videos.map((m) => {
       const price = resolveVideoPrice(m, m.defaultDurationSec, m.defaultResolution);
       return {
         name: m.name,

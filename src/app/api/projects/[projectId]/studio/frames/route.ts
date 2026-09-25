@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import OpenAI from "openai";
+import { isStrictFree } from "@/lib/cost-mode";
+import { generateImagePersisted, isZhipuConfigured } from "@/services/ai/zhipu";
 
 export const maxDuration = 30;
 
@@ -32,8 +34,18 @@ async function acquireFalSlot(): Promise<() => void> {
  * 3. Pollinations — last resort, rate-limited
  */
 async function generateFrameImage(prompt: string, aspectRatio: "landscape_16_9" | "square" = "landscape_16_9"): Promise<string> {
-  const openaiKey = process.env.OPENAI_API_KEY;
-  const falKey = process.env.FAL_KEY;
+  // Strict free mode: Zhipu CogView-3-Flash (free), then Pollinations (free) —
+  // never gpt-image or fal.
+  const free = isStrictFree();
+  if (free && isZhipuConfigured()) {
+    try {
+      return await generateImagePersisted(prompt, { aspectRatio: aspectRatio === "square" ? "1:1" : "16:9", folder: "frames" });
+    } catch (err) {
+      console.warn("CogView-3-Flash failed, falling back to Pollinations:", err instanceof Error ? err.message : err);
+    }
+  }
+  const openaiKey = free ? undefined : process.env.OPENAI_API_KEY;
+  const falKey = free ? undefined : process.env.FAL_KEY;
 
   // ── Option 1: OpenAI GPT Image (gpt-image-1 = GPT Image 2 in the API) ──
   if (openaiKey) {

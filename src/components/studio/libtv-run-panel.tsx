@@ -94,6 +94,15 @@ export function LibtvRunPanel({
 
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // The server may offer a different model list (strict free mode offers only
+  // the GLM engine) — never compile with a model that isn't on offer.
+  if (models.image.length && !models.image.some((m) => m.name === imageModel)) setImageModel(models.image[0].name);
+  if (models.video.length && !models.video.some((m) => m.name === videoModel)) {
+    setVideoModel(models.video[0].name);
+    const d = models.video[0].durations?.[0];
+    if (d) setClipDurationSec(d);
+  }
+
   const videoOption = useMemo(
     () => models.video.find((m) => m.name === videoModel) ?? models.video[0],
     [models.video, videoModel]

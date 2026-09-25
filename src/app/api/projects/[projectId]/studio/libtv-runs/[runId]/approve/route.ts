@@ -3,11 +3,15 @@
  * is studio-ready — packshots and SKU dimensions are what keep the product from
  * drifting, so an unready kit is a 409, not a warning.
  */
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { approveRun, getRunWithJobs } from "@/services/video-gen/libtv-queue";
+import { driveGlmRun } from "@/services/video-gen/glm-executor";
+import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
 import { getBrandKitCompleteness } from "@/services/brand-kit";
 
 export const dynamic = "force-dynamic";
+// GLM runs render on the server right after approval.
+export const maxDuration = 300;
 
 export async function POST(
   request: Request,
@@ -19,6 +23,14 @@ export async function POST(
   const existing = await getRunWithJobs(runId);
   if (!existing || existing.projectId !== projectId) {
     return NextResponse.json({ error: "Run not found" }, { status: 404 });
+  }
+
+  // LibTV spends credits; strict free mode only renders with the free GLM engine.
+  if (isStrictFree() && existing.executor !== "glm") {
+    return NextResponse.json(
+      { error: new PaidFeatureDisabledError("Rendering on LibTV").message + " Compile the run with the GLM models instead." },
+      { status: 402 }
+    );
   }
 
   const completeness = await getBrandKitCompleteness(projectId);
@@ -51,6 +63,9 @@ export async function POST(
       { status: 409 }
     );
   }
+
+  // Free GLM runs start rendering immediately on the server.
+  if (run.executor === "glm") after(() => driveGlmRun(runId, 280_000).then(() => undefined));
 
   return NextResponse.json({ run });
 }

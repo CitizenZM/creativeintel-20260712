@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
 import { prisma } from "@/lib/db";
 import { getVideoModel, VIDEO_MODELS } from "@/services/video-gen/models";
 
@@ -8,6 +9,9 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  if (isStrictFree()) {
+    return NextResponse.json({ error: new PaidFeatureDisabledError("fal / Veo video generation").message }, { status: 402 });
+  }
   const { projectId } = await params;
   const body = await request.json().catch(() => ({}));
   const {
