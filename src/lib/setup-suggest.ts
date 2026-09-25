@@ -44,11 +44,22 @@ export interface SetupSuggestInput {
 }
 
 /** What the model is asked to produce — every field optional; empty means "no suggestion". */
+// Per-field tolerance: a capitalised enum or an over-long sentence must not
+// discard the other suggestions.
+const lowerEnum = <T extends readonly [string, ...string[]]>(values: T) =>
+  z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() : v), z.enum(values)).nullable().optional().catch(null);
+const shortText = z
+  .string()
+  .transform((v) => v.trim().slice(0, 280))
+  .nullable()
+  .optional()
+  .catch(null);
+
 export const AISuggestionSchema = z.object({
-  campaignGoal: z.string().trim().max(280).optional().nullable(),
-  goalType: z.enum(GOAL_TYPES).optional().nullable(),
-  platform: z.enum(["tiktok", "instagram", "youtube", "tvc", "amazon"]).optional().nullable(),
-  targetAudience: z.string().trim().max(280).optional().nullable(),
+  campaignGoal: shortText,
+  goalType: lowerEnum(GOAL_TYPES),
+  platform: lowerEnum(["tiktok", "instagram", "youtube", "tvc", "amazon"] as const),
+  targetAudience: shortText,
 });
 export type AISuggestion = z.infer<typeof AISuggestionSchema>;
 

@@ -104,31 +104,36 @@ export function buildSuggestSources(
   return lines.join("\n\n");
 }
 
+// Each field is parsed on its own and a malformed one becomes undefined — one
+// bad font entry must not throw away the CTAs, tone and everything else.
+const lenient = <T extends z.ZodTypeAny>(schema: T) => schema.optional().catch(undefined);
+const namedList = <T extends z.ZodTypeAny>(item: T, max: number) =>
+  lenient(
+    z
+      .array(z.unknown())
+      .transform((xs) => xs.map((x) => item.safeParse(x)).filter((r) => r.success).map((r) => r.data as z.infer<T>))
+      .transform((xs) => xs.slice(0, max))
+  );
+
 export const suggestResponseSchema = z.object({
-  colors: z
-    .array(z.object({ hex: z.string(), name: z.string().optional(), usage: z.string().optional() }))
-    .max(5)
-    .optional(),
-  fonts: z
-    .array(z.object({ role: z.string().optional(), family: z.string(), source: z.string().optional() }))
-    .max(4)
-    .optional(),
-  ctaOptions: z.array(z.object({ text: z.string() })).max(3).optional(),
-  offerText: z.string().optional(),
-  claimsAllowed: z.array(z.string()).max(10).optional(),
-  claimsForbidden: z.array(z.string()).max(10).optional(),
-  toneGuidelines: z.string().optional(),
-  doNotShow: z.array(z.string()).max(10).optional(),
-  skuName: z.string().optional(),
-  skuDimensionsCm: z
-    .object({
+  colors: namedList(z.object({ hex: z.string(), name: z.string().optional(), usage: z.string().optional() }), 5),
+  fonts: namedList(z.object({ role: z.string().optional(), family: z.string().min(1), source: z.string().optional() }), 4),
+  ctaOptions: namedList(z.object({ text: z.string().min(1) }), 3),
+  offerText: lenient(z.string()),
+  claimsAllowed: namedList(z.string().min(1), 10),
+  claimsForbidden: namedList(z.string().min(1), 10),
+  toneGuidelines: lenient(z.string()),
+  doNotShow: namedList(z.string().min(1), 10),
+  skuName: lenient(z.string()),
+  skuDimensionsCm: lenient(
+    z.object({
       height: z.number().optional(),
       width: z.number().optional(),
       depth: z.number().optional(),
       weightG: z.number().optional(),
     })
-    .optional(),
-  productSummary: z.string().optional(),
+  ),
+  productSummary: lenient(z.string()),
 });
 
 export type SuggestResponse = z.infer<typeof suggestResponseSchema>;

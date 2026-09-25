@@ -202,3 +202,21 @@ describe("extractLogoUrlFromHtml", () => {
     expect(extractLogoUrlFromHtml("<head></head>", "https://brand.com")).toBeNull();
   });
 });
+
+describe("suggestResponseSchema", () => {
+  it("drops only the malformed items and keeps every other field", async () => {
+    const { suggestResponseSchema } = await import("./brand-kit-suggest");
+    const parsed = suggestResponseSchema.parse({
+      fonts: [{ role: "headline" }, { role: "body", family: "Inter" }],
+      ctaOptions: [{ text: "Shop Plaud" }, { nope: 1 }],
+      toneGuidelines: "Calm, precise, confident.",
+      skuDimensionsCm: "unknown",
+      colors: "not a list",
+    });
+    expect(parsed.fonts).toEqual([{ role: "body", family: "Inter" }]);
+    expect(parsed.ctaOptions).toEqual([{ text: "Shop Plaud" }]);
+    expect(parsed.toneGuidelines).toBe("Calm, precise, confident.");
+    expect(parsed.skuDimensionsCm).toBeUndefined();
+    expect(parsed.colors).toBeUndefined();
+  });
+});
