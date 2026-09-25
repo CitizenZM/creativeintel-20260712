@@ -20,6 +20,7 @@ export const STEP_ANCHOR: Record<string, string> = {
   "setup.brandKit": "brand-kit",
   "research.run": "research-progress",
   "research.competitors": "competitors",
+  "research.coverage": "competitors",
   "research.ads": "ads",
   "research.paid": "ads",
   "insights.analyze": "analysis",

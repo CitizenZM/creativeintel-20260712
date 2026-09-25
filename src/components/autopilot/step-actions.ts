@@ -174,6 +174,15 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
     auto: true,
     run: researchWithMoreCompetitors,
   },
+  "research.coverage": {
+    label: "Research them",
+    explain: "Competitors added since the last run haven't been searched yet. Re-running research collects their ads.",
+    auto: true,
+    run: async (projectId, onProgress) => {
+      await runResearch(projectId, onProgress);
+      return "Researched every competitor — their ads are below.";
+    },
+  },
   "research.ads": {
     label: "Find more ads",
     explain: "Adds two more competitors and researches their ads to reach at least 10.",
