@@ -6,6 +6,8 @@ export type StageState = "done" | "partial" | "todo";
 export interface StageCriterion {
   label: string;
   met: boolean;
+  /** Where to fix it: a page, optionally with the #section that holds the input. */
+  href?: string;
 }
 
 export interface ProjectStage {
@@ -116,42 +118,44 @@ export async function getProjectStages(projectId: string): Promise<ProjectStages
   const picked = pickedPoints + pickedPatterns + pickedInsights;
 
   const setupCriteria: StageCriterion[] = [
-    { label: "Define the product (name or product URL)", met: !!(project?.productName || project?.productUrl) },
+    { label: "Define the product (name or product URL)", met: !!(project?.productName || project?.productUrl), href: `${base}/overview#product-definition` },
     {
       label: "Confirm the product details we read from your page",
       // Only scraped details need a check; typed-in ones are the user's own.
       met: !project?.productPageTitle || !!project?.productConfirmedAt,
+      href: `${base}/overview#product-definition`,
     },
-    { label: "Set the campaign goal", met: !!project?.campaignGoal },
-    { label: "Choose storytelling, conversion or hybrid ads", met: !!project?.goalType },
-    { label: `Complete the Brand Kit to 60% (now ${brandKitScore}%)`, met: brandKitScore >= 60 },
+    { label: "Set the campaign goal", met: !!project?.campaignGoal, href: `${base}/overview#goal-type` },
+    { label: "Choose storytelling, conversion or hybrid ads", met: !!project?.goalType, href: `${base}/overview#goal-type` },
+    { label: `Complete the Brand Kit to 60% (now ${brandKitScore}%)`, met: brandKitScore >= 60, href: `${base}/overview#brand-kit` },
   ];
   const researchCriteria: StageCriterion[] = [
-    { label: "Run competitor research", met: assets > 0 },
-    { label: `Find at least ${MIN_COMPETITORS} competitors (now ${competitors})`, met: competitors >= MIN_COMPETITORS },
-    { label: `Collect at least ${MIN_ADS} ads (now ${assets})`, met: assets >= MIN_ADS },
-    { label: "Collect at least one verified paid ad", met: paidAssets > 0 },
+    { label: "Run competitor research", met: assets > 0, href: `${base}/content` },
+    { label: `Find at least ${MIN_COMPETITORS} competitors (now ${competitors})`, met: competitors >= MIN_COMPETITORS, href: `${base}/content#competitors` },
+    { label: `Collect at least ${MIN_ADS} ads (now ${assets})`, met: assets >= MIN_ADS, href: `${base}/content` },
+    { label: "Collect at least one verified paid ad", met: paidAssets > 0, href: `${base}/content` },
   ];
   const insightsCriteria: StageCriterion[] = [
-    { label: "Analyse what competitors run (ad teardowns)", met: teardowns > 0 },
+    { label: "Analyse what competitors run (ad teardowns)", met: teardowns > 0, href: `${base}/insights` },
     {
       label: "Pick at least one ad style",
       met:
         Array.isArray(project?.campaignSelection?.styleCategories) &&
         (project.campaignSelection.styleCategories as unknown[]).length > 0,
+      href: `${base}/insights`,
     },
-    { label: "Send at least one insight, selling point or pattern to scripts", met: picked > 0 },
+    { label: "Send at least one insight, selling point or pattern to scripts", met: picked > 0, href: `${base}/insights` },
   ];
   const creativeCriteria: StageCriterion[] = [
-    { label: "Write scripts", met: scripts > 0 },
-    { label: "Select the scripts to produce", met: selectedScripts.length > 0 },
-    { label: "Approve every frame of a selected script's storyboard", met: approvedBoards > 0 },
+    { label: "Write scripts", met: scripts > 0, href: `${base}/creative` },
+    { label: "Select the scripts to produce", met: selectedScripts.length > 0, href: `${base}/creative` },
+    { label: "Approve every frame of a selected script's storyboard", met: approvedBoards > 0, href: `${base}/creative` },
   ];
   const studioCriteria: StageCriterion[] = [
-    { label: "Compile a production run", met: runs.length > 0 },
-    { label: "Finish rendering a run", met: completedRuns > 0 },
+    { label: "Compile a production run", met: runs.length > 0, href: `${base}/studio` },
+    { label: "Finish rendering a run", met: completedRuns > 0, href: `${base}/studio` },
   ];
-  const deliverCriteria: StageCriterion[] = [{ label: "Render a master video", met: delivered > 0 }];
+  const deliverCriteria: StageCriterion[] = [{ label: "Render a master video", met: delivered > 0, href: `${base}/deliver` }];
 
   const stages: ProjectStage[] = [
     {

@@ -8,6 +8,9 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { FieldLegend } from "@/components/ui/field-shell";
+import { fieldStatus, readStatusMap, FIELD_LABEL, FIELD_TEXT, type FieldStatus, type FieldStatusMap } from "@/lib/field-status";
+import { markStagesStale } from "@/lib/stage-events";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,6 +71,8 @@ interface CampaignSelectionData {
   platform?: string | null;
   confirmed?: boolean;
   confirmedAt?: string | null;
+  /** Project.fieldStatus, echoed back by GET — keys for this section are prefixed "campaign.". */
+  fieldStatus?: unknown;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -123,22 +128,38 @@ function SelectionCard({
 }
 
 function SectionHeader({
-  icon: Icon, title, subtitle, complete,
+  icon: Icon, title, subtitle, complete, status, onConfirm, confirming,
 }: {
   icon: React.ComponentType<{ className?: string }>; title: string; subtitle: string; complete?: boolean;
+  status?: FieldStatus; onConfirm?: () => void; confirming?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-3 mb-3">
+    <div className="flex items-center gap-3 mb-3 flex-1">
       <div className={cn(
         "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
         complete ? "bg-emerald-100" : "bg-muted"
       )}>
         <Icon className={cn("h-4 w-4", complete ? "text-emerald-600" : "text-muted-foreground")} />
       </div>
-      <div>
-        <p className="text-sm font-semibold flex items-center gap-2">
+      <div className="flex-1">
+        <p className="text-sm font-semibold flex items-center gap-2 flex-wrap">
           {title}
           {complete && <span className="text-[10px] text-emerald-600 font-normal">Selected ✓</span>}
+          {status && (
+            <span className={cn("inline-flex items-center gap-1 text-[10px] font-medium ml-auto", FIELD_TEXT[status])}>
+              {FIELD_LABEL[status]}
+            </span>
+          )}
+          {status === "suggested" && onConfirm && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onConfirm(); }}
+              disabled={confirming}
+              className="rounded border border-[var(--status-healthy)] bg-background px-1.5 py-0.5 text-[10px] font-medium text-[var(--status-healthy-fg)] hover:bg-[var(--status-healthy-bg)] disabled:opacity-50"
+            >
+              {confirming ? "Saving…" : "Confirm"}
+            </button>
+          )}
         </p>
         <p className="text-xs text-muted-foreground">{subtitle}</p>
       </div>
@@ -251,6 +272,8 @@ export function CampaignSelection({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [confirmingField, setConfirmingField] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<string | null>("platform");
 
   // Local timeline state (can be customized from deep analysis default)
@@ -268,10 +291,70 @@ export function CampaignSelection({
         if (data.totalDurationSec) setTotalDuration(data.totalDurationSec);
         if (data.selectedSellingPoints) setSelectedSPs(data.selectedSellingPoints.map(s => s.point));
         if (data.videoTimeline) setCustomTimeline(data.videoTimeline);
+
+        // Auto-suggest once per project when platform is still empty (guarded
+        // server-side by fieldStatus.__suggestedAt so this only fires once).
+        const statusMap = (data.fieldStatus as Record<string, unknown>) || {};
+        const alreadySuggested = "__suggestedAt" in statusMap;
+        if (!alreadySuggested && !data.platform) {
+          void runSuggest();
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  async function runSuggest() {
+    setSuggesting(true);
+    try {
+      await fetch(`/api/projects/${projectId}/setup-suggest`, { method: "POST" });
+      const refreshed: CampaignSelectionData = await fetch(`/api/projects/${projectId}/campaign-selection`).then(r => r.json());
+      setSel(refreshed);
+      if (refreshed.platform) setPlatform(refreshed.platform);
+      markStagesStale();
+    } catch {
+      // Non-fatal — the section still works with red/green states only.
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  async function confirmField(field: string) {
+    setConfirmingField(field);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirmField", field }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setSel(prev => ({ ...prev, fieldStatus: updated.fieldStatus }));
+        markStagesStale();
+      }
+    } finally {
+      setConfirmingField(null);
+    }
+  }
+
+  async function confirmAllSuggestions() {
+    setConfirmingField("__all__");
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirmAllSuggestions" }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setSel(prev => ({ ...prev, fieldStatus: updated.fieldStatus }));
+        markStagesStale();
+      }
+    } finally {
+      setConfirmingField(null);
+    }
+  }
 
   // Seed timeline from deep analysis if no custom one set. This mirrors the
   // `deepTimeline` prop into local state, so it's derived during render
@@ -298,6 +381,7 @@ export function CampaignSelection({
       });
       const updated = await res.json();
       setSel(updated);
+      markStagesStale();
     } finally {
       setSaving(false);
     }
@@ -324,6 +408,16 @@ export function CampaignSelection({
 
   const isComplete = !!(sel.selectedEnvironment && sel.selectedActorRole && selectedSPs.length > 0 && customTimeline.length > 0);
 
+  const campaignMarks: FieldStatusMap = readStatusMap(sel.fieldStatus);
+  const campaignMark = (field: string) => campaignMarks[`campaign.${field}`];
+  const platformStatus = fieldStatus(platform, campaignMark("platform"));
+  const environmentStatus = fieldStatus(sel.selectedEnvironment, campaignMark("selectedEnvironment"));
+  const actorStatus = fieldStatus(sel.selectedActorRole, campaignMark("selectedActorRole"));
+  const sellingPointsStatus = fieldStatus(selectedSPs.length > 0 ? selectedSPs : null, campaignMark("selectedSellingPoints"));
+  const sectionStatuses = [platformStatus, environmentStatus, actorStatus, sellingPointsStatus];
+  const suggestedCount = sectionStatuses.filter(s => s === "suggested").length;
+  const missingCount = sectionStatuses.filter(s => s === "missing").length;
+
   if (loading) return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
       <Loader2 className="h-4 w-4 animate-spin" /> Loading campaign context…
@@ -332,6 +426,26 @@ export function CampaignSelection({
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <FieldLegend />
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">
+            {missingCount > 0 ? `${missingCount} need your input` : "All fields set"}
+            {suggestedCount > 0 ? ` · ${suggestedCount} suggestion${suggestedCount === 1 ? "" : "s"} to check` : ""}
+          </span>
+          {suggestedCount > 0 && (
+            <Button size="sm" variant="outline" onClick={confirmAllSuggestions} disabled={confirmingField === "__all__"} className="h-7 text-xs gap-1.5">
+              {confirmingField === "__all__" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+              Confirm all suggestions
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={runSuggest} disabled={suggesting} className="h-7 text-xs gap-1.5">
+            {suggesting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+            Suggest answers
+          </Button>
+        </div>
+      </div>
+
       {/* Status bar */}
       <div className={cn(
         "rounded-xl border px-4 py-3 flex items-center justify-between gap-4 flex-wrap",
@@ -377,7 +491,12 @@ export function CampaignSelection({
           className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors"
           onClick={() => toggleSection("platform")}
         >
-          <SectionHeader icon={Film} title="Platform & Duration" subtitle="Where will this ad run and how long?" complete={!!platform} />
+          <SectionHeader
+            icon={Film} title="Platform & Duration" subtitle="Where will this ad run and how long?" complete={!!platform}
+            status={platformStatus}
+            onConfirm={platformStatus === "suggested" ? () => confirmField("campaign.platform") : undefined}
+            confirming={confirmingField === "campaign.platform"}
+          />
           {expandedSection === "platform" ? <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
         </button>
         {expandedSection === "platform" && (
@@ -428,7 +547,12 @@ export function CampaignSelection({
           className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors"
           onClick={() => toggleSection("env")}
         >
-          <SectionHeader icon={MapPin} title="Shooting Environment" subtitle="Where does the ad take place?" complete={!!sel.selectedEnvironment} />
+          <SectionHeader
+            icon={MapPin} title="Shooting Environment" subtitle="Where does the ad take place?" complete={!!sel.selectedEnvironment}
+            status={environmentStatus}
+            onConfirm={environmentStatus === "suggested" ? () => confirmField("campaign.selectedEnvironment") : undefined}
+            confirming={confirmingField === "campaign.selectedEnvironment"}
+          />
           {expandedSection === "env" ? <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
         </button>
         {expandedSection === "env" && (
@@ -473,7 +597,12 @@ export function CampaignSelection({
           className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors"
           onClick={() => toggleSection("actor")}
         >
-          <SectionHeader icon={Users} title="Actor Role & Persona" subtitle="Who appears in the ad?" complete={!!sel.selectedActorRole} />
+          <SectionHeader
+            icon={Users} title="Actor Role & Persona" subtitle="Who appears in the ad?" complete={!!sel.selectedActorRole}
+            status={actorStatus}
+            onConfirm={actorStatus === "suggested" ? () => confirmField("campaign.selectedActorRole") : undefined}
+            confirming={confirmingField === "campaign.selectedActorRole"}
+          />
           {expandedSection === "actor" ? <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
         </button>
         {expandedSection === "actor" && (
@@ -529,7 +658,12 @@ export function CampaignSelection({
           className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors"
           onClick={() => toggleSection("sp")}
         >
-          <SectionHeader icon={Target} title="Selling Points Priority" subtitle="Which benefits should the ad focus on?" complete={selectedSPs.length > 0} />
+          <SectionHeader
+            icon={Target} title="Selling Points Priority" subtitle="Which benefits should the ad focus on?" complete={selectedSPs.length > 0}
+            status={sellingPointsStatus}
+            onConfirm={sellingPointsStatus === "suggested" ? () => confirmField("campaign.selectedSellingPoints") : undefined}
+            confirming={confirmingField === "campaign.selectedSellingPoints"}
+          />
           {expandedSection === "sp" ? <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
         </button>
         {expandedSection === "sp" && (

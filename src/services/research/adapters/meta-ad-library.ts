@@ -100,12 +100,14 @@ export const metaAdLibraryAdapter: Adapter = async (
       },
     };
   } catch (err) {
-    const { note } = describeMetaError(err);
+    const { note, accessTier } = describeMetaError(err);
     return {
       candidates: [],
       report: {
         name: NAME,
-        status: err instanceof SkippedNoCredentialsError ? "skipped_no_key" : "failed",
+        // "Not connected yet" (no key, or Meta withholding access) is a known
+        // state shown as blocked, not an error.
+        status: err instanceof SkippedNoCredentialsError ? "skipped_no_key" : accessTier ? "blocked" : "failed",
         count: 0,
         note,
       },

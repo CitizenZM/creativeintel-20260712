@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { isGoalType } from "@/lib/style-categories";
+import { readStatusMap } from "@/lib/field-status";
 
 export async function GET(
   _request: Request,
@@ -32,12 +33,44 @@ export async function GET(
   return NextResponse.json(project);
 }
 
+/** Fields whose review state is tracked in Project.fieldStatus (see src/lib/field-status.ts). */
+const TRACKED_FIELDS = ["campaignGoal", "goalType"] as const;
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
   const body = await request.json().catch(() => ({}));
+
+  // "Confirm all suggestions" — clears every "suggested" mark on this project
+  // to "confirmed" without changing any value. Setup page calls this.
+  if (body && typeof body === "object" && body.action === "confirmAllSuggestions") {
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { fieldStatus: true } });
+    if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    const status = readStatusMap(project.fieldStatus);
+    const nextStatus = Object.fromEntries(
+      Object.entries(status).map(([k, v]) => [k, v === "suggested" ? "confirmed" : v])
+    );
+    const updated = await prisma.project.update({
+      where: { id: projectId },
+      data: { fieldStatus: nextStatus as never },
+    });
+    return NextResponse.json(updated);
+  }
+
+  // Confirm one suggested field without changing its value (FieldShell's Confirm button).
+  if (body && typeof body === "object" && body.action === "confirmField" && typeof body.field === "string") {
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { fieldStatus: true } });
+    if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    const status = readStatusMap(project.fieldStatus);
+    const updated = await prisma.project.update({
+      where: { id: projectId },
+      data: { fieldStatus: { ...status, [body.field]: "confirmed" } as never },
+    });
+    return NextResponse.json(updated);
+  }
+
   const allowed = ["brandUrl", "productUrl", "productName", "campaignGoal", "briefingText", "category", "name"];
   const data: Record<string, unknown> = {};
   for (const key of allowed) {
@@ -54,6 +87,18 @@ export async function PATCH(
   if (body && typeof body === "object" && "archived" in body) {
     data.archivedAt = body.archived ? new Date() : null;
   }
+
+  // A field the user explicitly edited here is their own, by definition — clear
+  // any "suggested" mark on it so it reads as confirmed (green).
+  const touchedTracked = TRACKED_FIELDS.filter((f) => f in data);
+  if (touchedTracked.length > 0) {
+    const existing = await prisma.project.findUnique({ where: { id: projectId }, select: { fieldStatus: true } });
+    const status = readStatusMap(existing?.fieldStatus);
+    const nextStatus = { ...status };
+    for (const f of touchedTracked) nextStatus[f] = "confirmed";
+    data.fieldStatus = nextStatus;
+  }
+
   try {
     const project = await prisma.project.update({ where: { id: projectId }, data });
     return NextResponse.json(project);

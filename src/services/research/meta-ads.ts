@@ -282,7 +282,7 @@ export function describeMetaError(err: unknown): { note: string; accessTier: boo
     }
     if (code === 10 || code === 200 || code === 613 || sub === 1870034) {
       return {
-        note: `Meta Ad Library access tier denies this query (code ${code}): ${err.message}. The app/token needs Ad Library API access and identity confirmation.`,
+        note: `Not connected yet — Meta is holding Ad Library API access until the account's identity confirmation (facebook.com/ID) is approved (code ${code}). It connects automatically once approved; Meta ads still come from the local worker meanwhile.`,
         accessTier: true,
       };
     }

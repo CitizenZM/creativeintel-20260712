@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { scrapeProductPageDetailed } from "@/services/research/product-page-scraper";
 import type { ProductPageData, ScrapeOutcome } from "@/services/research/product-page-scraper";
+import { readStatusMap } from "@/lib/field-status";
 
 export const maxDuration = 30;
 
@@ -20,6 +21,7 @@ const PROJECT_SELECT = {
   productPageText: true,
   userProductImages: true,
   productConfirmedAt: true,
+  fieldStatus: true,
 } as const;
 
 function toScrapeResult(outcome: ScrapeOutcome) {
@@ -171,10 +173,16 @@ export async function PATCH(
     return NextResponse.json({ error: "No updatable fields provided" }, { status: 400 });
   }
 
-  // Details typed or edited by a person are confirmed by definition.
+  // Details typed or edited by a person are confirmed by definition — clear
+  // any "suggested" mark on the touched fields too.
+  const existing = await prisma.project.findUnique({ where: { id: projectId }, select: { fieldStatus: true } });
+  const status = readStatusMap(existing?.fieldStatus);
+  const nextStatus = { ...status };
+  for (const key of Object.keys(data)) nextStatus[key] = "confirmed";
+
   const project = await prisma.project.update({
     where: { id: projectId },
-    data: { ...data, productConfirmedAt: new Date() },
+    data: { ...data, productConfirmedAt: new Date(), fieldStatus: nextStatus as never },
     select: PROJECT_SELECT,
   });
 

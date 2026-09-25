@@ -1,22 +1,12 @@
-import { getProjectStages, type ProjectStage } from "@/services/project-stages";
-import { NextStepHint } from "./next-step-hint";
-import { StageChecklist } from "./stage-checklist";
-
-const STEP_NUMBER: Record<ProjectStage["id"], number> = {
-  setup: 1,
-  research: 2,
-  insights: 3,
-  creative: 4,
-  studio: 5,
-  deliver: 6,
-};
+import type { ProjectStage } from "@/services/project-stages";
+import { StagePanel } from "./step-frame";
 
 /**
- * Shows the same next-step banner the header CTA points at, on the page where
- * the work actually happens — but only when this stage is the one to do next,
- * so a finished stage stays quiet.
+ * The stage checklist at the top of a stage page — always shown, red while
+ * anything is left to do and green once the stage is complete. Live: it
+ * refreshes as soon as a save on the page changes a check.
  */
-export async function StageGuide({
+export function StageGuide({
   projectId,
   stage,
   detail,
@@ -25,13 +15,5 @@ export async function StageGuide({
   stage: ProjectStage["id"];
   detail?: string;
 }) {
-  const stages = await getProjectStages(projectId).catch(() => null);
-  if (!stages?.next || stages.next.id !== stage) return null;
-
-  return (
-    <div className="mb-4">
-      <NextStepHint step={`Step ${STEP_NUMBER[stage]}`} title={stages.next.action} detail={detail} />
-      <StageChecklist criteria={stages.next.criteria} />
-    </div>
-  );
+  return <StagePanel projectId={projectId} stage={stage} detail={detail} />;
 }

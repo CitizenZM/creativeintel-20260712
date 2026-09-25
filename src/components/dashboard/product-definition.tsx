@@ -3,11 +3,14 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Loader2, Link, Package, RefreshCw, ExternalLink, Upload,
-  CheckCircle2, AlertCircle, X, Plus, Pencil, Check,
+  CheckCircle2, AlertCircle, X, Plus, Pencil, Check, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { FieldShell, FieldLegend } from "@/components/ui/field-shell";
+import { fieldStatus, readStatusMap } from "@/lib/field-status";
+import { markStagesStale } from "@/lib/stage-events";
 
 interface ProductImage {
   url: string;
@@ -23,6 +26,7 @@ interface ProductDefinitionData {
   productPageText: string | null;
   userProductImages: ProductImage[] | null;
   productConfirmedAt?: string | null;
+  fieldStatus?: unknown;
 }
 
 interface AdapterAttempt {
@@ -66,6 +70,8 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
   const [previewAdapter, setPreviewAdapter] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [confirmingField, setConfirmingField] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -75,10 +81,69 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
         setData(d);
         setUrlDraft(d.productUrl || "");
         setNameDraft(d.productName || "");
+
+        // Auto-suggest once per project when fields are still empty (guarded
+        // server-side by fieldStatus.__suggestedAt so this only fires once).
+        const status = readStatusMap(d.fieldStatus);
+        const alreadySuggested = "__suggestedAt" in ((d.fieldStatus as Record<string, unknown>) || {});
+        const hasEmptyField = !d.productUrl && !d.productName && !d.userProductImages?.length;
+        if (!alreadySuggested && hasEmptyField) {
+          void runSuggest();
+        }
+        void status;
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  async function runSuggest() {
+    setSuggesting(true);
+    try {
+      await fetch(`/api/projects/${projectId}/setup-suggest`, { method: "POST" });
+      markStagesStale();
+    } catch {
+      // Non-fatal — the section still works with red/green states only.
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  async function confirmField(field: string) {
+    setConfirmingField(field);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirmField", field }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setData(prev => (prev ? { ...prev, fieldStatus: updated.fieldStatus } : prev));
+        markStagesStale();
+      }
+    } finally {
+      setConfirmingField(null);
+    }
+  }
+
+  async function confirmAllSuggestions() {
+    setConfirmingField("__all__");
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirmAllSuggestions" }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setData(prev => (prev ? { ...prev, fieldStatus: updated.fieldStatus } : prev));
+        markStagesStale();
+      }
+    } finally {
+      setConfirmingField(null);
+    }
+  }
 
   /** Step 1 — scrape without writing so the user can confirm what was found. */
   async function scrapeUrl(url: string) {
@@ -130,6 +195,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
       setPreview(null);
       setEditingUrl(false);
       setAttempts([]);
+      markStagesStale();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save product definition");
     } finally {
@@ -138,13 +204,15 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
   }
 
   async function saveName() {
-    await fetch(`/api/projects/${projectId}/product`, {
+    const res = await fetch(`/api/projects/${projectId}/product`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ productName: nameDraft }),
     });
-    setData(prev => prev ? { ...prev, productName: nameDraft } : prev);
+    const updated = await res.json().catch(() => null);
+    setData(prev => (prev ? { ...prev, productName: nameDraft, fieldStatus: updated?.fieldStatus ?? prev.fieldStatus } : prev));
     setEditingName(false);
+    markStagesStale();
   }
 
   /** Uploads go to the Brand Kit asset store (kind PACKSHOT), not base64 into Postgres. */
@@ -181,6 +249,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
         throw new Error(payload.error || "Failed to attach uploaded images");
       }
       setData(prev => prev ? { ...prev, userProductImages: merged } : prev);
+      markStagesStale();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -201,6 +270,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
       return;
     }
     setData(prev => prev ? { ...prev, userProductImages: updated } : prev);
+    markStagesStale();
   }
 
   if (loading) return (
@@ -222,14 +292,47 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
     }).catch(() => null);
     if (!res?.ok) return setError("Couldn't save the confirmation — try again.");
     setData(await res.json());
+    markStagesStale();
   }
   const allImages = [
     ...(data?.productPageImages || []).slice(0, 4),
     ...(data?.userProductImages || []).slice(0, 4),
   ];
 
+  const marks = readStatusMap(data?.fieldStatus);
+  // Product page details are scraped, not typed — their status follows the
+  // confirm flow (productConfirmedAt) rather than a per-field mark.
+  const urlStatus = fieldStatus(data?.productUrl, marks.productUrl);
+  const nameStatus = data?.productPageTitle
+    ? (data.productConfirmedAt ? "confirmed" : "suggested")
+    : fieldStatus(data?.productName, marks.productName);
+  const imagesStatus = fieldStatus(allImages.length > 0 ? allImages : null, undefined);
+  const fieldStatuses = [urlStatus, nameStatus, imagesStatus];
+  const suggestedCount = fieldStatuses.filter(s => s === "suggested").length;
+  const missingCount = fieldStatuses.filter(s => s === "missing").length;
+
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <FieldLegend />
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">
+            {missingCount > 0 ? `${missingCount} need your input` : "All fields set"}
+            {suggestedCount > 0 ? ` · ${suggestedCount} suggestion${suggestedCount === 1 ? "" : "s"} to check` : ""}
+          </span>
+          {suggestedCount > 0 && (
+            <Button size="sm" variant="outline" onClick={confirmAllSuggestions} disabled={confirmingField === "__all__"} className="h-7 text-xs gap-1.5">
+              {confirmingField === "__all__" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+              Confirm all suggestions
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={runSuggest} disabled={suggesting} className="h-7 text-xs gap-1.5">
+            {suggesting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+            Suggest answers
+          </Button>
+        </div>
+      </div>
+
       {/* Status bar */}
       <div className={cn(
         "rounded-xl border px-4 py-3 flex items-center gap-3",
@@ -344,11 +447,17 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
       )}
 
       {/* Product URL */}
-      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+      <FieldShell
+        status={urlStatus}
+        label={
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
             <Link className="h-3.5 w-3.5" /> Product Page URL
-          </p>
+          </span>
+        }
+        onConfirm={urlStatus === "suggested" ? () => confirmField("productUrl") : undefined}
+        confirming={confirmingField === "productUrl"}
+      >
+        <div className="flex items-center justify-between gap-2">
           {data?.productUrl && !editingUrl && (
             <button onClick={() => setEditingUrl(true)} className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1">
               <Pencil className="h-3 w-3" /> Edit
@@ -395,15 +504,19 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
             </a>
           </div>
         )}
-      </div>
+      </FieldShell>
 
       {/* Product Name */}
-      <div className="rounded-xl border border-border bg-card p-4 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+      <FieldShell
+        status={nameStatus}
+        label={
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
             <Package className="h-3.5 w-3.5" /> Product Name
-          </p>
-        </div>
+          </span>
+        }
+        onConfirm={nameStatus === "suggested" ? () => (data?.productPageTitle ? confirmProduct() : confirmField("productName")) : undefined}
+        confirming={confirmingField === "productName"}
+      >
         {editingName ? (
           <div className="flex gap-2">
             <Input
@@ -422,14 +535,18 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
             <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 ml-auto" />
           </button>
         )}
-      </div>
+      </FieldShell>
 
       {/* Product Images — from product page + user uploads */}
-      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      <FieldShell
+        status={imagesStatus}
+        label={
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Product Images ({allImages.length})
-          </p>
+          </span>
+        }
+      >
+        <div className="flex items-center justify-end gap-2">
           <div className="flex gap-1.5">
             {data?.productUrl && (
               <Button
@@ -523,7 +640,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
           <strong>Blue (Web)</strong> = fetched from product page · <strong>Purple (Upload)</strong> = your photos
           <br />These exact images are used as reference for all AI-generated content in this project.
         </p>
-      </div>
+      </FieldShell>
 
       {/* Product description preview */}
       {data?.productPageText && (

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { StepFrame } from "@/components/layout/step-frame";
 import { StageGuide } from "@/components/layout/stage-guide";
 import Link from "next/link";
 import { NARRATIVE_TYPE_LABELS, CONTENT_TYPE_LABELS } from "@/lib/constants";
@@ -245,16 +246,18 @@ export default async function ContentPage({
     <div className="space-y-5">
       <StageGuide projectId={projectId} stage="research" detail="These are the competitor ads we collected. Skim the top performers before writing creative." />
       <ResearchProgress projectId={projectId} />
-      <CompetitorManager
-        projectId={projectId}
-        competitors={competitors.map((c) => ({
-          id: c.id,
-          name: c.name,
-          url: c.url,
-          excluded: c.excluded,
-          adCount: c._count.contentAssets,
-        }))}
-      />
+      <StepFrame projectId={projectId} anchor="competitors">
+        <CompetitorManager
+          projectId={projectId}
+          competitors={competitors.map((c) => ({
+            id: c.id,
+            name: c.name,
+            url: c.url,
+            excluded: c.excluded,
+            adCount: c._count.contentAssets,
+          }))}
+        />
+      </StepFrame>
       {excludedCount > 0 && (
         <p className="text-xs text-muted-foreground">
           {excludedCount} excluded ad{excludedCount !== 1 ? "s" : ""} hidden ·{" "}
