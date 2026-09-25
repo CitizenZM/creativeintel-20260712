@@ -21,6 +21,14 @@ describe("normalizeCompetitor", () => {
     });
   });
 
+  it("keeps brand names that are styled as a domain", () => {
+    expect(normalizeCompetitor("Booking.com")).toEqual({ name: "Booking.com", url: "https://booking.com/" });
+    expect(normalizeCompetitor("Amazon.com", "https://www.amazon.com")).toEqual({
+      name: "Amazon.com",
+      url: "https://www.amazon.com/",
+    });
+  });
+
   it("leaves ordinary brand names alone apart from whitespace", () => {
     expect(normalizeCompetitor("  Nature’s   Bounty ")).toEqual({ name: "Nature’s Bounty", url: null });
     expect(normalizeCompetitor("Dr. Squatch")).toEqual({ name: "Dr. Squatch", url: null });

@@ -38,7 +38,13 @@ export function normalizeCompetitor(
   if (!name.includes(" ") && DOMAIN_LIKE.test(name)) {
     const url = toUrl(name);
     if (url) {
-      return { name: brandFromHost(new URL(url).hostname), url: givenUrl ?? url };
+      // "Booking.com" / "Amazon.com" are brand names styled as domains; only a
+      // scheme, a www. prefix or an all-lowercase host reads as a paste.
+      const pasted = /^(https?:\/\/|www\.)/i.test(name) || name === name.toLowerCase();
+      return {
+        name: pasted ? brandFromHost(new URL(url).hostname) : name,
+        url: givenUrl ?? url,
+      };
     }
   }
   return { name, url: givenUrl };

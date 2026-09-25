@@ -68,12 +68,15 @@ export async function POST(request: Request) {
       category: data.category ?? null,
     });
 
+    // Normalize once so the brand-library profile and the project's competitor
+    // row agree on the name (a pasted "hoka.com" is "Hoka" in both).
+    const competitors = data.competitors.map((c) => normalizeCompetitor(c.name, c.url || null));
     const competitorProfiles = await Promise.all(
-      data.competitors.map((c) =>
+      competitors.map((c) =>
         upsertCompetitorProfile({
           workspaceId: workspace.id,
           name: c.name,
-          url: c.url ?? null,
+          url: c.url,
         })
       )
     );
@@ -163,8 +166,8 @@ export async function POST(request: Request) {
             }
           : {}),
         competitors: {
-          create: data.competitors.map((c, i) => ({
-            ...normalizeCompetitor(c.name, c.url || null),
+          create: competitors.map((c, i) => ({
+            ...c,
             competitorProfileId: competitorProfiles[i].id,
           })),
         },
