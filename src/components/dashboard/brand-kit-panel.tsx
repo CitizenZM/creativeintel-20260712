@@ -347,8 +347,10 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
         applyResponse(payload as BrandKitResponse);
         const s = (payload as BrandKitResponse).suggested;
         const filledCount = (s?.fields.length ?? 0) + (s?.packshots ?? 0) + (s?.logo ? 1 : 0);
+        const aiError = (payload as { aiError?: string | null }).aiError;
+        if (aiError && !auto) setError(`The AI couldn't draft suggestions this time (${aiError}). Try again in a moment.`);
         if (!auto || filledCount > 0) {
-          setNotice(filledCount > 0 ? `Pre-filled ${filledCount} suggestion(s) from your product page.` : "No new suggestions found.");
+          setNotice(filledCount > 0 ? `Pre-filled ${filledCount} suggestion(s) from your product page.` : aiError ? null : "No new suggestions found.");
         }
         markStagesStale();
         router.refresh();

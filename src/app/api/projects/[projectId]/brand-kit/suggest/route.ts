@@ -120,6 +120,7 @@ export async function POST(
 
   const kitData: Record<string, unknown> = {};
   let suggestedKeys: string[] = [];
+  let aiError: string | null = null;
 
   // Only call the AI when there is at least one text field it could help with
   // (asset/logo suggestion below runs independently of this).
@@ -142,6 +143,7 @@ export async function POST(
     } catch (err) {
       // Degrade gracefully — still apply the landingUrl fallback below and
       // report the AI miss instead of failing the whole request.
+      aiError = err instanceof Error ? err.message.slice(0, 300) : String(err);
       console.warn("brand-kit suggest: AI call failed", err);
     }
   }
@@ -240,5 +242,8 @@ export async function POST(
     assets: freshKit.assets,
     completeness,
     suggested: { fields: suggestedKeys, packshots: addedPackshots, logo: addedLogo },
+    // Surfaced so the panel can say why nothing was suggested, instead of
+    // silently leaving fields red.
+    aiError,
   });
 }
