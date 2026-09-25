@@ -48,12 +48,20 @@ function sanitizeSelection(body: Record<string, unknown>): Record<string, unknow
  * CampaignSelection fields lives on the parent Project.fieldStatus, keyed
  * "campaign.<field>", per the shared convention (see src/lib/setup-suggest.ts).
  */
-async function markCampaignFieldsConfirmed(projectId: string, touchedKeys: string[]) {
+async function markCampaignFieldsConfirmed(
+  projectId: string,
+  touchedKeys: string[],
+  mark: "confirmed" | "suggested" = "confirmed"
+) {
   if (touchedKeys.length === 0) return;
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { fieldStatus: true } });
-  const status = readStatusMap(project?.fieldStatus);
-  const next = { ...status };
-  for (const k of touchedKeys) next[campaignFieldKey(k)] = "confirmed";
+  // Keep bookkeeping keys such as __suggestedAt; readStatusMap alone drops them.
+  const raw =
+    project?.fieldStatus && typeof project.fieldStatus === "object" && !Array.isArray(project.fieldStatus)
+      ? (project.fieldStatus as Record<string, unknown>)
+      : {};
+  const next: Record<string, unknown> = { ...raw, ...readStatusMap(raw) };
+  for (const k of touchedKeys) next[campaignFieldKey(k)] = mark;
   await prisma.project.update({ where: { id: projectId }, data: { fieldStatus: next as never } });
 }
 
@@ -109,6 +117,7 @@ export async function PATCH(
     create: { projectId, ...data },
     update: data,
   });
-  await markCampaignFieldsConfirmed(projectId, Object.keys(data));
+  // The autopilot writes AI picks with { suggested: true } so they show yellow.
+  await markCampaignFieldsConfirmed(projectId, Object.keys(data), body.suggested === true ? "suggested" : "confirmed");
   return NextResponse.json(sel);
 }

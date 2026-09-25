@@ -1,12 +1,14 @@
 "use client";
 
-import type { ReactNode } from "react";
-import Link from "next/link";
+import { useEffect, useRef, type ReactNode } from "react";
 import { CheckCircle2, CircleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FIELD_TONE } from "@/lib/field-status";
 import type { ProjectStage, StageCriterion } from "@/services/project-stages";
 import { focusSection, useProjectStages } from "./use-project-stages";
+import { StepItem } from "@/components/autopilot/step-item";
+import { STEP_ACTIONS } from "@/components/autopilot/step-actions";
+import { autoAttempted, markAutoAttempted, runStep } from "@/components/autopilot/step-runner";
 
 function criteriaFor(stages: ProjectStage[], anchor: string): StageCriterion[] {
   return stages.flatMap((s) => s.criteria).filter((c) => c.href?.endsWith(`#${anchor}`));
@@ -55,8 +57,10 @@ export function StepFrame({
 }
 
 /**
- * Top-of-page checklist for a stage: always shown on that stage's page so the
- * user sees at a glance what is left (red) or that it's finished (green).
+ * Top-of-page checklist for a stage: always shown on that stage's page. Each
+ * unfinished check has its AI action and a "Show me". When this is the step
+ * to do next, the AI actions run automatically on arrival, one after another,
+ * so the user lands on pre-made answers to confirm rather than a blank page.
  */
 export function StagePanel({
   projectId,
@@ -67,16 +71,44 @@ export function StagePanel({
   stage: ProjectStage["id"];
   detail?: string;
 }) {
-  const { data } = useProjectStages(projectId);
+  const { data, refresh } = useProjectStages(projectId);
   const s = data?.stages.find((x) => x.id === stage);
+  const isNext = data?.next?.id === stage;
+  const autoStarted = useRef(false);
+
+  // Land on the section a cross-page "Show me" pointed at.
+  useEffect(() => {
+    const anchor = typeof window !== "undefined" ? window.location.hash.slice(1) : "";
+    if (!anchor) return;
+    const t = window.setTimeout(() => focusSection(anchor), 600);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (!s || !isNext || autoStarted.current) return;
+    const queue = s.criteria.filter(
+      (c) => !c.met && c.id && STEP_ACTIONS[c.id]?.auto && !autoAttempted(projectId, c.id)
+    );
+    if (!queue.length) return;
+    autoStarted.current = true;
+    void (async () => {
+      for (const c of queue) {
+        // An earlier action may already have satisfied this one.
+        const fresh = await refresh();
+        const now = fresh?.stages.find((x) => x.id === stage)?.criteria.find((x) => x.id === c.id);
+        if (now?.met) continue;
+        markAutoAttempted(projectId, c.id!);
+        const result = await runStep(projectId, c.id!);
+        if (result.status === "error") break;
+      }
+      await refresh();
+    })();
+  }, [s, isNext, projectId, stage, refresh]);
+
   if (!s) return null;
   const open = s.criteria.filter((c) => !c.met);
+  const met = s.criteria.filter((c) => c.met);
   const done = open.length === 0;
-
-  function go(c: StageCriterion, e: React.MouseEvent) {
-    const anchor = c.href?.split("#")[1];
-    if (anchor && focusSection(anchor)) e.preventDefault();
-  }
 
   return (
     <div className={cn("mb-4 rounded-xl border p-3 sm:p-4", done ? FIELD_TONE.confirmed : FIELD_TONE.missing)}>
@@ -91,37 +123,28 @@ export function StagePanel({
             {done ? `${s.label} is complete — use Next step to continue` : `${s.label}: ${open.length} left to do`}
           </p>
           {!done && detail && <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>}
-          <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
-            {s.criteria.map((c) => (
-              <li key={c.label}>
-                {c.href && !c.met ? (
-                  <Link
-                    href={c.href}
-                    onClick={(e) => go(c, e)}
-                    className="flex items-center gap-2 rounded-md border border-[color-mix(in_oklab,var(--status-urgent)_45%,transparent)] bg-background/70 px-2 py-1 text-xs hover:bg-background"
-                  >
-                    <CircleAlert className="h-3.5 w-3.5 shrink-0 text-[var(--status-urgent-fg)]" />
-                    <span className="flex-1">{c.label}</span>
-                    <span className="font-medium text-[var(--status-urgent-fg)]">Fix →</span>
-                  </Link>
-                ) : (
-                  <span
-                    className={cn(
-                      "flex items-center gap-2 rounded-md px-2 py-1 text-xs",
-                      c.met ? "text-muted-foreground" : "text-foreground"
-                    )}
-                  >
-                    {c.met ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--status-healthy-fg)]" />
-                    ) : (
-                      <CircleAlert className="h-3.5 w-3.5 shrink-0 text-[var(--status-urgent-fg)]" />
-                    )}
-                    {c.label}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
+          {!done && isNext && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              The AI runs each step for you and leaves the results for you to check — or press a button to run one now.
+            </p>
+          )}
+          {open.length > 0 && (
+            <div className="mt-2 grid gap-2 lg:grid-cols-2">
+              {open.map((c) => (
+                <StepItem key={c.id ?? c.label} projectId={projectId} criterion={c} />
+              ))}
+            </div>
+          )}
+          {met.length > 0 && (
+            <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+              {met.map((c) => (
+                <li key={c.label} className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <CheckCircle2 className="h-3 w-3 text-[var(--status-healthy-fg)]" />
+                  {c.label}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>
