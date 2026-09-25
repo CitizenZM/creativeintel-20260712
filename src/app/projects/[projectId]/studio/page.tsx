@@ -8,6 +8,7 @@ import { StoryboardTimeline } from "@/components/studio/storyboard-timeline";
 import { LibtvRunPanel } from "@/components/studio/libtv-run-panel";
 import { NextStepHint } from "@/components/layout/next-step-hint";
 import { StageGuideClient } from "@/components/layout/stage-guide-client";
+import { AUTOPILOT_DONE } from "@/components/autopilot/step-runner";
 import type {
   BrandKitReadiness,
   BudgetMode,
@@ -67,6 +68,16 @@ export default function StudioPage() {
   const [selectedFrame, setSelectedFrame] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Reload when an AI action in the stage panel (e.g. compile) finishes.
+  const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    const onDone = (e: Event) => {
+      if ((e as CustomEvent<{ projectId: string }>).detail?.projectId === projectId) setReloadKey((k) => k + 1);
+    };
+    window.addEventListener(AUTOPILOT_DONE, onDone);
+    return () => window.removeEventListener(AUTOPILOT_DONE, onDone);
+  }, [projectId]);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -106,7 +117,7 @@ export default function StudioPage() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, initialStoryboardId]);
+  }, [projectId, initialStoryboardId, reloadKey]);
 
   const storyboard = useMemo(
     () => storyboards.find((s) => s.id === storyboardId) ?? null,

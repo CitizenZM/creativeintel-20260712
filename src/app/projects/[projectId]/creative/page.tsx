@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { AUTOPILOT_DONE } from "@/components/autopilot/step-runner";
 import { Button } from "@/components/ui/button";
 import { NARRATIVE_TYPE_LABELS } from "@/lib/constants";
 import {
@@ -174,6 +175,16 @@ export default function CreativePage() {
   const [lighting, setLighting] = useState("");
   const [visualStyle, setVisualStyle] = useState("");
   const [styleNotes, setStyleNotes] = useState("");
+
+  // The AI actions in the stage panel write scripts/storyboards server-side;
+  // reload this page's data when one finishes so the results appear at once.
+  useEffect(() => {
+    const onDone = (e: Event) => {
+      if ((e as CustomEvent<{ projectId: string }>).detail?.projectId === projectId) setLoaded(false);
+    };
+    window.addEventListener(AUTOPILOT_DONE, onDone);
+    return () => window.removeEventListener(AUTOPILOT_DONE, onDone);
+  }, [projectId]);
 
   useEffect(() => {
     if (loaded) return;
