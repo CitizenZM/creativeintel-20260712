@@ -208,6 +208,43 @@ export async function heartbeatTask(id: string) {
   });
 }
 
+// ─── Worker liveness ─────────────────────────────────────────────────────────
+
+/** A worker that polled within this window is considered online. */
+const WORKER_ONLINE_MS = 3 * 60 * 1000;
+const ONLINE_CACHE_MS = 30 * 1000;
+let onlineCache: { at: number; online: boolean } | null = null;
+
+export async function recordWorkerSeen(workerId: string) {
+  await prisma.workerHeartbeat
+    .upsert({
+      where: { workerId },
+      create: { workerId, lastSeenAt: new Date() },
+      update: { lastSeenAt: new Date() },
+    })
+    .catch(() => null);
+}
+
+/**
+ * True when a local worker polled or touched a task recently. Callers that
+ * block waiting on the worker check this first so an offline Mac costs nothing
+ * instead of minutes of polling a task nobody will claim.
+ */
+export async function isWorkerOnline(): Promise<boolean> {
+  if (onlineCache && Date.now() - onlineCache.at < ONLINE_CACHE_MS) return onlineCache.online;
+  const since = new Date(Date.now() - WORKER_ONLINE_MS);
+  const [beat, task] = await Promise.all([
+    prisma.workerHeartbeat.findFirst({ where: { lastSeenAt: { gte: since } }, select: { workerId: true } }),
+    prisma.workerTask.findFirst({
+      where: { status: { in: ["claimed", "running", "completed"] }, updatedAt: { gte: since } },
+      select: { id: true },
+    }),
+  ]).catch(() => [null, null] as const);
+  const online = !!(beat || task);
+  onlineCache = { at: Date.now(), online };
+  return online;
+}
+
 /** Bounces tasks stuck in claimed/running for over 20 minutes back to queued. */
 export async function requeueStaleTasks() {
   const cutoff = new Date(Date.now() - STALE_AFTER_MS);

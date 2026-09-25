@@ -22,6 +22,7 @@ import {
   failTask,
   heartbeatTask,
   requeueStaleTasks,
+  recordWorkerSeen,
 } from "@/services/worker-tasks";
 import { parseAdCandidates, type AdCandidate } from "@/services/research/ad-candidate";
 import { rerankOwner, saveUnrankedCandidates } from "@/services/research/persist";
@@ -124,7 +125,7 @@ export async function POST(request: Request) {
         if (!body.workerId) {
           return NextResponse.json({ error: "workerId required" }, { status: 400 });
         }
-        await requeueStaleTasks();
+        await Promise.all([requeueStaleTasks(), recordWorkerSeen(body.workerId)]);
         const task = await claimNextTask(body.workerId, body.kinds);
         return NextResponse.json({ task });
       }

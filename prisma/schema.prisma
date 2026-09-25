@@ -549,6 +549,14 @@ model Job {
 }
 
 // The LibTV credit balance as last read by a person from LibTV's top bar.
+// Last time each local worker polled for work. The queue alone can't tell an
+// idle worker from an offline one, and callers that block on the worker need
+// to know which before waiting minutes for a result that will never come.
+model WorkerHeartbeat {
+  workerId   String   @id
+  lastSeenAt DateTime @default(now())
+}
+
 // LibTV exposes no balance API, so the app tracks it: latest reading minus the
 // credits every run has spent since it was recorded.
 model LibtvBalance {
