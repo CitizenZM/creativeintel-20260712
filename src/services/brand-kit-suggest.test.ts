@@ -220,3 +220,20 @@ describe("suggestResponseSchema", () => {
     expect(parsed.colors).toBeUndefined();
   });
 });
+
+describe("suggestResponseSchema shape variants", () => {
+  it("accepts CTAs as strings, fonts as a role map and tone as a list", async () => {
+    const { suggestResponseSchema } = await import("./brand-kit-suggest");
+    const parsed = suggestResponseSchema.parse({
+      ctaOptions: ["Shop Plaud Note", "Start recording smarter"],
+      fonts: { headline: "Inter", body: "Inter" },
+      toneGuidelines: ["Calm and precise.", "Confident, never hype."],
+    });
+    expect(parsed.ctaOptions).toEqual([{ text: "Shop Plaud Note" }, { text: "Start recording smarter" }]);
+    expect(parsed.fonts).toEqual([
+      { role: "headline", family: "Inter" },
+      { role: "body", family: "Inter" },
+    ]);
+    expect(parsed.toneGuidelines).toBe("Calm and precise. Confident, never hype.");
+  });
+});

@@ -117,12 +117,45 @@ const namedList = <T extends z.ZodTypeAny>(item: T, max: number) =>
 
 export const suggestResponseSchema = z.object({
   colors: namedList(z.object({ hex: z.string(), name: z.string().optional(), usage: z.string().optional() }), 5),
-  fonts: namedList(z.object({ role: z.string().optional(), family: z.string().min(1), source: z.string().optional() }), 4),
-  ctaOptions: namedList(z.object({ text: z.string().min(1) }), 3),
+  // Models answer these in several shapes; accept the common ones.
+  fonts: lenient(
+    z
+      .preprocess((v) => {
+        if (v && typeof v === "object" && !Array.isArray(v)) {
+          // { headline: "X", body: "Y" }
+          return Object.entries(v as Record<string, unknown>).map(([role, family]) =>
+            typeof family === "string" ? { role, family } : family
+          );
+        }
+        return v;
+      }, z.array(z.unknown()))
+      .transform((xs) =>
+        xs
+          .map((x) => (typeof x === "string" ? { family: x } : x))
+          .map((x) => z.object({ role: z.string().optional(), family: z.string().min(1), source: z.string().optional() }).safeParse(x))
+          .filter((r) => r.success)
+          .map((r) => r.data!)
+          .slice(0, 4)
+      )
+  ),
+  ctaOptions: lenient(
+    z
+      .array(z.unknown())
+      .transform((xs) =>
+        xs
+          .map((x) => (typeof x === "string" ? { text: x } : x))
+          .map((x) => z.object({ text: z.string().min(1) }).safeParse(x))
+          .filter((r) => r.success)
+          .map((r) => r.data!)
+          .slice(0, 3)
+      )
+  ),
   offerText: lenient(z.string()),
   claimsAllowed: namedList(z.string().min(1), 10),
   claimsForbidden: namedList(z.string().min(1), 10),
-  toneGuidelines: lenient(z.string()),
+  toneGuidelines: lenient(
+    z.preprocess((v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string").join(" ") : v), z.string().min(1))
+  ),
   doNotShow: namedList(z.string().min(1), 10),
   skuName: lenient(z.string()),
   skuDimensionsCm: lenient(
