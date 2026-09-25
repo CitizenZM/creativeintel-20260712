@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { normalizeCompetitor } from "@/lib/brand-name";
 import { createProjectSchema } from "@/lib/validations";
 import {
   upsertBrandProfile,
@@ -163,8 +164,7 @@ export async function POST(request: Request) {
           : {}),
         competitors: {
           create: data.competitors.map((c, i) => ({
-            name: c.name,
-            url: c.url || null,
+            ...normalizeCompetitor(c.name, c.url || null),
             competitorProfileId: competitorProfiles[i].id,
           })),
         },

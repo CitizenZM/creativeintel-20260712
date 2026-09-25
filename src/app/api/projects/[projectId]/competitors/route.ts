@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { normalizeCompetitor } from "@/lib/brand-name";
 
 /** Add a competitor by hand; it is researched on the next run. */
 export async function POST(
@@ -8,15 +9,13 @@ export async function POST(
 ) {
   const { projectId } = await params;
   const body = (await request.json().catch(() => ({}))) as { name?: unknown; url?: unknown };
-  const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
-  if (!name) return NextResponse.json({ error: "name is required" }, { status: 400 });
-  let url: string | null = null;
-  if (typeof body.url === "string" && body.url.trim()) {
-    try {
-      url = new URL(body.url.trim().startsWith("http") ? body.url.trim() : `https://${body.url.trim()}`).toString();
-    } catch {
-      return NextResponse.json({ error: "url is not a valid web address" }, { status: 400 });
-    }
+  const rawName = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
+  if (!rawName) return NextResponse.json({ error: "name is required" }, { status: 400 });
+  const rawUrl = typeof body.url === "string" ? body.url.trim() : "";
+  // A pasted domain becomes a searchable brand name plus its URL.
+  const { name, url } = normalizeCompetitor(rawName, rawUrl || null);
+  if (rawUrl && !url) {
+    return NextResponse.json({ error: "url is not a valid web address" }, { status: 400 });
   }
 
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });

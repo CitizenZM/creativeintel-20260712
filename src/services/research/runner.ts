@@ -8,6 +8,7 @@ import {
   extractSearchKeywords,
 } from "./keyword-extractor";
 import { searchVerifiedVideos } from "./video-search";
+import { normalizeCompetitor } from "@/lib/brand-name";
 import { classifyAdCandidateGroups, type ClassifyGroup } from "./video-relevance";
 import { fetchTikTokForYouFeed } from "./adapters/tiktok-creative-center";
 import { getCampaignPlatform } from "@/lib/campaign-platform";
@@ -57,6 +58,11 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
       include: { brand: true, competitors: { where: { excluded: false } } },
     });
     if (!project) throw new Error("Project not found");
+    // Older rows may hold a pasted domain as the name; search by the brand.
+    project.competitors = project.competitors.map((c) => {
+      const n = normalizeCompetitor(c.name, c.url);
+      return { ...c, name: n.name, url: n.url };
+    });
 
     // Step 1: parallel website crawls
     await startStep(jobId, "Crawl websites");
