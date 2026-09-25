@@ -76,6 +76,7 @@ export function StepItem({ projectId, criterion, compact = false }: { projectId:
       const n = await approveAllFrames(projectId);
       setNote(n ? `Approved ${n} frame(s).` : "Every frame was already approved.");
       markStagesStale();
+      window.dispatchEvent(new CustomEvent(AUTOPILOT_DONE, { detail: { projectId, id } }));
       router.refresh();
     } catch (err) {
       setNote(err instanceof Error ? err.message : "Could not approve the frames");
