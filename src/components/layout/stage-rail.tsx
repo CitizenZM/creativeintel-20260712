@@ -83,14 +83,17 @@ export function StageRail({ projectId, compact = false }: { projectId: string; c
               className={cn(
                 "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px]",
                 s.state === "done" && "border-emerald-500 bg-emerald-500 text-white",
-                s.state === "partial" && "border-amber-500 text-amber-600",
-                s.state === "todo" && "border-border text-muted-foreground"
+                // Same language as the tabs: unfinished is red, done is green.
+                s.state !== "done" && data && "border-[var(--status-urgent)] text-[var(--status-urgent-fg)]",
+                s.state !== "done" && !data && "border-border text-muted-foreground"
               )}
             >
               {s.state === "done" ? <Icon className="h-3 w-3" /> : i + 1}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block leading-tight">{s.label}</span>
+              <span className={cn("block leading-tight", data && s.state !== "done" && "text-[var(--status-urgent-fg)]")}>
+                {s.label}
+              </span>
               {!compact && s.detail && (
                 <span className="block truncate text-[10px] text-muted-foreground">{s.detail}</span>
               )}
