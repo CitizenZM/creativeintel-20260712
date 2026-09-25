@@ -346,7 +346,12 @@ async function callModel(
       return await createOnRoute(client, provider, messages, modelToUse, maxTokens);
     } catch (err) {
       if (isAuthError(err)) {
-        console.warn(`[ai] ${provider} rejected the API key — disabling it for this process`);
+        // 401 = bad key; 403 can also mean "this project can't use this
+        // model" — log which, so the fix is obvious from the runtime logs.
+        const e = err as { status?: number; code?: string; message?: string };
+        console.warn(
+          `[ai] ${provider} rejected the request (${e.status}${e.code ? ` ${e.code}` : ""}, model ${modelToUse}): ${String(e.message ?? "").slice(0, 200)} — disabling it for this process`
+        );
         _disabledProviders.add(provider);
         lastErr = err;
         continue;
