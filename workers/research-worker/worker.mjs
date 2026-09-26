@@ -38,6 +38,9 @@ const WORKER_KINDS =(process.env.WORKER_KINDS || 'ad_library_fetch,browser_fetch
   .map((s) => s.trim())
   .filter(Boolean);
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 6000);
+// Idle backoff: every empty claim doubles the wait up to this cap, so an idle
+// worker stops waking the database around the clock. Any task resets it.
+const MAX_IDLE_POLL_MS = Number(process.env.MAX_IDLE_POLL_MS || 60 * 1000);
 const HEARTBEAT_INTERVAL_MS = 60 * 1000;
 // Public sites get a breather between tasks so a queue burst never reads as a crawl.
 const COOLDOWN_MS = Number(process.env.TASK_COOLDOWN_MS || 15000);
@@ -192,20 +195,24 @@ async function mainLoop() {
     process.exit(1);
   }
 
+  let idleWait = POLL_INTERVAL_MS;
   while (!shuttingDown) {
     let task = null;
     try {
       task = await claimTask();
     } catch (err) {
       logError('claim failed:', err.message || err);
-      await sleep(POLL_INTERVAL_MS);
+      await sleep(idleWait);
+      idleWait = Math.min(idleWait * 2, MAX_IDLE_POLL_MS);
       continue;
     }
 
     if (!task) {
-      await sleep(POLL_INTERVAL_MS);
+      await sleep(idleWait);
+      idleWait = Math.min(idleWait * 2, MAX_IDLE_POLL_MS);
       continue;
     }
+    idleWait = POLL_INTERVAL_MS;
 
     // One task at a time: the browser is a single shared resource.
     await processTask(task);
