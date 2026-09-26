@@ -5,9 +5,10 @@ import path from "node:path";
 import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
 import { describe, expect, it } from "vitest";
-import { captionFilter, planSegments, wrapCaption } from "./glm-assemble";
+import { captionPng, overlayGraph, planSegments, wrapCaption } from "./glm-assemble";
 
 const run = promisify(execFile);
+const FONT = path.join(process.cwd(), "assets/fonts/Anton-Regular.ttf");
 
 describe("captions", () => {
   it("wraps caption text into at most three lines", () => {
@@ -24,20 +25,28 @@ describe("captions", () => {
     expect(segs.map((s) => s.text)).toEqual(["Get Your Ramp Card", undefined]);
   });
 
-  it("burns a caption into a real 1080x1920 segment", async () => {
+  it("draws a caption PNG with sharp, escaping markup", async () => {
+    const png = await captionPng(["Save <5%> & more"], { w: 1080, h: 1920 }, FONT);
+    const sharp = (await import("sharp")).default;
+    const meta = await sharp(png).metadata();
+    expect(meta.format).toBe("png");
+    expect(meta.channels).toBe(4);
+    expect(meta.width).toBeGreaterThan(200);
+    expect(meta.width).toBeLessThan(1080);
+  });
+
+  it("overlays the caption onto a real 1080x1920 segment (no drawtext needed)", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "caption-test-"));
     try {
-      const lineFiles: string[] = [];
-      for (const [n, line] of wrapCaption("Tired of managing piles of receipts?").entries()) {
-        lineFiles.push(path.join(dir, `cap-${n}.txt`));
-        await writeFile(lineFiles[n], line);
-      }
+      const cap = path.join(dir, "cap.png");
+      await writeFile(cap, await captionPng(wrapCaption("Tired of managing piles of receipts?"), { w: 1080, h: 1920 }, FONT));
       const out = path.join(dir, "seg.mp4");
+      const vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p";
       await run(ffmpegPath!, [
-        "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=navy:s=1080x1920:d=1", "-vf",
-        captionFilter(lineFiles, { w: 1080, h: 1920 }, path.join(process.cwd(), "assets/fonts/Anton-Regular.ttf")),
-        "-frames:v", "1", "-update", "1", path.join(dir, "cap.png"), "-c:v", "libx264", "-preset", "veryfast", out,
+        "-y", "-v", "error", "-f", "lavfi", "-t", "1", "-i", "color=c=navy:s=720x1280:d=1", "-i", cap,
+        "-filter_complex", overlayGraph(vf), "-map", "[out]", "-t", "1", "-an", "-c:v", "libx264", "-preset", "veryfast", out,
       ]);
+      await run(ffmpegPath!, ["-y", "-v", "error", "-i", out, "-frames:v", "1", path.join(dir, "preview.png")]);
       const { stderr } = await run(ffmpegPath!, ["-i", out]).catch((e) => e as { stderr: string });
       expect(String(stderr)).toMatch(/1080x1920/);
     } finally {
