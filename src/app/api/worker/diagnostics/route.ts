@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { describeMetaError, searchMetaAdLibrary } from "@/services/research/meta-ads";
 import { isZhipuConfigured, zhipuKey, ZHIPU_BASE_URL, ZHIPU_FREE } from "@/services/ai/zhipu";
+import { persistDataUrl } from "@/services/ai/image-engine";
 
 export const maxDuration = 60;
 
@@ -59,4 +60,33 @@ export async function GET(request: Request) {
   ]);
 
   return NextResponse.json({ db, meta, zhipu, costMode: process.env.AI_COST_MODE ?? "default" });
+}
+
+/**
+ * Maintenance: move base64 frame images out of Storyboard.frames into asset
+ * storage (they were saved inline before image-engine persisted them).
+ */
+export async function POST(request: Request) {
+  if (!isAuthorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const body = (await request.json().catch(() => ({}))) as { action?: string };
+  if (body.action !== "externalize-frame-images") return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "Storyboard" WHERE frames::text LIKE '%"imageUrl": "data:%' OR frames::text LIKE '%"imageUrl":"data:%' LIMIT 20`;
+  let images = 0;
+  for (const { id } of rows) {
+    const board = await prisma.storyboard.findUnique({ where: { id }, select: { frames: true, projectId: true } });
+    const frames = Array.isArray(board?.frames) ? (board!.frames as Record<string, unknown>[]) : [];
+    const next = [];
+    for (const f of frames) {
+      const url = typeof f.imageUrl === "string" ? f.imageUrl : null;
+      if (url?.startsWith("data:")) {
+        const stored = await persistDataUrl(url, `storyboards/${board!.projectId}`);
+        if (stored !== url) images++;
+        next.push({ ...f, imageUrl: stored });
+      } else next.push(f);
+    }
+    await prisma.storyboard.update({ where: { id }, data: { frames: next as never } });
+  }
+  return NextResponse.json({ storyboards: rows.length, images });
 }

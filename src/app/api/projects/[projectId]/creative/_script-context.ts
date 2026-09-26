@@ -315,7 +315,14 @@ export function formatComplianceViolations(violations: ScriptClaimsViolation[]):
 export async function persistScript(
   projectId: string,
   raw: ScriptV2,
-  opts: { template: ScriptTemplate; videoType: VideoType; totalDurationSec: number; angleTitle?: string }
+  opts: {
+    template: ScriptTemplate;
+    videoType: VideoType;
+    totalDurationSec: number;
+    angleTitle?: string;
+    /** Violations the rewrite didn't fix, shown on the script card. */
+    complianceNotes?: string[];
+  }
 ) {
   const script = validateAndRepairDurations(raw, opts.totalDurationSec);
   const videoType = resolveVideoType(script.videoType, opts.videoType);
@@ -342,6 +349,7 @@ export async function persistScript(
       predictedScore: script.predictedScore,
       scenes: script.scenes as never,
       platformTechniques: script.platformTechniques as never,
+      complianceNotes: opts.complianceNotes?.length ? (opts.complianceNotes as never) : undefined,
     },
   });
 }

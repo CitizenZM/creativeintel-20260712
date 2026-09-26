@@ -62,6 +62,8 @@ export interface ScriptData {
   narrativeType: string;
   targetEmotion: string;
   predictedScore: number;
+  /** Brand-rule violations the rewrite couldn't fix (the title carries ⚠). */
+  complianceNotes?: string[] | null;
 }
 
 type Picks = Pick<ScriptData, "selectedHookIdx" | "selectedCtaIdx" | "roleName" | "environmentName">;
@@ -309,6 +311,11 @@ export function ScriptCard({
               {script.duration}
               {script.targetEmotion ? ` · ${script.targetEmotion}` : ""}
             </p>
+            {!!script.complianceNotes?.length && (
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1">
+                Check before producing: {script.complianceNotes.join(" · ")}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <div className="text-right">
