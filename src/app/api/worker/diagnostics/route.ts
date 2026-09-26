@@ -69,19 +69,27 @@ export async function GET(request: Request) {
     const sample = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png";
     const [vision, image, video] = await Promise.all([
       check(async () => {
-        const res = await fetch(`${ZHIPU_BASE_URL}chat/completions`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${zhipuKey()}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: ZHIPU_FREE.vision,
-            messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: sample } }, { type: "text", text: "In five words, what is in this image?" }] }],
-            max_tokens: 40,
-            thinking: { type: "disabled" },
-          }),
-          signal: AbortSignal.timeout(45_000),
-        });
-        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string }; choices?: { message?: { content?: string } }[] };
-        return { status: res.status, error: body.error?.message, answer: body.choices?.[0]?.message?.content?.slice(0, 120) };
+        // Zhipu's servers often can't fetch overseas hosts, so the app sends
+        // images inline; check both inline forms it could use.
+        const img = await fetch(sample, { signal: AbortSignal.timeout(20_000) });
+        const b64 = Buffer.from(await img.arrayBuffer()).toString("base64");
+        const type = img.headers.get("content-type")?.split(";")[0] || "image/png";
+        const ask = async (url: string) => {
+          const res = await fetch(`${ZHIPU_BASE_URL}chat/completions`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${zhipuKey()}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: ZHIPU_FREE.vision,
+              messages: [{ role: "user", content: [{ type: "image_url", image_url: { url } }, { type: "text", text: "In five words, what is in this image?" }] }],
+              max_tokens: 40,
+              thinking: { type: "disabled" },
+            }),
+            signal: AbortSignal.timeout(45_000),
+          });
+          const body = (await res.json().catch(() => ({}))) as { error?: { message?: string }; choices?: { message?: { content?: string } }[] };
+          return { status: res.status, error: body.error?.message, answer: body.choices?.[0]?.message?.content?.slice(0, 120) };
+        };
+        return { dataUrl: await ask(`data:${type};base64,${b64}`), rawBase64: await ask(b64) };
       }),
       check(async () => ({ url: await generateImage("A studio product photo of an emerald green travel duffle bag", { aspectRatio: "9:16" }) })),
       check(async () => ({ taskId: await submitVideo({ prompt: "Slow push-in on an emerald green travel duffle bag on a hotel bed, soft morning light", aspectRatio: "9:16" }) })),
