@@ -51,12 +51,19 @@ describe("modelOptions", () => {
 
   it("hides ComfyUI when no node is configured", () => {
     expect(names(modelOptions(false, false))).not.toContain(COMFY_VIDEO_MODEL);
-    expect(names(modelOptions(true, false))).toEqual([GLM_IMAGE_MODEL, GLM_VIDEO_MODEL]);
+    expect(names(modelOptions(true, false, {}, true))).toEqual([GLM_IMAGE_MODEL, GLM_VIDEO_MODEL]);
+  });
+
+  it("hides the GLM models when no Zhipu key is set", () => {
+    const all = names(modelOptions(false, false, {}, false));
+    expect(all).not.toContain(GLM_VIDEO_MODEL);
+    expect(all).not.toContain(GLM_IMAGE_MODEL);
+    expect(all).toContain("Hailuo 2.3 Fast");
   });
 
   it("offers ComfyUI when COMFYUI_URL is set, including in strict free mode", () => {
     expect(names(modelOptions(false, true))).toEqual(expect.arrayContaining([COMFY_IMAGE_MODEL, COMFY_VIDEO_MODEL, "Hailuo 2.3 Fast"]));
-    const free = names(modelOptions(true, true));
+    const free = names(modelOptions(true, true, {}, true));
     expect(free).toEqual(expect.arrayContaining([GLM_IMAGE_MODEL, GLM_VIDEO_MODEL, COMFY_IMAGE_MODEL, COMFY_VIDEO_MODEL]));
     expect(free).not.toContain("Hailuo 2.3 Fast");
   });
