@@ -103,7 +103,7 @@ vi.mock("./libtv-queue", () => queue);
 const assemble = vi.hoisted(() => vi.fn(async () => "https://cdn/master.mp4"));
 vi.mock("./glm-assemble", () => ({ assembleGlmMaster: assemble }));
 
-import { advanceActiveRuns, driveRun, tickRun, type EngineAdapter, type TaskResult } from "./server-executor";
+import { advanceActiveRuns, driveRun, NO_TEXT_IMAGE, NO_TEXT_VIDEO, tickRun, type EngineAdapter, type TaskResult } from "./server-executor";
 
 function job(partial: Partial<Job> & Pick<Job, "id" | "nodeName" | "kind">): Job {
   return {
@@ -198,10 +198,10 @@ describe("tickRun", () => {
     expect(statusOf("k3")).toBe("skipped");
     expect(store.jobs.find((j) => j.id === "k3")!.resultUrl).toBe("https://cdn/packshot.png");
     expect(adapter.generateImage).toHaveBeenCalledTimes(1);
-    expect(adapter.generateImage).toHaveBeenCalledWith("K1 prompt", expect.objectContaining({ runId: "run1", nodeName: "K1", aspectRatio: "9:16" }));
+    expect(adapter.generateImage).toHaveBeenCalledWith(`${NO_TEXT_IMAGE} K1 prompt`, expect.objectContaining({ runId: "run1", nodeName: "K1", aspectRatio: "9:16" }));
     // The clip starts off its finished keyframe in the same tick, using the job's own duration.
     expect(adapter.submitVideo).toHaveBeenCalledWith(
-      { prompt: "V1 prompt", imageUrl: "https://cdn/K1.png" },
+      { prompt: `${NO_TEXT_VIDEO} V1 prompt`, imageUrl: "https://cdn/K1.png" },
       expect.objectContaining({ nodeName: "V1", durationSec: 4 })
     );
     expect(store.jobs.find((j) => j.id === "v1")!.nodeId).toBe("task-V1");
@@ -248,7 +248,7 @@ describe("tickRun", () => {
     imageDone = true;
     await tickRun(adapter, "run1");
     expect([k1().status, k1().resultUrl]).toEqual(["completed", "https://cdn/img-K1.png"]);
-    expect(adapter.submitVideo).toHaveBeenCalledWith({ prompt: "V1 prompt", imageUrl: "https://cdn/img-K1.png" }, expect.anything());
+    expect(adapter.submitVideo).toHaveBeenCalledWith({ prompt: `${NO_TEXT_VIDEO} V1 prompt`, imageUrl: "https://cdn/img-K1.png" }, expect.anything());
   });
 
   it("fails the run when a clip fails", async () => {
@@ -332,5 +332,21 @@ describe("assembly timing", () => {
     Object.assign(store.runs.get("run1")!, { status: "assembling", updatedAt: new Date() });
     expect(await tickRun(fakeAdapter(), "run1")).toBe("idle");
     expect(assemble).not.toHaveBeenCalled();
+  });
+});
+
+describe("no-text prompts", () => {
+  it("tells every generated keyframe and clip to carry no text, first", async () => {
+    const { withNoText } = await import("./server-executor");
+    expect(withNoText("a green duffle bag", "image")).toBe(`${NO_TEXT_IMAGE} a green duffle bag`);
+    expect(withNoText("slow push-in", "video").startsWith(NO_TEXT_VIDEO)).toBe(true);
+    expect(withNoText(withNoText("x", "image"), "image")).toBe(`${NO_TEXT_IMAGE} x`);
+
+    seed();
+    const adapter = fakeAdapter();
+    await tickRun(adapter, "run1");
+    await tickRun(adapter, "run1");
+    expect((adapter.generateImage as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(`${NO_TEXT_IMAGE} K1 prompt`);
+    expect((adapter.submitVideo as ReturnType<typeof vi.fn>).mock.calls[0][0].prompt).toBe(`${NO_TEXT_VIDEO} V1 prompt`);
   });
 });

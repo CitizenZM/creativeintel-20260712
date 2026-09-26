@@ -54,6 +54,20 @@ export interface EngineAdapter {
 }
 
 const TERMINAL_JOB = new Set(["completed", "skipped", "failed"]);
+
+/**
+ * Image and video models invent lettering — garbled signs ("Obalzarus"), fake
+ * brand names on the product. Captions and the real packshot carry all text, so
+ * every generated frame is told to have none. Prepended so a model that
+ * truncates long prompts (CogVideoX: 500 chars) still sees it.
+ */
+export const NO_TEXT_IMAGE = "No text, letters, words, numbers, logos, signage or watermarks anywhere in the image.";
+export const NO_TEXT_VIDEO = "No text, letters, logos or signage appear.";
+
+export function withNoText(prompt: string, kind: "image" | "video"): string {
+  const clause = kind === "image" ? NO_TEXT_IMAGE : NO_TEXT_VIDEO;
+  return prompt.startsWith(clause) ? prompt : `${clause} ${prompt}`;
+}
 /**
  * Assembly downloads every clip and encodes the master — about a minute. It only
  * starts with this much of the invocation's budget left, so a function limit can
@@ -163,7 +177,7 @@ export async function tickRun(
           await jobDone({ jobId: j.id, resultUrl: urlOf(j.leftRefs ? (j.leftRefs as string[])[0] : "PROD-1"), skipped: true, creditsSpent: 0 });
           return;
         }
-        const out = await adapter.generateImage(j.prompt, ctxFor(j));
+        const out = await adapter.generateImage(withNoText(j.prompt, "image"), ctxFor(j));
         if ("url" in out) await jobDone({ jobId: j.id, resultUrl: out.url, creditsSpent: 0 });
         else await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: out.taskId } });
       } catch (err) {
@@ -192,7 +206,7 @@ export async function tickRun(
     const imageUrl = ref?.resultUrl ?? undefined;
     if (!(await claimJob(j.id))) continue;
     try {
-      const taskId = await adapter.submitVideo({ prompt: j.prompt, imageUrl }, ctxFor(j));
+      const taskId = await adapter.submitVideo({ prompt: withNoText(j.prompt, "video"), imageUrl }, ctxFor(j));
       await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: taskId } });
       inFlight++;
     } catch (err) {
