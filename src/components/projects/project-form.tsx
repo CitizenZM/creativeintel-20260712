@@ -29,6 +29,8 @@ export function ProjectForm() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Server validation errors that belong to the product URL show under that field.
+  const [productUrlError, setProductUrlError] = useState<string | null>(null);
 
   const [brandName, setBrandName] = useState("");
   const [brandUrl, setBrandUrl] = useState("");
@@ -67,6 +69,7 @@ export function ProjectForm() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setProductUrlError(null);
     setScrapeWarning(null);
     if (!allowDuplicate) setDuplicate(null);
 
@@ -125,6 +128,15 @@ export function ProjectForm() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: "Request failed" }));
+        const issues = (data.issues ?? []) as { path?: (string | number)[]; message: string }[];
+        const urlIssue = issues.find((i) => i.path?.[0] === "productUrl");
+        if (urlIssue) {
+          setProductUrlError(urlIssue.message);
+          const field = document.getElementById("productUrl");
+          field?.scrollIntoView({ behavior: "smooth", block: "center" });
+          field?.focus();
+          return;
+        }
         throw new Error(data.error || "Failed to create project");
       }
 
@@ -229,9 +241,19 @@ export function ProjectForm() {
               type="url"
               placeholder="https://www.sharkninja.com/shark-vacuums/... or https://amazon.com/dp/..."
               value={productUrl}
-              onChange={(e) => setProductUrl(e.target.value)}
-              className="h-10 rounded-md bg-white"
+              onChange={(e) => {
+                setProductUrl(e.target.value);
+                setProductUrlError(null);
+              }}
+              aria-invalid={!!productUrlError}
+              aria-describedby={productUrlError ? "productUrl-error" : undefined}
+              className={`h-10 rounded-md bg-white ${productUrlError ? "border-destructive ring-1 ring-destructive" : ""}`}
             />
+            {productUrlError && (
+              <p id="productUrl-error" className="text-xs text-destructive">
+                {productUrlError}
+              </p>
+            )}
             <p className="text-[10px] text-muted-foreground">
               Paste the DTC product page or Amazon listing. The AI will extract the exact product images, name, and description.
             </p>

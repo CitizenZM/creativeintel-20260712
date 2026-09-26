@@ -162,7 +162,7 @@ export async function buildStoryboardCreateData(
 
   const prompt = buildStoryboardPrompt({
     brandName: project.brandName,
-    productName: project.productPageTitle || project.productName || undefined,
+    productName: project.productName || project.productPageTitle || undefined,
     scriptTitle: script.title,
     scriptBody: script.body,
     hooks,

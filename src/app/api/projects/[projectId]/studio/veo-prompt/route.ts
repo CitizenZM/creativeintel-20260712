@@ -118,7 +118,7 @@ export async function POST(
     const shotDurationSec = Math.floor(totalDurationSec / shotCount);
 
     // Product-specific safeguard — use the most precise product identifier available
-    const productRef = project.productPageTitle || project.productName || brand?.valueProposition || project.brandName;
+    const productRef = project.productName || project.productPageTitle || brand?.valueProposition || project.brandName;
     const productText = project.productPageText?.slice(0, 300) || brand?.productDescription?.slice(0, 300) || "";
     // Anti-animal / anti-wrong-product clause
     const antiConfusion = `CRITICAL BRAND SAFETY: The product is "${productRef}". ${productText ? `It is described as: ${productText}` : ""} This is NOT a shark animal, NOT a fish, NOT any creature. It is a physical consumer product. Generate footage showing the ACTUAL product only.`;

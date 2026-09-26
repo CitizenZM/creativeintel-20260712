@@ -52,7 +52,7 @@ export async function POST(
     const { candidates, reports } = await searchVerifiedVideos(ownerName, keywords, {
       projectId,
       competitorId: owner?.id ?? null,
-      productName: project.productPageTitle || project.productName || undefined,
+      productName: project.productName || project.productPageTitle || undefined,
       campaign,
       countries: ["US"],
       limit: 15,

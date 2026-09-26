@@ -21,8 +21,15 @@ export const competitorSchema = z.object({
 const NON_PDP_MESSAGE =
   "This looks like a homepage or category page, not a product page. Paste the specific product URL (e.g. /products/<item> or /dp/<ASIN>).";
 
+/**
+ * Categories whose "product" is a service or program. They have no PDP, so the
+ * offering's own landing page (even a homepage) is the right thing to read.
+ */
+const SERVICE_CATEGORIES = new Set(["SaaS & Software", "Financial Services", "Education", "Entertainment", "Other"]);
+const STOREFRONT_SUBDOMAINS = new Set(["www", "shop", "store", "m", "en", "us"]);
+
 /** true when the URL is a storefront root / listing page rather than a PDP. */
-export function isLikelyNonProductUrl(value: string): boolean {
+export function isLikelyNonProductUrl(value: string, opts: { category?: string } = {}): boolean {
   let url: URL;
   try {
     url = new URL(value);
@@ -31,7 +38,13 @@ export function isLikelyNonProductUrl(value: string): boolean {
   }
 
   const path = url.pathname.replace(/\/+$/, "");
-  if (!path || path === "/") return true;
+  if (!path || path === "/") {
+    if (opts.category && SERVICE_CATEGORIES.has(opts.category)) return false;
+    // speedrun.a16z.com is a product's own landing page; www./shop. roots are storefronts.
+    const labels = url.hostname.toLowerCase().split(".");
+    const isSubdomainSite = labels.length > 2 && !STOREFRONT_SUBDOMAINS.has(labels[0]);
+    return !isSubdomainSite;
+  }
 
   const lower = path.toLowerCase();
   const looksLikePdp = /\/(products?|dp|gp\/product|item|p)\//.test(lower) || /\/[a-z0-9-]{8,}-p\d+/.test(lower);
@@ -59,13 +72,18 @@ export const createProjectSchema = z.object({
     .min(1, "Brand name is required")
     .refine((v) => !looksLikeUrl(v), NAME_NOT_URL("Brand name")),
   brandUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")),
-  productUrl: optionalProductUrlSchema,
+  // Checked against the category below: service brands may use a homepage.
+  productUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")),
   productName: z.string().optional(),
   category: z.string().optional(),
   campaignGoal: z.string().optional(),
   goalType: z.enum(["storytelling", "conversion", "hybrid"]).optional(),
   briefingText: z.string().optional(),
   competitors: z.array(competitorSchema).min(1, "Add at least one competitor"),
+}).superRefine((v, ctx) => {
+  if (v.productUrl && isLikelyNonProductUrl(v.productUrl, { category: v.category })) {
+    ctx.addIssue({ code: "custom", path: ["productUrl"], message: NON_PDP_MESSAGE });
+  }
 });
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
