@@ -27,6 +27,8 @@ export interface EngineUsage {
   videoMinutes: number;
   costUsd: number;
   unpricedCalls: number;
+  /** Part of costUsd that is a list-price estimate rather than a logged cost. */
+  estimatedUsd: number;
 }
 
 export interface UsageSummary {
@@ -43,6 +45,33 @@ export interface UsageSummary {
 }
 
 const FREE_PROVIDERS = new Set(["glm", "pollinations", "comfyui"]);
+
+/**
+ * Public list prices (USD) for the built-in env providers, whose calls are
+ * logged without a cost. Used only to estimate spend on the settings page —
+ * per 1M tokens in / out, or per image (gpt-image-1 at medium, 1024px).
+ * Sources: openai.com/api/pricing, anthropic.com/pricing, ai.google.dev/pricing.
+ */
+export const LIST_PRICES: Record<string, { inPerM?: number; outPerM?: number; perImage?: number }> = {
+  "gpt-4o": { inPerM: 2.5, outPerM: 10 },
+  "gpt-4o-mini": { inPerM: 0.15, outPerM: 0.6 },
+  "gpt-4.1": { inPerM: 2, outPerM: 8 },
+  "gpt-4.1-mini": { inPerM: 0.4, outPerM: 1.6 },
+  "gpt-image-1": { perImage: 0.042 },
+  "claude-sonnet-4-5": { inPerM: 3, outPerM: 15 },
+  "claude-haiku-4-5": { inPerM: 1, outPerM: 5 },
+  "gemini-2.5-flash": { inPerM: 0.3, outPerM: 2.5 },
+  "gemini-2.5-pro": { inPerM: 1.25, outPerM: 10 },
+};
+
+/** List-price estimate for a usage bucket, or null when the model isn't listed. */
+export function estimateListCost(row: Pick<UsageGroup, "model" | "inputTokens" | "outputTokens" | "images">): number | null {
+  const p = LIST_PRICES[row.model];
+  if (!p) return null;
+  return (
+    (row.inputTokens / 1e6) * (p.inPerM ?? 0) + (row.outputTokens / 1e6) * (p.outPerM ?? 0) + row.images * (p.perImage ?? 0)
+  );
+}
 
 export function isFreeProvider(provider: string): boolean {
   return FREE_PROVIDERS.has(provider);
@@ -65,6 +94,7 @@ export function summarizeUsage(groups: UsageGroup[]): UsageSummary {
         videoMinutes: 0,
         costUsd: 0,
         unpricedCalls: 0,
+        estimatedUsd: 0,
       } satisfies EngineUsage);
     if (!e.models.includes(row.model)) e.models.push(row.model);
     e.calls += row.calls;
@@ -73,7 +103,13 @@ export function summarizeUsage(groups: UsageGroup[]): UsageSummary {
     e.images += row.images;
     e.videoMinutes += row.videoSeconds / 60;
     e.costUsd += row.costUsd ?? 0;
-    if (!free) e.unpricedCalls += row.calls - row.pricedCalls;
+    const unpriced = row.calls - row.pricedCalls;
+    // Env providers log no cost; estimate a wholly unpriced bucket at list price.
+    const estimate = !free && unpriced > 0 && row.pricedCalls === 0 ? estimateListCost(row) : null;
+    if (estimate !== null) {
+      e.costUsd += estimate;
+      e.estimatedUsd += estimate;
+    } else if (!free) e.unpricedCalls += unpriced;
     byProvider.set(row.provider, e);
   }
 

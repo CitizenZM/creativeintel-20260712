@@ -307,6 +307,11 @@ function Usage({ view }: { view: AiSettingsView }) {
               </div>
             ))}
           </div>
+          {engines.some((e) => e.estimatedUsd > 0) && (
+            <p className="text-[11px] text-muted-foreground">
+              Built-in providers (OpenAI, Anthropic, Gemini) log no cost, so their spend is estimated at public list prices.
+            </p>
+          )}
           {totals.unpricedPaidCalls > 0 && (
             <p className="text-[11px] text-muted-foreground">
               {fmt.format(totals.unpricedPaidCalls)} paid call{totals.unpricedPaidCalls === 1 ? "" : "s"} have no known price
@@ -346,7 +351,7 @@ function Usage({ view }: { view: AiSettingsView }) {
                         <td className="px-3 py-2 text-right tabular-nums">{fmt.format(e.images)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{e.videoMinutes.toFixed(1)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">
-                          {e.free ? "free" : e.unpricedCalls === e.calls ? "unknown" : usd(e.costUsd) + (e.unpricedCalls ? "+" : "")}
+                          {e.free ? "free" : e.unpricedCalls === e.calls ? "unknown" : usd(e.costUsd) + (e.unpricedCalls ? "+" : "") + (e.estimatedUsd > 0 ? " (est.)" : "")}
                         </td>
                       </tr>
                     );
