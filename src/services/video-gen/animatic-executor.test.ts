@@ -45,3 +45,13 @@ describe("animatic engine", () => {
     }
   }, 60_000);
 });
+
+describe("pollinationsBackoffMs", () => {
+  it("honours Retry-After on 429 and backs off harder than on other errors", async () => {
+    const { pollinationsBackoffMs } = await import("./animatic-executor");
+    expect(pollinationsBackoffMs(429, "7", 0)).toBe(7000);
+    expect(pollinationsBackoffMs(429, "600", 0)).toBe(60_000);
+    expect(pollinationsBackoffMs(429, null, 1)).toBe(20_000);
+    expect(pollinationsBackoffMs(500, null, 1)).toBe(6000);
+  });
+});

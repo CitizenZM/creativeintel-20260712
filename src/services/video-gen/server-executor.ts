@@ -166,6 +166,7 @@ export async function tickRun(adapter: EngineAdapter, runId: string): Promise<Ti
     if (inFlight >= adapter.maxVideosInFlight) break;
     const ref = byNameFresh.get(refName(((j.leftRefs as string[] | null) ?? [])[0] ?? ""));
     if (ref && !TERMINAL_JOB.has(ref.status)) continue; // keyframe not ready yet
+    if (ref?.status === "failed") continue; // the run fails on the keyframe; don't add a second error
     const imageUrl = ref?.resultUrl ?? undefined;
     if (!(await claimJob(j.id))) continue;
     try {
