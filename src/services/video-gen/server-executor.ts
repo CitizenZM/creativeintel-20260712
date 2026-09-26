@@ -208,11 +208,14 @@ async function storyboardFrames(storyboardId: string | null): Promise<AssembleFr
   if (!storyboardId) return [];
   const sb = await prisma.storyboard.findUnique({ where: { id: storyboardId }, select: { frames: true, frameSeconds: true } });
   const frameSeconds = sb?.frameSeconds || 2;
-  const frames = Array.isArray(sb?.frames) ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number }[]) : [];
+  const frames = Array.isArray(sb?.frames)
+    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null }[])
+    : [];
   return frames.map((f, i) => ({
     frameNumber: f.frameNumber ?? i + 1,
     startSec: Number.isFinite(f.startSec) ? f.startSec! : i * frameSeconds,
     endSec: Number.isFinite(f.endSec) ? f.endSec! : (i + 1) * frameSeconds,
+    text: typeof f.textOverlay === "string" ? f.textOverlay : null,
   }));
 }
 
