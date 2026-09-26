@@ -1,0 +1,135 @@
+import { describe, expect, it } from "vitest";
+import {
+  customVideoModelName,
+  DEFAULT_AI_SETTINGS,
+  engineOptions,
+  envAvailability,
+  normalizeSettings,
+  resolveStrictFree,
+  routeOrder,
+  videoDefaults,
+  type CustomProviderInfo,
+} from "./ai-settings-core";
+
+const TEXT_BASE = ["openai", "gemini", "anthropic", "openrouter", "glm"];
+
+describe("resolveStrictFree — DB > env > default", () => {
+  it("uses the DB value when set", () => {
+    expect(resolveStrictFree(true, undefined)).toEqual({ effective: true, source: "db" });
+    expect(resolveStrictFree(false, "free")).toEqual({ effective: false, source: "db" });
+  });
+
+  it("falls back to env AI_COST_MODE when the DB has no value", () => {
+    expect(resolveStrictFree(null, "free")).toEqual({ effective: true, source: "env" });
+    expect(resolveStrictFree(undefined, "paid")).toEqual({ effective: false, source: "env" });
+  });
+
+  it("defaults to off", () => {
+    expect(resolveStrictFree(null, undefined)).toEqual({ effective: false, source: "default" });
+    expect(resolveStrictFree(null, "")).toEqual({ effective: false, source: "default" });
+  });
+});
+
+describe("normalizeSettings", () => {
+  it("fills defaults for missing or invalid values", () => {
+    expect(normalizeSettings(null)).toEqual(DEFAULT_AI_SETTINGS);
+    expect(normalizeSettings({ text: "gemini", image: 42, strictFree: "yes" })).toEqual({
+      ...DEFAULT_AI_SETTINGS,
+      text: "gemini",
+    });
+  });
+
+  it("keeps custom provider choices and explicit strict-free", () => {
+    expect(normalizeSettings({ video: "custom:abc123", strictFree: false })).toEqual({
+      ...DEFAULT_AI_SETTINGS,
+      video: "custom:abc123",
+      strictFree: false,
+    });
+  });
+
+  it("rejects an engine that does not serve the capability", () => {
+    expect(normalizeSettings({ text: "libtv", video: "anthropic" })).toEqual(DEFAULT_AI_SETTINGS);
+  });
+});
+
+describe("routeOrder — engine selection", () => {
+  it("auto keeps today's order", () => {
+    expect(routeOrder("auto", TEXT_BASE, { strictFree: false, freeIds: ["glm"] })).toEqual(TEXT_BASE);
+  });
+
+  it("puts the chosen engine first, then falls back in today's order", () => {
+    expect(routeOrder("anthropic", TEXT_BASE, { strictFree: false, freeIds: ["glm"] })).toEqual([
+      "anthropic",
+      "openai",
+      "gemini",
+      "openrouter",
+      "glm",
+    ]);
+    expect(routeOrder("custom:p1", TEXT_BASE, { strictFree: false, freeIds: ["glm"] })[0]).toBe("custom:p1");
+  });
+
+  it("AI_PROVIDER still forces a single provider when nothing is chosen", () => {
+    expect(routeOrder("auto", TEXT_BASE, { strictFree: false, freeIds: ["glm"], forced: "gemini" })).toEqual(["gemini"]);
+    expect(routeOrder("glm", TEXT_BASE, { strictFree: false, freeIds: ["glm"], forced: "gemini" })).toEqual(["glm", "gemini"]);
+  });
+
+  it("strict free mode keeps only free engines, whatever was chosen", () => {
+    expect(routeOrder("openai", TEXT_BASE, { strictFree: true, freeIds: ["glm"] })).toEqual(["glm"]);
+    expect(routeOrder("custom:p1", TEXT_BASE, { strictFree: true, freeIds: ["glm"], forced: "openai" })).toEqual(["glm"]);
+    expect(
+      routeOrder("pollinations", ["glm", "pollinations"], { strictFree: true, freeIds: ["glm", "pollinations"] })
+    ).toEqual(["pollinations", "glm"]);
+  });
+});
+
+const zhipuPaid: CustomProviderInfo = {
+  id: "p1",
+  name: "My Zhipu",
+  type: "zhipu-paid",
+  models: { video: "cogvideox-3", text: "glm-4.7" },
+  prices: { perClipUsd: 0.14 },
+};
+const fal: CustomProviderInfo = { id: "p2", name: "fal", type: "fal", models: { image: "fal-ai/flux/dev" }, prices: null };
+
+describe("videoDefaults", () => {
+  it("strict free always renders on GLM", () => {
+    expect(videoDefaults("libtv", true, [zhipuPaid])).toEqual({ imageModel: "GLM CogView-3-Flash", videoModel: "GLM CogVideoX-Flash" });
+  });
+
+  it("maps each choice to its compile defaults", () => {
+    expect(videoDefaults("auto", false, [])).toEqual({ imageModel: "Seedream 4.0", videoModel: "Hailuo 2.3 Fast" });
+    expect(videoDefaults("glm", false, [])).toEqual({ imageModel: "GLM CogView-3-Flash", videoModel: "GLM CogVideoX-Flash" });
+    expect(videoDefaults("custom:p1", false, [zhipuPaid])).toEqual({
+      imageModel: "GLM CogView-3-Flash",
+      videoModel: customVideoModelName(zhipuPaid),
+    });
+    expect(videoDefaults("custom:gone", false, [zhipuPaid]).videoModel).toBe("Hailuo 2.3 Fast");
+  });
+});
+
+describe("engineOptions", () => {
+  const env = envAvailability({ ZHIPU_API_KEY: "z", OPENAI_API_KEY: "o" });
+
+  it("marks env providers connected only when their key exists", () => {
+    const opts = engineOptions("text", { env, providers: [], strictFree: false });
+    expect(opts.find((o) => o.value === "openai")?.connected).toBe(true);
+    expect(opts.find((o) => o.value === "gemini")?.connected).toBe(false);
+    expect(opts.find((o) => o.value === "gemini")?.disabledReason).toMatch(/GEMINI_API_KEY/);
+  });
+
+  it("lists custom providers only for capabilities they serve", () => {
+    const image = engineOptions("image", { env, providers: [zhipuPaid, fal], strictFree: false });
+    expect(image.some((o) => o.value === "custom:p2")).toBe(true);
+    expect(image.some((o) => o.value === "custom:p1")).toBe(false);
+    const video = engineOptions("video", { env, providers: [zhipuPaid, fal], strictFree: false });
+    expect(video.map((o) => o.value)).toEqual(["auto", "glm", "libtv", "custom:p1"]);
+  });
+
+  it("disables paid engines in strict free mode with a reason", () => {
+    const opts = engineOptions("text", { env, providers: [zhipuPaid], strictFree: true });
+    const openai = opts.find((o) => o.value === "openai")!;
+    expect(openai.disabledReason).toMatch(/Strict free mode/);
+    expect(opts.find((o) => o.value === "glm")?.disabledReason).toBeUndefined();
+    expect(opts.find((o) => o.value === "custom:p1")?.disabledReason).toMatch(/Strict free mode/);
+  });
+});

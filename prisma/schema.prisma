@@ -1061,3 +1061,45 @@ model BrowserGenJob {
   @@index([projectId])
   @@index([scriptId])
 }
+
+// ─── AI engine settings ─────────────────────────────────────────────────────
+// Single-tenant key/value settings (e.g. "ai.engines"). Read through a ~30 s
+// in-memory cache in src/services/settings/ai-settings.ts.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// A bring-your-own paid model API. The key is AES-256-GCM encrypted with
+// SETTINGS_ENCRYPTION_KEY and never leaves the server decrypted.
+model ModelProvider {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  type      String // "openai-compatible" | "zhipu-paid" | "fal"
+  baseUrl   String?
+  apiKeyEnc String
+  keyLast4  String
+  models    Json // { text?, vision?, image?, video? } model ids
+  prices    Json? // { inputPerMTokUsd?, outputPerMTokUsd?, perImageUsd?, perClipUsd? }
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One row per AI call (text/vision completion, image, video clip). Written
+// fire-and-forget; costUsd is null when the price is not known.
+model AiUsage {
+  id           String   @id @default(cuid())
+  provider     String
+  model        String
+  capability   String // text | vision | image | video
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  images       Int      @default(0)
+  videoSeconds Float    @default(0)
+  costUsd      Float?
+  projectId    String?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+}
