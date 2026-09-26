@@ -125,7 +125,8 @@ export function AiSettingsClient({ initial }: { initial: AiSettingsView }) {
               <p className="font-medium">{strict.effective ? "On — only free models run" : "Off — paid engines allowed"}</p>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 When on, every call goes to Zhipu&apos;s free models (GLM-4.7-Flash, GLM-4.6V-Flash, CogView-3-Flash,
-                CogVideoX-Flash) or Pollinations, and anything that would spend money is refused. {strictSource}.
+                CogVideoX-Flash), Pollinations or your own ComfyUI node, and anything that would spend money is refused.{" "}
+                {strictSource}.
               </p>
             </div>
             <label className="flex shrink-0 cursor-pointer items-center gap-2">

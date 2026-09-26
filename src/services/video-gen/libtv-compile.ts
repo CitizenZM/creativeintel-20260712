@@ -263,7 +263,7 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
   // bring-your-own paid video models); strict free mode defaults to — and only
   // renders with — the free GLM models.
   const snap = await loadAiSettings();
-  const defaults = videoDefaults(snap.settings.video, isStrictFree(), snap.providers);
+  const defaults = videoDefaults(snap.settings.video, isStrictFree(), snap.providers, { comfyAvailable: isComfyConfigured() });
   const {
     projectId,
     storyboardId,

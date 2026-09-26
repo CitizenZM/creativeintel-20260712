@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { isStrictFree } from "@/lib/cost-mode";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { videoDefaults } from "@/services/settings/ai-settings-core";
+import { isComfyConfigured } from "@/services/ai/comfyui";
 import {
   compileRunFromStoryboard,
   LibtvCompileError,
@@ -31,7 +32,11 @@ export async function GET(
   return NextResponse.json({
     runs,
     // The render engine picked in Settings → AI engines comes back as `preferred`.
-    models: modelOptions(isStrictFree(), undefined, videoDefaults(snap.settings.video, isStrictFree(), snap.providers)),
+    models: modelOptions(
+      isStrictFree(),
+      undefined,
+      videoDefaults(snap.settings.video, isStrictFree(), snap.providers, { comfyAvailable: isComfyConfigured() })
+    ),
     brandKit: completeness,
     limits: { maxRunCredits: maxRunCredits(), defaultBudgetMode: DEFAULT_BUDGET_MODE },
   });

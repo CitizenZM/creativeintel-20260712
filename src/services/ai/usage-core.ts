@@ -42,7 +42,7 @@ export interface UsageSummary {
   };
 }
 
-const FREE_PROVIDERS = new Set(["glm", "pollinations"]);
+const FREE_PROVIDERS = new Set(["glm", "pollinations", "comfyui"]);
 
 export function isFreeProvider(provider: string): boolean {
   return FREE_PROVIDERS.has(provider);

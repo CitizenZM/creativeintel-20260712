@@ -5,6 +5,8 @@
  */
 import { z } from "zod";
 import {
+  COMFY_IMAGE_MODEL,
+  COMFY_VIDEO_MODEL,
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
   GLM_IMAGE_MODEL,
@@ -29,11 +31,11 @@ export const BUILTIN_ENGINES: Record<Capability, string[]> = {
   text: ["glm", "openai", "gemini", "anthropic", "openrouter"],
   vision: ["glm", "openai", "gemini", "anthropic", "openrouter"],
   image: ["glm", "openai", "fal", "pollinations"],
-  video: ["glm", "libtv"],
+  video: ["glm", "comfyui", "libtv"],
 };
 
-/** Engines that never cost money. */
-export const FREE_ENGINES = new Set(["glm", "pollinations"]);
+/** Engines that never cost money (ComfyUI is the operator's own GPU: 0 credits). */
+export const FREE_ENGINES = new Set(["glm", "pollinations", "comfyui"]);
 
 const ENGINE_LABELS: Record<Capability, Record<string, string>> = {
   text: {
@@ -58,6 +60,7 @@ const ENGINE_LABELS: Record<Capability, Record<string, string>> = {
   },
   video: {
     glm: "Zhipu CogVideoX-Flash (free, server-side)",
+    comfyui: "ComfyUI (your own GPU node)",
     libtv: "LibTV (credits, local worker)",
   },
 };
@@ -70,6 +73,7 @@ const ENGINE_ENV: Record<string, string[]> = {
   anthropic: ["ANTHROPIC_API_KEY"],
   openrouter: ["OPENROUTER_API_KEY"],
   fal: ["FAL_KEY"],
+  comfyui: ["COMFYUI_URL"],
 };
 
 export interface AiEngineSettings {
@@ -190,9 +194,11 @@ export function customVideoModelName(p: Pick<CustomProviderInfo, "name" | "model
 export function videoDefaults(
   choice: string,
   strictFree: boolean,
-  providers: CustomProviderInfo[]
+  providers: CustomProviderInfo[],
+  opts: { comfyAvailable?: boolean } = {}
 ): { imageModel: string; videoModel: string } {
   const glm = { imageModel: GLM_IMAGE_MODEL, videoModel: GLM_VIDEO_MODEL };
+  if (choice === "comfyui" && opts.comfyAvailable) return { imageModel: COMFY_IMAGE_MODEL, videoModel: COMFY_VIDEO_MODEL };
   if (strictFree || choice === "glm") return glm;
   if (choice.startsWith(CUSTOM_PREFIX)) {
     const p = providers.find((x) => x.id === choice.slice(CUSTOM_PREFIX.length));

@@ -106,6 +106,15 @@ describe("videoDefaults", () => {
     });
     expect(videoDefaults("custom:gone", false, [zhipuPaid]).videoModel).toBe("Hailuo 2.3 Fast");
   });
+
+  it("renders on ComfyUI only when a node is configured", () => {
+    const comfy = { imageModel: "ComfyUI Image (self-hosted)", videoModel: "ComfyUI Video (self-hosted)" };
+    expect(videoDefaults("comfyui", false, [], { comfyAvailable: true })).toEqual(comfy);
+    // ComfyUI is zero-credit, so it stays the default in strict free mode.
+    expect(videoDefaults("comfyui", true, [], { comfyAvailable: true })).toEqual(comfy);
+    expect(videoDefaults("comfyui", false, [], { comfyAvailable: false }).videoModel).toBe("Hailuo 2.3 Fast");
+    expect(videoDefaults("comfyui", true, [], { comfyAvailable: false }).videoModel).toBe("GLM CogVideoX-Flash");
+  });
 });
 
 describe("engineOptions", () => {
@@ -123,7 +132,8 @@ describe("engineOptions", () => {
     expect(image.some((o) => o.value === "custom:p2")).toBe(true);
     expect(image.some((o) => o.value === "custom:p1")).toBe(false);
     const video = engineOptions("video", { env, providers: [zhipuPaid, fal], strictFree: false });
-    expect(video.map((o) => o.value)).toEqual(["auto", "glm", "libtv", "custom:p1"]);
+    expect(video.map((o) => o.value)).toEqual(["auto", "glm", "comfyui", "libtv", "custom:p1"]);
+    expect(video.find((o) => o.value === "comfyui")?.disabledReason).toMatch(/COMFYUI_URL/);
   });
 
   it("disables paid engines in strict free mode with a reason", () => {
@@ -132,6 +142,14 @@ describe("engineOptions", () => {
     expect(openai.disabledReason).toMatch(/Strict free mode/);
     expect(opts.find((o) => o.value === "glm")?.disabledReason).toBeUndefined();
     expect(opts.find((o) => o.value === "custom:p1")?.disabledReason).toMatch(/Strict free mode/);
+  });
+
+  it("keeps a configured ComfyUI node selectable in strict free mode", () => {
+    const withComfy = envAvailability({ ZHIPU_API_KEY: "z", COMFYUI_URL: "https://gpu.example" });
+    const video = engineOptions("video", { env: withComfy, providers: [], strictFree: true });
+    expect(video.find((o) => o.value === "comfyui")).toMatchObject({ connected: true, paid: false });
+    expect(video.find((o) => o.value === "comfyui")?.disabledReason).toBeUndefined();
+    expect(video.find((o) => o.value === "libtv")?.disabledReason).toMatch(/Strict free mode/);
   });
 });
 
