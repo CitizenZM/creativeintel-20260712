@@ -132,7 +132,7 @@ describe("engineOptions", () => {
     expect(image.some((o) => o.value === "custom:p2")).toBe(true);
     expect(image.some((o) => o.value === "custom:p1")).toBe(false);
     const video = engineOptions("video", { env, providers: [zhipuPaid, fal], strictFree: false });
-    expect(video.map((o) => o.value)).toEqual(["auto", "glm", "comfyui", "libtv", "custom:p1"]);
+    expect(video.map((o) => o.value)).toEqual(["auto", "glm", "comfyui", "animatic", "libtv", "custom:p1"]);
     expect(video.find((o) => o.value === "comfyui")?.disabledReason).toMatch(/COMFYUI_URL/);
   });
 

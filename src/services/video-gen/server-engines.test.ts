@@ -22,8 +22,8 @@ describe("server engine registry", () => {
   });
 
   it("sweeps every server engine", async () => {
-    expect(await advanceActiveServerRuns(1000)).toEqual({ glm: 0, comfyui: 0 });
+    expect(await advanceActiveServerRuns(1000)).toEqual({ glm: 0, comfyui: 0, animatic: 0 });
     const executors = findMany.mock.calls.map((c) => (c as unknown as [{ where: { executor: string } }])[0].where.executor).sort();
-    expect(executors).toEqual(["comfyui", "glm"]);
+    expect(executors).toEqual(["animatic", "comfyui", "glm"]);
   });
 });
