@@ -3,6 +3,10 @@ import { jsonrepair } from "jsonrepair";
 import { ZodSchema } from "zod";
 import { isStrictFree } from "@/lib/cost-mode";
 import { ZHIPU_BASE_URL, ZHIPU_FREE, zhipuKey } from "./zhipu";
+import { cachedAiSettings, cachedProvider, loadAiSettings } from "@/services/settings/ai-settings";
+import { CUSTOM_PREFIX, routeOrder } from "@/services/settings/ai-settings-core";
+import { logAiUsage } from "./usage";
+import { costForTokens } from "./usage-core";
 
 // Route priority: OpenAI → Gemini → Anthropic → OpenRouter. Each provider is
 // tried in order while its key is present and not disabled; the first 401/403
@@ -15,8 +19,17 @@ import { ZHIPU_BASE_URL, ZHIPU_FREE, zhipuKey } from "./zhipu";
 // standard (writing), deep (teardowns, synthesis) — and each provider maps
 // tiers to models, overridable per tier by env. Cheap work stops paying for
 // the big model.
+//
+// Settings → AI engines (/settings/ai) can pick the engine per capability
+// (text, vision) — a built-in provider or a bring-your-own "custom:<id>" one.
+// The chosen engine is tried first, then today's order as the fallback;
+// strict free mode still narrows everything to GLM.
 
 type ProviderName = "openai" | "gemini" | "anthropic" | "openrouter" | "glm";
+/** A built-in provider or a bring-your-own one ("custom:<ModelProvider.id>"). */
+type Route = ProviderName | `custom:${string}`;
+type TextCapability = "text" | "vision";
+const BASE_ORDER: ProviderName[] = ["openai", "gemini", "anthropic", "openrouter", "glm"];
 export type ModelTier = "fast" | "standard" | "deep";
 
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/";
@@ -28,7 +41,8 @@ const GEMINI_MAX_TOKENS = 32768;
 const GEMINI_IMAGE_FETCH_TIMEOUT_MS = 10_000;
 const GEMINI_IMAGE_MAX_BYTES = 6 * 1024 * 1024;
 
-const _disabledProviders = new Set<ProviderName>();
+const _disabledProviders = new Set<Route>();
+const _customClients = new Map<string, { apiKey: string; baseUrl: string | null; client: OpenAI }>();
 
 let _openai: OpenAI | null = null;
 let _gemini: OpenAI | null = null;
@@ -82,7 +96,25 @@ function openrouterClient(): OpenAI | null {
   return _openrouter;
 }
 
-function clientFor(provider: ProviderName): OpenAI | null {
+function customId(route: Route): string | null {
+  return route.startsWith(CUSTOM_PREFIX) ? route.slice(CUSTOM_PREFIX.length) : null;
+}
+
+/** OpenAI client for a bring-your-own provider (openai-compatible or paid Zhipu). */
+function customClient(route: Route): OpenAI | null {
+  const id = customId(route);
+  const p = id ? cachedProvider(id) : null;
+  if (!p || !p.apiKey || p.type === "fal" || _disabledProviders.has(route)) return null;
+  const baseUrl = p.baseUrl || (p.type === "zhipu-paid" ? ZHIPU_BASE_URL : null);
+  const hit = _customClients.get(p.id);
+  if (hit && hit.apiKey === p.apiKey && hit.baseUrl === baseUrl) return hit.client;
+  const client = new OpenAI({ apiKey: p.apiKey, baseURL: baseUrl ?? undefined });
+  _customClients.set(p.id, { apiKey: p.apiKey, baseUrl, client });
+  return client;
+}
+
+function clientFor(provider: Route): OpenAI | null {
+  if (customId(provider)) return customClient(provider);
   if (provider === "openai") return openaiClient();
   if (provider === "gemini") return geminiClient();
   if (provider === "anthropic") return anthropicClient();
@@ -95,21 +127,27 @@ function forcedProvider(): ProviderName | null {
   return v === "openai" || v === "gemini" || v === "anthropic" || v === "openrouter" || v === "glm" ? v : null;
 }
 
-/** Ordered list of providers to try. AI_PROVIDER, if set, forces a single entry. */
-function providerOrder(): ProviderName[] {
-  // Strict free mode: Zhipu's free models only — never fall through to a paid provider.
-  if (isStrictFree()) return ["glm"];
-  const forced = forcedProvider();
-  if (forced) return [forced];
-  return ["openai", "gemini", "anthropic", "openrouter", "glm"];
+/**
+ * Ordered list of providers to try: the engine chosen in settings first, then
+ * today's order (AI_PROVIDER, if set, forces a single fallback entry). Strict
+ * free mode: Zhipu's free models only — never fall through to a paid provider.
+ */
+function providerOrder(capability: TextCapability = "text"): Route[] {
+  const choice = cachedAiSettings().settings[capability];
+  return routeOrder(choice, BASE_ORDER, {
+    strictFree: isStrictFree(),
+    freeIds: ["glm"],
+    forced: forcedProvider(),
+  }) as Route[];
 }
 
 /** Best-guess active provider for label/vision-model resolution. Never throws. */
-function activeProvider(): ProviderName {
-  for (const provider of providerOrder()) {
+function activeProvider(capability: TextCapability = "text"): Route {
+  const order = providerOrder(capability);
+  for (const provider of order) {
     if (clientFor(provider)) return provider;
   }
-  return providerOrder()[0] ?? "openai";
+  return order[0] ?? "openai";
 }
 
 function isAuthError(err: unknown): boolean {
@@ -129,11 +167,17 @@ function toOpenRouterModel(model: string): string {
   return `openai/${model}`;
 }
 
-function adaptModelForProvider(model: string, provider: ProviderName): string {
+function adaptModelForProvider(model: string, provider: Route): string {
   return provider === "openrouter" ? toOpenRouterModel(model) : model;
 }
 
-function modelFor(provider: ProviderName, tier: ModelTier = "standard"): string {
+function modelFor(provider: Route, tier: ModelTier = "standard", capability: TextCapability = "text"): string {
+  const id = customId(provider);
+  if (id) {
+    const models = cachedProvider(id)?.models ?? {};
+    return (capability === "vision" ? models.vision : undefined) ?? models.text ?? models.vision ?? "";
+  }
+  if (capability === "vision") return visionModelFor(provider);
   const env = process.env;
   if (provider === "openai") {
     const standard = env.AI_MODEL || "gpt-4o";
@@ -164,10 +208,15 @@ function modelFor(provider: ProviderName, tier: ModelTier = "standard"): string 
   return "meta-llama/llama-3.3-70b-instruct:free";
 }
 
+function routeLabel(route: Route): string {
+  const id = customId(route);
+  return id ? (cachedProvider(id)?.name ?? route) : route;
+}
+
 /** The model id this deployment actually calls for text analysis — safe to render in the UI. */
 export function getConfiguredModelLabel(): string {
   const provider = activeProvider();
-  return `${modelFor(provider)} (${provider})`;
+  return `${modelFor(provider)} (${routeLabel(provider)})`;
 }
 
 /**
@@ -175,7 +224,10 @@ export function getConfiguredModelLabel(): string {
  * OpenRouter free tier) cannot see images, so vision routes separately.
  */
 export function getVisionModel(): string {
-  const provider = activeProvider();
+  return modelFor(activeProvider("vision"), "standard", "vision");
+}
+
+function visionModelFor(provider: Route): string {
   if (provider === "gemini") {
     return process.env.AI_GEMINI_VISION_MODEL || process.env.AI_GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
   }
@@ -256,7 +308,7 @@ async function toGeminiContent(
 
 async function prepareMessagesForRoute(
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
-  provider: ProviderName
+  provider: Route
 ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
   if (provider !== "gemini") return messages;
   const prepared: OpenAI.Chat.ChatCompletionMessageParam[] = [];
@@ -316,7 +368,7 @@ function parseErrorMessage(err: unknown): string {
 
 async function createOnRoute(
   client: OpenAI,
-  provider: ProviderName,
+  provider: Route,
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
   modelToUse: string,
   maxTokens: number
@@ -325,7 +377,8 @@ async function createOnRoute(
   const preparedMessages = await prepareMessagesForRoute(messages, provider);
   // GLM-4.7-Flash is a hybrid reasoning model; these calls want the JSON
   // answer, not a thinking trace, so switch thinking off.
-  const extra = provider === "glm" ? ({ thinking: { type: "disabled" } } as Record<string, unknown>) : {};
+  const zhipuFamily = provider === "glm" || (customId(provider) && cachedProvider(customId(provider)!)?.type === "zhipu-paid");
+  const extra = zhipuFamily ? ({ thinking: { type: "disabled" } } as Record<string, unknown>) : {};
   try {
     return await client.chat.completions.create({
       model: modelToUse,
@@ -353,13 +406,24 @@ async function createOnRoute(
  * usually transient, so the provider stays eligible for the next call. Any
  * other error is thrown immediately (it won't be fixed by switching providers).
  */
+/** Fire-and-forget usage row for a completed call. */
+function recordUsage(provider: Route, model: string, capability: TextCapability, usage: OpenAI.CompletionUsage | undefined) {
+  const inputTokens = usage?.prompt_tokens ?? 0;
+  const outputTokens = usage?.completion_tokens ?? 0;
+  const id = customId(provider);
+  const costUsd =
+    provider === "glm" ? 0 : id ? costForTokens(cachedProvider(id)?.prices, inputTokens, outputTokens) : null;
+  logAiUsage({ provider, model, capability, inputTokens, outputTokens, costUsd });
+}
+
 async function callModel(
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
   maxTokens: number,
   modelOverride?: string,
-  tier: ModelTier = "standard"
+  tier: ModelTier = "standard",
+  capability: TextCapability = "text"
 ) {
-  const order = providerOrder();
+  const order = providerOrder(capability);
   let lastErr: unknown;
   let tried = false;
 
@@ -367,9 +431,15 @@ async function callModel(
     const client = clientFor(provider);
     if (!client) continue;
     tried = true;
-    const modelToUse = modelOverride ? adaptModelForProvider(modelOverride, provider) : modelFor(provider, tier);
+    // A bring-your-own provider always uses its own configured model ids.
+    const modelToUse =
+      modelOverride && !customId(provider)
+        ? adaptModelForProvider(modelOverride, provider)
+        : modelFor(provider, tier, capability);
     try {
-      return await createOnRoute(client, provider, messages, modelToUse, maxTokens);
+      const response = await createOnRoute(client, provider, messages, modelToUse, maxTokens);
+      recordUsage(provider, modelToUse, capability, response.usage);
+      return response;
     } catch (err) {
       if (isAuthError(err)) {
         // 401 = bad key; 403 can also mean "this project can't use this
@@ -393,7 +463,9 @@ async function callModel(
 
   if (!tried) {
     throw new Error(
-      "No AI key configured — set OPENAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY"
+      isStrictFree()
+        ? "Strict free mode is on but ZHIPU_API_KEY is not configured — set it, or turn strict free mode off in Settings → AI engines"
+        : "No AI key configured — set OPENAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY or ZHIPU_API_KEY, or connect a model API in Settings → AI engines"
     );
   }
   throw lastErr;
@@ -422,6 +494,11 @@ export async function analyzeWithClaude<T>(options: {
     }
   }
 
+  // Warm the engine settings (cached ~30 s): chosen engines + strict free mode.
+  await loadAiSettings();
+  const capability: TextCapability =
+    typeof userPrompt !== "string" && userPrompt.some((part) => part.type === "image_url") ? "vision" : "text";
+
   // OpenAI requires "json" in the messages when using json_object format
   const systemWithJson = systemPrompt.toLowerCase().includes("json")
     ? systemPrompt
@@ -436,7 +513,8 @@ export async function analyzeWithClaude<T>(options: {
     ],
     maxTokens,
     modelOverride,
-    tier
+    tier,
+    capability
   );
 
   const text = response.choices[0]?.message?.content || "";
@@ -467,7 +545,8 @@ export async function analyzeWithClaude<T>(options: {
       ],
       maxTokens,
       modelOverride,
-      tier
+      tier,
+      capability
     );
 
     const retryText = retryResponse.choices[0]?.message?.content || "";

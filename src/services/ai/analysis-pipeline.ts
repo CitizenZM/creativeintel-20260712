@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { selectionKey } from "@/services/creative-library";
-import { analyzeWithClaude, getVisionModel } from "./claude-client";
+import { analyzeWithClaude } from "./claude-client";
 import { buildBrandAnalysisPrompt } from "./prompts/brand-analysis";
 import { buildContentScoringPrompt, type VideoEvidence, type ScoringItem } from "./prompts/content-scoring";
 import { buildPatternMiningPrompt, type PatternTeardown } from "./prompts/pattern-mining";
@@ -875,7 +875,8 @@ export async function runAdTeardownStage(
             userPrompt: prompt.user,
             responseSchema: teardownSchema,
             maxTokens: 4096,
-            model: evidence.frameUrls.length > 0 ? getVisionModel() : undefined,
+            // Frames make this a vision call: claude-client routes it to the
+            // vision engine chosen in settings (per provider) on its own.
             // Only the top-N ads get torn down; this is where quality pays off.
             tier: "deep",
           });

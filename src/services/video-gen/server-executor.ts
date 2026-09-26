@@ -22,7 +22,7 @@ export type TickResult = "idle" | "running" | "done" | "failed";
 
 export type TaskResult =
   | { status: "PROCESSING" }
-  | { status: "SUCCESS"; url: string; remoteUrl?: string }
+  | { status: "SUCCESS"; url: string; remoteUrl?: string; creditsSpent?: number }
   | { status: "FAIL"; error: string };
 
 export interface JobContext {
@@ -31,6 +31,10 @@ export interface JobContext {
   aspectRatio: string;
   /** Clip length for video jobs (job settings, else the run's clip duration). */
   durationSec: number;
+  projectId?: string;
+  /** The job's compiled settings (e.g. a bring-your-own paid model id). */
+  settings?: Record<string, unknown>;
+  creditsEstimated?: number;
 }
 
 /** What an engine must provide; the graph walking is shared. */
@@ -70,7 +74,7 @@ function errorText(err: unknown): string {
 
 async function applyTaskResult(adapter: EngineAdapter, job: LibtvJob, result: TaskResult) {
   if (result.status === "SUCCESS") {
-    await jobDone({ jobId: job.id, resultUrl: result.url, remoteUrl: result.remoteUrl, creditsSpent: 0 });
+    await jobDone({ jobId: job.id, resultUrl: result.url, remoteUrl: result.remoteUrl, creditsSpent: result.creditsSpent ?? 0 });
   } else if (result.status === "FAIL") {
     await jobFailed(job.id, result.error);
   }
@@ -96,7 +100,15 @@ export async function tickRun(adapter: EngineAdapter, runId: string): Promise<Ti
   const ctxFor = (j: LibtvJob): JobContext => {
     const s = (j.settings ?? {}) as { duration?: unknown };
     const duration = Number(s.duration) || Number(run.clipDurationSec) || 5;
-    return { runId, nodeName: j.nodeName, aspectRatio: run.aspectRatio, durationSec: duration };
+    return {
+      runId,
+      nodeName: j.nodeName,
+      aspectRatio: run.aspectRatio,
+      durationSec: duration,
+      projectId: run.projectId,
+      settings: (j.settings ?? {}) as Record<string, unknown>,
+      creditsEstimated: j.creditsEstimated ?? 0,
+    };
   };
   const byName = new Map(run.jobs.map((j) => [j.nodeName, j]));
   const urlOf = (ref: string) => byName.get(refName(ref))?.resultUrl ?? byName.get(refName(ref))?.sourceUrl ?? null;
@@ -182,7 +194,9 @@ export async function tickRun(adapter: EngineAdapter, runId: string): Promise<Ti
   try {
     const frames = await storyboardFrames(run.storyboardId);
     const master = await assembleGlmMaster({ runId, aspectRatio: run.aspectRatio, frames, jobs: now as LibtvJob[] });
-    await runDone({ runId, masterMp4Url: master, creditsSpent: 0 });
+    // Free runs spend 0; bring-your-own paid clips record their cost.
+    const spent = now.reduce((sum, x) => sum + (x.creditsSpent ?? 0), 0);
+    await runDone({ runId, masterMp4Url: master, creditsSpent: spent });
     return "done";
   } catch (err) {
     await runFailed(runId, `Assembly failed: ${errorText(err)}`);

@@ -100,6 +100,8 @@ export interface ModelOptionView {
   durations?: number[];
   /** "libtv" | "glm" | "comfyui" — the video model decides which engine renders the run. */
   engine?: string;
+  /** Default picked in Settings → AI engines. */
+  preferred?: boolean;
 }
 
 export interface BrandKitReadiness {

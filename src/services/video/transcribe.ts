@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import { isStrictFree } from "@/lib/cost-mode";
+import { loadAiSettings } from "@/services/settings/ai-settings";
 import path from "node:path";
 import { runProc, checkBinaries } from "./binaries";
 
@@ -40,6 +41,7 @@ function nativeContentType(filePath: string): string | undefined {
 // If neither key is set, return a graceful no-transcript result.
 export async function transcribeAudio(videoPath: string): Promise<TranscriptResult> {
   const groqKey = process.env.GROQ_API_KEY;
+  await loadAiSettings();
   // Strict free mode: Groq's free tier only — never paid OpenAI Whisper.
   const openaiKey = isStrictFree() ? undefined : process.env.OPENAI_API_KEY;
 

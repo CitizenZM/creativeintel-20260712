@@ -1,22 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import OpenAI from "openai";
-import { isStrictFree } from "@/lib/cost-mode";
-import { generateImagePersisted, isZhipuConfigured } from "@/services/ai/zhipu";
+import { generateImageByEngine } from "@/services/ai/image-engine";
 
 export const maxDuration = 300;
-
-async function generateImageFree(prompt: string): Promise<string> {
-  const encoded = encodeURIComponent(prompt);
-  const seed = Math.floor(Math.random() * 999999);
-  const url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&seed=${seed}&nologo=true&model=flux`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(25000) });
-  if (!res.ok) throw new Error(`Pollinations error: ${res.status}`);
-  const buffer = await res.arrayBuffer();
-  const b64 = Buffer.from(buffer).toString("base64");
-  const mime = res.headers.get("content-type") || "image/jpeg";
-  return `data:${mime};base64,${b64}`;
-}
 
 export async function POST(
   request: Request,
@@ -33,44 +19,21 @@ export async function POST(
   const noTextDirective = "CRITICAL: No text, no words, no letters, no typography, no captions, no logos, no signs. Pure cinematic visual only.";
 
   try {
-    // OpenAI client — used only if key is present and valid
-    const free = isStrictFree();
-    const openai = !free && process.env.OPENAI_API_KEY
-      ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-      : null;
-
     const keyframes = [];
     for (let i = 0; i < Math.min(prompts.length, 8); i++) {
       try {
         const fullPrompt = `Cinematic film still for a video ad: ${prompts[i]}. Photorealistic advertising cinematography, natural lighting, commercial production quality. ${noTextDirective}`;
-        let imageUrl: string | null = null;
-
-        // Primary: OpenAI gpt-image-1
-        if (openai) {
-          try {
-            const response = await openai.images.generate({
-              model: "gpt-image-1",
-              prompt: fullPrompt,
-              n: 1,
-              size: "1024x1024",
-              quality: "low",
-            });
-            const b64 = response.data?.[0]?.b64_json;
-            imageUrl = b64 ? `data:image/png;base64,${b64}` : (response.data?.[0]?.url ?? null);
-          } catch (openaiErr) {
-            console.warn(`Keyframe ${i}: OpenAI failed, using Pollinations:`, openaiErr instanceof Error ? openaiErr.message : openaiErr);
-          }
-        }
-
-        // Free mode: Zhipu CogView-3-Flash first.
-        if (!imageUrl && free && isZhipuConfigured()) {
-          imageUrl = await generateImagePersisted(fullPrompt, { aspectRatio: "1:1", folder: "keyframes" }).catch(() => null);
-        }
-
-        // Fallback: Pollinations.ai (free, no key)
-        if (!imageUrl) {
-          imageUrl = await generateImageFree(fullPrompt);
-        }
+        // OpenAI gpt-image-1 → Pollinations; strict free: CogView-3-Flash → Pollinations.
+        // Settings → AI engines can put any engine first.
+        const imageUrl: string | null = await generateImageByEngine({
+          prompt: fullPrompt,
+          shape: "square",
+          openaiQuality: "low",
+          pollinations: { width: 1024, height: 1024, as: "dataUrl" },
+          folder: "keyframes",
+          projectId,
+          defaults: { free: ["glm", "pollinations"], paid: ["openai", "pollinations"] },
+        }).catch(() => null);
 
         if (!imageUrl) { keyframes.push(null); continue; }
 

@@ -322,8 +322,14 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
       if (!target) {
         const pending = runs.find((r) => r.status === "awaiting_approval");
         if (!pending) throw new Error("No compiled run yet — compile one first.");
+        // Only zero-cost server-engine runs are auto-approved. LibTV runs spend
+        // credits; a server-engine run with a cost uses a bring-your-own paid model.
         if (!isServerEngine(pending.executor) || pending.creditsEstimated > 0) {
-          throw new Error(`This run spends ${pending.creditsEstimated} LibTV credits — approve it yourself in Studio.`);
+          throw new Error(
+            isServerEngine(pending.executor)
+              ? `This run uses a paid model (about ${pending.creditsEstimated} US¢ on your own API key) — approve it yourself in Studio.`
+              : `This run spends ${pending.creditsEstimated} LibTV credits — approve it yourself in Studio.`
+          );
         }
         await api(`/api/projects/${projectId}/studio/libtv-runs/${pending.id}/approve`, { json: {} });
         target = pending;

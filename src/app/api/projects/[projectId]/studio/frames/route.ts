@@ -1,123 +1,31 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import OpenAI from "openai";
-import { isStrictFree } from "@/lib/cost-mode";
-import { generateImagePersisted, isZhipuConfigured } from "@/services/ai/zhipu";
+import { generateImageByEngine } from "@/services/ai/image-engine";
 
 export const maxDuration = 30;
 
-// fal.ai caps the account at 10 concurrent requests and answers the eleventh
-// with a 429 — 23 frame generations were lost that way. Hold a slot instead of
-// relying on their limiter to say no.
-const FAL_MAX_CONCURRENT = 9;
-let falActive = 0;
-const falWaiting: Array<() => void> = [];
-
-async function acquireFalSlot(): Promise<() => void> {
-  if (falActive >= FAL_MAX_CONCURRENT) {
-    await new Promise<void>((resolve) => falWaiting.push(resolve));
-  }
-  falActive++;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    falActive--;
-    falWaiting.shift()?.();
-  };
-}
-
 /**
- * Image generation priority:
- * 1. OpenAI gpt-image-1 (GPT Image 2 in the API) — highest quality, uses subscription plan
- * 2. fal.ai flux/schnell — fast fallback if OPENAI_API_KEY not set/invalid
+ * Image engine order (Settings → AI engines can put any engine first):
+ * 1. OpenAI gpt-image-1 — highest quality
+ * 2. fal.ai flux/schnell — fast fallback
  * 3. Pollinations — last resort, rate-limited
+ * Strict free mode: Zhipu CogView-3-Flash (free), then Pollinations (free).
  */
-async function generateFrameImage(prompt: string, aspectRatio: "landscape_16_9" | "square" = "landscape_16_9"): Promise<string> {
-  // Strict free mode: Zhipu CogView-3-Flash (free), then Pollinations (free) —
-  // never gpt-image or fal.
-  const free = isStrictFree();
-  if (free && isZhipuConfigured()) {
-    try {
-      return await generateImagePersisted(prompt, { aspectRatio: aspectRatio === "square" ? "1:1" : "16:9", folder: "frames" });
-    } catch (err) {
-      console.warn("CogView-3-Flash failed, falling back to Pollinations:", err instanceof Error ? err.message : err);
-    }
-  }
-  const openaiKey = free ? undefined : process.env.OPENAI_API_KEY;
-  const falKey = free ? undefined : process.env.FAL_KEY;
-
-  // ── Option 1: OpenAI GPT Image (gpt-image-1 = GPT Image 2 in the API) ──
-  if (openaiKey) {
-    try {
-      const openai = new OpenAI({ apiKey: openaiKey });
-      const size = aspectRatio === "landscape_16_9" ? "1536x1024" : "1024x1024";
-
-      const response = await openai.images.generate({
-        model: "gpt-image-1",   // GPT Image 2 — latest model
-        prompt,
-        n: 1,
-        size: size as "1024x1024" | "1536x1024",
-        quality: "medium",      // "low" | "medium" | "high" — medium balances cost/quality
-      });
-
-      const b64 = response.data?.[0]?.b64_json;
-      if (b64) return `data:image/png;base64,${b64}`;
-
-      const url = response.data?.[0]?.url;
-      if (url) return url;
-
-      throw new Error("OpenAI returned no image data");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn("OpenAI image generation failed, falling back to fal.ai:", msg);
-      // Fall through to fal.ai
-    }
-  }
-
-  // ── Option 2: fal.ai Flux Schnell ──
-  if (falKey) {
-    const release = await acquireFalSlot();
-    try {
-    const res = await fetch("https://fal.run/fal-ai/flux/schnell", {
-      method: "POST",
-      headers: {
-        "Authorization": `Key ${falKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        prompt,
-        image_size: aspectRatio,
-        num_inference_steps: 4,
-        num_images: 1,
-        enable_safety_checker: false,
-      }),
-      signal: AbortSignal.timeout(25000),
-    });
-
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      throw new Error(`fal.ai flux error ${res.status}: ${err.slice(0, 100)}`);
-    }
-
-    const data = await res.json();
-    const url = data?.images?.[0]?.url;
-    if (!url) throw new Error("fal.ai returned no image URL");
-    return url;
-    } finally {
-      release();
-    }
-  }
-
-  // ── Option 3: Pollinations (last resort) ──
-  const encoded = encodeURIComponent(prompt);
-  const seed = Math.floor(Math.random() * 999999);
-  const width = aspectRatio === "landscape_16_9" ? 1024 : 512;
-  const height = aspectRatio === "landscape_16_9" ? 576 : 512;
-  const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=flux&nofeed=true`;
-  const pollRes = await fetch(url, { signal: AbortSignal.timeout(25000) });
-  if (!pollRes.ok) throw new Error(`Pollinations error: ${pollRes.status}`);
-  return url;
+function generateFrameImage(
+  prompt: string,
+  aspectRatio: "landscape_16_9" | "square",
+  projectId: string
+): Promise<string> {
+  const square = aspectRatio === "square";
+  return generateImageByEngine({
+    prompt,
+    shape: square ? "square" : "landscape",
+    openaiQuality: "medium",
+    pollinations: { width: square ? 512 : 1024, height: square ? 512 : 576, as: "url" },
+    folder: "frames",
+    projectId,
+    defaults: { free: ["glm", "pollinations"], paid: ["openai", "fal", "pollinations"] },
+  });
 }
 
 export async function POST(
@@ -146,7 +54,7 @@ export async function POST(
     });
 
     try {
-      const imageUrl = await generateFrameImage(fullPrompt, aspectRatio);
+      const imageUrl = await generateFrameImage(fullPrompt, aspectRatio, projectId);
 
       await prisma.previewAsset.update({
         where: { id: asset.id },

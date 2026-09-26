@@ -94,11 +94,28 @@ export function LibtvRunPanel({
 
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Start from the engine picked in Settings → AI engines, once, when the
+  // catalogue arrives; after that the user's own pick wins.
+  const [appliedPreferred, setAppliedPreferred] = useState(false);
+  if (!appliedPreferred && models.video.length) {
+    setAppliedPreferred(true);
+    const pImage = models.image.find((m) => m.preferred);
+    const pVideo = models.video.find((m) => m.preferred);
+    if (pImage) setImageModel(pImage.name);
+    if (pVideo) {
+      setVideoModel(pVideo.name);
+      const d = pVideo.durations?.[0];
+      if (d) setClipDurationSec(d);
+    }
+  }
+
   // The server may offer a different model list (strict free mode offers only
   // the GLM / ComfyUI engines; ComfyUI only when a node is configured) — never
   // compile with a model that isn't on offer.
-  if (models.image.length && !models.image.some((m) => m.name === imageModel)) setImageModel(models.image[0].name);
-  if (models.video.length && !models.video.some((m) => m.name === videoModel)) {
+  if (appliedPreferred && models.image.length && !models.image.some((m) => m.name === imageModel)) {
+    setImageModel(models.image[0].name);
+  }
+  if (appliedPreferred && models.video.length && !models.video.some((m) => m.name === videoModel)) {
     setVideoModel(models.video[0].name);
     const d = models.video[0].durations?.[0];
     if (d) setClipDurationSec(d);

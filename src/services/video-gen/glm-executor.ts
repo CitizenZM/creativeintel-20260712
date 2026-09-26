@@ -2,10 +2,23 @@
  * GLM engine — the free, parallel alternative to the LibTV Mac worker.
  *   image (K<n>) → Zhipu CogView-3-Flash (free)
  *   video (V<n>) → Zhipu CogVideoX-Flash image-to-video off its keyframe (free)
+ * A bring-your-own paid Zhipu model (cogvideox-3, viduq1-image, … — set up in
+ * Settings → AI engines) renders here too: its job settings carry `zhipuModel`
+ * and `providerId`, the clip is submitted on that provider's key, and its cost
+ * (creditsEstimated, in US cents) is recorded as spent.
  * The graph walking, claiming and assembly live in server-executor.ts.
  */
 import { generateImagePersisted, getVideoTask, isZhipuConfigured, persistResult, submitVideo } from "@/services/ai/zhipu";
+import { zhipuAuthFor } from "@/services/settings/ai-settings";
 import { advanceActiveRuns, driveRun, tickRun, type EngineAdapter, type TaskResult, type TickResult } from "./server-executor";
+
+/** A paid bring-your-own model on a video job (credits = US cents per clip). */
+function paidVideo(settings: Record<string, unknown> = {}): { zhipuModel?: string; providerId?: string } {
+  return {
+    zhipuModel: typeof settings.zhipuModel === "string" ? settings.zhipuModel : undefined,
+    providerId: typeof settings.providerId === "string" ? settings.providerId : undefined,
+  };
+}
 
 export const glmAdapter: EngineAdapter = {
   engine: "glm",
@@ -16,21 +29,46 @@ export const glmAdapter: EngineAdapter = {
   notConfiguredError: "ZHIPU_API_KEY is not configured",
 
   async generateImage(prompt, ctx) {
-    const url = await generateImagePersisted(prompt, { aspectRatio: ctx.aspectRatio, folder: `glm-runs/${ctx.runId}` });
+    const url = await generateImagePersisted(prompt, {
+      aspectRatio: ctx.aspectRatio,
+      folder: `glm-runs/${ctx.runId}`,
+      projectId: ctx.projectId,
+    });
     return { url };
   },
 
   async submitVideo(input, ctx) {
-    return submitVideo({ prompt: input.prompt, imageUrl: input.imageUrl, aspectRatio: ctx.aspectRatio });
+    const paid = paidVideo(ctx.settings);
+    return submitVideo({
+      prompt: input.prompt,
+      imageUrl: input.imageUrl,
+      aspectRatio: ctx.aspectRatio,
+      model: paid.zhipuModel,
+      auth: await zhipuAuthFor(paid.providerId),
+    });
   },
 
   async pollVideo(taskId, ctx): Promise<TaskResult> {
-    const task = await getVideoTask(taskId);
+    const paid = paidVideo(ctx.settings);
+    const cents = ctx.creditsEstimated ?? 0;
+    const costUsd = paid.zhipuModel ? cents / 100 : 0;
+    const task = await getVideoTask(taskId, {
+      auth: await zhipuAuthFor(paid.providerId),
+      usage: {
+        provider: paid.providerId ? `custom:${paid.providerId}` : undefined,
+        model: paid.zhipuModel,
+        seconds: ctx.durationSec,
+        costUsd,
+        projectId: ctx.projectId,
+      },
+    });
     if (task.status === "SUCCESS" && task.videoUrl) {
       const url = await persistResult(task.videoUrl, `glm-runs/${ctx.runId}`, `${ctx.nodeName}.mp4`);
-      return { status: "SUCCESS", url, remoteUrl: task.videoUrl };
+      return paid.zhipuModel
+        ? { status: "SUCCESS", url, remoteUrl: task.videoUrl, creditsSpent: cents }
+        : { status: "SUCCESS", url, remoteUrl: task.videoUrl };
     }
-    if (task.status === "FAIL") return { status: "FAIL", error: "CogVideoX-Flash reported FAIL" };
+    if (task.status === "FAIL") return { status: "FAIL", error: `${paid.zhipuModel ?? "CogVideoX-Flash"} reported FAIL` };
     return { status: "PROCESSING" };
   },
 };

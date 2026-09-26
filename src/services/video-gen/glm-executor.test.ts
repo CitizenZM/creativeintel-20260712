@@ -9,6 +9,10 @@ const zhipu = vi.hoisted(() => ({
   submitVideo: vi.fn(),
 }));
 vi.mock("@/services/ai/zhipu", () => zhipu);
+const settings = vi.hoisted(() => ({
+  zhipuAuthFor: vi.fn(async (id?: string) => (id ? { apiKey: "paid-key", baseUrl: null } : undefined)),
+}));
+vi.mock("@/services/settings/ai-settings", () => settings);
 
 import { glmAdapter } from "./glm-executor";
 
@@ -53,5 +57,30 @@ describe("glmAdapter", () => {
     // SUCCESS without a URL is not done yet.
     zhipu.getVideoTask.mockResolvedValueOnce({ id: "t", status: "SUCCESS" });
     expect(await glmAdapter.pollVideo("t", ctx)).toEqual({ status: "PROCESSING" });
+  });
+
+  it("renders a bring-your-own paid Zhipu model on its provider's key and records the cost", async () => {
+    const paidCtx = { ...ctx, projectId: "p1", creditsEstimated: 14, settings: { zhipuModel: "cogvideox-3", providerId: "prov1" } };
+    zhipu.submitVideo.mockResolvedValue("task-paid");
+    expect(await glmAdapter.submitVideo({ prompt: "pour", imageUrl: "https://cdn/k.png" }, paidCtx)).toBe("task-paid");
+    expect(zhipu.submitVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "cogvideox-3", auth: { apiKey: "paid-key", baseUrl: null } })
+    );
+
+    zhipu.getVideoTask.mockResolvedValue({ id: "task-paid", status: "SUCCESS", videoUrl: "https://zhipu/p.mp4" });
+    zhipu.persistResult.mockResolvedValue("https://cdn/V2.mp4");
+    expect(await glmAdapter.pollVideo("task-paid", paidCtx)).toEqual({
+      status: "SUCCESS",
+      url: "https://cdn/V2.mp4",
+      remoteUrl: "https://zhipu/p.mp4",
+      creditsSpent: 14,
+    });
+    expect(zhipu.getVideoTask).toHaveBeenCalledWith(
+      "task-paid",
+      expect.objectContaining({
+        auth: { apiKey: "paid-key", baseUrl: null },
+        usage: expect.objectContaining({ provider: "custom:prov1", model: "cogvideox-3", costUsd: 0.14 }),
+      })
+    );
   });
 });

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, LayoutGrid, FolderKanban, Plus, Sparkles, Library } from "lucide-react";
+import { Activity, Cpu, LayoutGrid, FolderKanban, Plus, Sparkles, Library } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { StageRail } from "@/components/layout/stage-rail";
@@ -13,6 +13,7 @@ const navItems = [
   { href: "/all", label: "Projects", icon: FolderKanban },
   { href: "/projects/new", label: "New project", icon: Plus },
   { href: "/library/brands", label: "Brand library", icon: Library },
+  { href: "/settings/ai", label: "AI engines", icon: Cpu },
   { href: "/status", label: "System status", icon: Activity },
 ];
 
