@@ -66,7 +66,7 @@ export async function GET(request: Request) {
   const task = params.get("task");
   if (task) extra.videoTask = await check(() => getVideoTask(task));
   if (params.get("full") === "1" && isZhipuConfigured()) {
-    const sample = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png";
+    const sample = params.get("vimg") || "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png";
     const [vision, image, video] = await Promise.all([
       check(async () => {
         // Zhipu's servers often can't fetch overseas hosts, so the app sends
