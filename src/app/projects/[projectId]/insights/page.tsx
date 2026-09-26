@@ -20,6 +20,7 @@ import { AnalysisRunner } from "@/components/insights/analysis-runner";
 import { StylePicker, type StyleCategoryView } from "@/components/insights/style-picker";
 import { STYLE_CATEGORIES, isGoalType, isRecommendedFor, sanitizeStyleCategories } from "@/lib/style-categories";
 import { getConfiguredModelLabel } from "@/services/ai/claude-client";
+import { loadAiSettings } from "@/services/settings/ai-settings";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -228,6 +229,7 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
   const sellingPointVisuals = (deep?.sellingPointVisuals as SellingPointVisual[] | null) || [];
   const videoTimeline = deep?.videoTimeline as VideoTimeline | null;
   const maxCameraFreq = cameraAngles.length > 0 ? Math.max(...cameraAngles.map(c => c.frequency)) : 1;
+  await loadAiSettings(); // the engine chosen in Settings → AI engines
   const aiModel = getConfiguredModelLabel();
 
   return (
