@@ -54,3 +54,26 @@ describe("captions", () => {
     }
   }, 60_000);
 });
+
+describe("fitStillFilter", () => {
+  it("fits a landscape card into 9:16 over a blurred fill, with and without a caption", async () => {
+    const { fitStillFilter } = await import("./glm-assemble");
+    const dir = await mkdtemp(path.join(tmpdir(), "fit-test-"));
+    try {
+      const card = path.join(dir, "card.png");
+      await run(ffmpegPath!, ["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=600x338:rate=1", "-frames:v", "1", card]);
+      const plain = path.join(dir, "plain.mp4");
+      await run(ffmpegPath!, ["-y", "-v", "error", "-loop", "1", "-t", "1", "-i", card, "-vf", fitStillFilter({ w: 1080, h: 1920 }), "-an", "-c:v", "libx264", "-preset", "veryfast", plain]);
+      const cap = path.join(dir, "cap.png");
+      await writeFile(cap, await captionPng(["Apply Now"], { w: 1080, h: 1920 }, FONT));
+      const withCap = path.join(dir, "cap.mp4");
+      await run(ffmpegPath!, ["-y", "-v", "error", "-loop", "1", "-t", "1", "-i", card, "-i", cap, "-filter_complex", overlayGraph(fitStillFilter({ w: 1080, h: 1920 })), "-map", "[out]", "-t", "1", "-an", "-c:v", "libx264", "-preset", "veryfast", withCap]);
+      for (const f of [plain, withCap]) {
+        const { stderr } = await run(ffmpegPath!, ["-i", f]).catch((e) => e as { stderr: string });
+        expect(String(stderr)).toMatch(/1080x1920/);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});

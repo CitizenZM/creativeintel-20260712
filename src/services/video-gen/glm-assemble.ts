@@ -95,6 +95,21 @@ export async function captionPng(lines: string[], canvas: { w: number; h: number
     .toBuffer();
 }
 
+/**
+ * Stills (packshots, CTA cards) are often a different shape from the master —
+ * a 16:9 "Apply now" card cover-cropped into 9:16 loses its words. Fit the
+ * whole image and fill the rest with a blurred copy of it.
+ */
+export function fitStillFilter(canvas: { w: number; h: number }, fps = FPS): string {
+  const { w, h } = canvas;
+  return [
+    "split=2[bg][fg]",
+    `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=40:2[bgb]`,
+    `[fg]scale=${w}:${h}:force_original_aspect_ratio=decrease[fgs]`,
+    `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,fps=${fps},format=yuv420p`,
+  ].join(";");
+}
+
 /** Filter graph: fit the source to the canvas, then lay the caption over the lower third. */
 export function overlayGraph(baseVf: string): string {
   return `[0:v]${baseVf}[base];[base][1:v]overlay=x=(W-w)/2:y=H*0.72-h/2:format=auto,format=yuv420p[out]`;
@@ -183,12 +198,13 @@ export async function assembleGlmMaster(input: {
           ? ["-y", "-v", "error", "-ss", String(seg.from), "-t", String(seg.length), "-i", src]
           : ["-y", "-v", "error", "-loop", "1", "-t", String(seg.length), "-i", src];
       const encode = ["-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", out];
+      const segVf = seg.kind === "still" ? fitStillFilter({ w, h }) : vf;
       let captioned = false;
       if (seg.text && hasCaptionFont) {
         try {
           const cap = path.join(dir, `cap${String(i).padStart(3, "0")}.png`);
           await writeFile(cap, await captionPng(wrapCaption(seg.text), { w, h }));
-          await run(ffmpegPath, [...args, "-i", cap, "-filter_complex", overlayGraph(vf), "-map", "[out]", "-t", String(seg.length), ...encode], {
+          await run(ffmpegPath, [...args, "-i", cap, "-filter_complex", overlayGraph(segVf), "-map", "[out]", "-t", String(seg.length), ...encode], {
             timeout: 90_000,
           });
           captioned = true;
@@ -197,7 +213,7 @@ export async function assembleGlmMaster(input: {
           console.warn(`[assemble] caption for frame ${seg.frameNumber} failed, rendering without it:`, err instanceof Error ? err.message.slice(0, 300) : err);
         }
       }
-      if (!captioned) await run(ffmpegPath, [...args, "-vf", vf, ...encode], { timeout: 90_000 });
+      if (!captioned) await run(ffmpegPath, [...args, "-vf", segVf, ...encode], { timeout: 90_000 });
       parts.push(out);
     }
 
