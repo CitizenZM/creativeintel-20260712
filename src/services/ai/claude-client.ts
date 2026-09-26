@@ -280,8 +280,8 @@ async function fetchAsDataUrl(url: string): Promise<string | null> {
 }
 
 /**
- * Gemini's OpenAI-compatible vision endpoint only accepts `data:` image URLs, not
- * remote https URLs. Converts every http(s) image_url part to a data URL; on
+ * Gemini's OpenAI-compatible vision endpoint only accepts `data:` image URLs, and
+ * Zhipu often can't fetch the remote host. Converts every http(s) image_url part to a data URL; on
  * fetch failure the image part is dropped (text is preserved). data: URLs and
  * other content parts pass through untouched.
  */
@@ -297,7 +297,7 @@ async function toGeminiContent(
       if (dataUrl) {
         parts.push({ type: "image_url", image_url: { url: dataUrl } });
       } else {
-        console.warn(`[ai] gemini: dropping image part, could not fetch ${part.image_url.url}`);
+        console.warn(`[ai] dropping image part, could not fetch ${part.image_url.url}`);
       }
       continue;
     }
@@ -310,7 +310,9 @@ async function prepareMessagesForRoute(
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
   provider: Route
 ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
-  if (provider !== "gemini") return messages;
+  // Gemini only takes data: URLs; Zhipu (GLM) can't reach many overseas image
+  // hosts (YouTube, Meta, Wikimedia CDNs) and answers "图片输入格式/解析错误".
+  if (provider !== "gemini" && provider !== "glm") return messages;
   const prepared: OpenAI.Chat.ChatCompletionMessageParam[] = [];
   for (const msg of messages) {
     if (msg.role === "user" && Array.isArray(msg.content)) {
