@@ -14,6 +14,7 @@ import { cachedAiSettings, cachedProvider, loadAiSettings } from "@/services/set
 import { CUSTOM_PREFIX, routeOrder } from "@/services/settings/ai-settings-core";
 import { generateImagePersisted, isZhipuConfigured } from "./zhipu";
 import { logAiUsage } from "./usage";
+import { uploadBuffer } from "@/services/storage";
 
 export type ImageEngineId = "glm" | "openai" | "fal" | "pollinations" | `custom:${string}`;
 
@@ -168,13 +169,36 @@ export async function imageEngineOrder(defaults: ImageRequest["defaults"]): Prom
   }) as ImageEngineId[];
 }
 
+/**
+ * gpt-image-1 and Pollinations can hand back base64. Kept as-is, a ~4 MB data
+ * URI lands in the storyboard's frames JSON — one Ramp storyboard grew to 12 MB,
+ * so listing storyboards took 14 s and every frame approval rewrote it. Store
+ * the bytes and keep the URL; only fall back to the data URI with no storage.
+ */
+export async function persistDataUrl(url: string, folder: string): Promise<string> {
+  const m = /^data:([^;,]+);base64,([\s\S]*)$/.exec(url);
+  if (!m) return url;
+  try {
+    const up = await uploadBuffer({
+      buffer: Buffer.from(m[2], "base64"),
+      filename: `image-${Date.now()}.${m[1].split("/")[1] || "png"}`,
+      contentType: m[1],
+      folder,
+    });
+    return up.provider === "inline" ? url : up.url;
+  } catch (err) {
+    console.warn("[image] could not store generated image, keeping it inline:", err instanceof Error ? err.message : err);
+    return url;
+  }
+}
+
 export async function generateImageByEngine(req: ImageRequest): Promise<string> {
   const order = await imageEngineOrder(req.defaults);
   let lastErr: unknown = null;
   for (const engine of order) {
     try {
       const url = await runEngine(engine, req);
-      if (url) return url;
+      if (url) return persistDataUrl(url, req.folder);
     } catch (err) {
       lastErr = err;
       console.warn(`[image] ${engine} failed, trying the next engine:`, err instanceof Error ? err.message : err);
