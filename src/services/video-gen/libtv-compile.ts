@@ -21,9 +21,7 @@ import { type SkuDimensionsCm } from "@/services/brand-kit";
 import { FRAME_SECONDS, type GridFrame } from "@/lib/storyboard-grid";
 import {
   DEFAULT_BUDGET_MODE,
-  DEFAULT_IMAGE_MODEL,
   DEFAULT_MAX_RUN_CREDITS,
-  DEFAULT_VIDEO_MODEL,
   estimateRun,
   findVideoModel,
   framesPerClip,
@@ -36,14 +34,14 @@ import {
   videoCredits,
   videoSettings,
   type BudgetMode,
-  GLM_IMAGE_MODEL,
-  GLM_VIDEO_MODEL,
   engineFor,
   engineLabel,
   mismatchedImageEngine,
 } from "./libtv-pricing";
 import { isStrictFree } from "@/lib/cost-mode";
 import { isComfyConfigured } from "@/services/ai/comfyui";
+import { loadAiSettings } from "@/services/settings/ai-settings";
+import { videoDefaults } from "@/services/settings/ai-settings-core";
 
 export const PRODUCT_LOCK_CLAUSE =
   "product stays exactly the same size, shape and label throughout — it must not grow, warp or re-letter";
@@ -261,12 +259,16 @@ export interface CompileResult {
 }
 
 export async function compileRunFromStoryboard(input: CompileRunInput): Promise<CompileResult> {
+  // Settings → AI engines picks the default render engine (and registers any
+  // bring-your-own paid video models); strict free mode defaults to — and only
+  // renders with — the free GLM models.
+  const snap = await loadAiSettings();
+  const defaults = videoDefaults(snap.settings.video, isStrictFree(), snap.providers);
   const {
     projectId,
     storyboardId,
-    // Strict free mode defaults to (and only renders with) the free GLM models.
-    imageModel = isStrictFree() ? GLM_IMAGE_MODEL : DEFAULT_IMAGE_MODEL,
-    videoModel = isStrictFree() ? GLM_VIDEO_MODEL : DEFAULT_VIDEO_MODEL,
+    imageModel = defaults.imageModel,
+    videoModel = defaults.videoModel,
     aspectRatio = "9:16",
   } = input;
   const executor = engineFor(videoModel);

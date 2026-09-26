@@ -4,7 +4,15 @@
  *   CogVideoX-Flash   text/image → video (async task)  free, watermarked
  * Docs: https://docs.bigmodel.cn/api-reference/模型-api/视频生成异步.md
  */
+import { logAiUsage } from "./usage";
+
 export const ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/";
+
+/** A bring-your-own (paid) Zhipu key; omitted = the free env key. */
+export interface ZhipuAuth {
+  apiKey: string;
+  baseUrl?: string | null;
+}
 
 export const ZHIPU_FREE = {
   text: "glm-4.7-flash",
@@ -21,13 +29,14 @@ export function isZhipuConfigured(): boolean {
   return !!zhipuKey();
 }
 
-async function zhipu<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  const key = zhipuKey();
+async function zhipu<T>(path: string, init: { method?: string; body?: unknown; auth?: ZhipuAuth } = {}): Promise<T> {
+  const key = init.auth?.apiKey ?? zhipuKey();
   if (!key) throw new Error("ZHIPU_API_KEY is not configured");
+  const base = init.auth?.baseUrl || ZHIPU_BASE_URL;
   let lastErr: unknown;
   // Free models are rate-limited per account: back off on 429 instead of failing.
   for (let attempt = 0; attempt < 5; attempt++) {
-    const res = await fetch(`${ZHIPU_BASE_URL}${path}`, {
+    const res = await fetch(`${base.endsWith("/") ? base : `${base}/`}${path}`, {
       method: init.method ?? (init.body ? "POST" : "GET"),
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: init.body ? JSON.stringify(init.body) : undefined,
@@ -53,12 +62,25 @@ export function cogviewSize(aspectRatio = "9:16"): string {
   return "768x1344"; // 9:16 and anything else vertical
 }
 
-export async function generateImage(prompt: string, opts: { aspectRatio?: string } = {}): Promise<string> {
+export async function generateImage(
+  prompt: string,
+  opts: { aspectRatio?: string; projectId?: string; model?: string; auth?: ZhipuAuth; costUsd?: number | null; usageProvider?: string } = {}
+): Promise<string> {
+  const model = opts.model ?? ZHIPU_FREE.image;
   const data = await zhipu<{ data?: { url: string }[] }>("images/generations", {
-    body: { model: ZHIPU_FREE.image, prompt: prompt.slice(0, 1000), size: cogviewSize(opts.aspectRatio) },
+    body: { model, prompt: prompt.slice(0, 1000), size: cogviewSize(opts.aspectRatio) },
+    auth: opts.auth,
   });
   const url = data.data?.[0]?.url;
   if (!url) throw new Error("CogView returned no image");
+  logAiUsage({
+    provider: opts.auth ? (opts.usageProvider ?? "zhipu-paid") : "glm",
+    model,
+    capability: "image",
+    images: 1,
+    costUsd: opts.auth ? (opts.costUsd ?? null) : 0,
+    projectId: opts.projectId,
+  });
   return url;
 }
 
@@ -77,34 +99,61 @@ export interface VideoTask {
   coverUrl?: string;
 }
 
-/** Submit an async CogVideoX-Flash task; returns the task id. */
+/**
+ * Submit an async video task; returns the task id. `model` defaults to the
+ * free CogVideoX-Flash; a paid model (cogvideox-3, viduq1-image, …) passes the
+ * bring-your-own `auth`. Vidu models take a fixed size, so size/quality/audio
+ * are only sent to CogVideoX models.
+ */
 export async function submitVideo(input: {
   prompt: string;
   imageUrl?: string;
   aspectRatio?: string;
   withAudio?: boolean;
+  model?: string;
+  auth?: ZhipuAuth;
 }): Promise<string> {
+  const model = input.model ?? ZHIPU_FREE.video;
   const body: Record<string, unknown> = {
-    model: ZHIPU_FREE.video,
+    model,
     // The API caps prompts at 512 characters.
     prompt: input.prompt.slice(0, 500),
-    quality: "quality",
-    with_audio: input.withAudio ?? false,
-    size: cogvideoSize(input.aspectRatio),
   };
+  if (model.startsWith("cogvideox")) {
+    body.quality = "quality";
+    body.with_audio = input.withAudio ?? false;
+    body.size = cogvideoSize(input.aspectRatio);
+  }
   if (input.imageUrl) body.image_url = input.imageUrl;
-  const data = await zhipu<{ id?: string; task_status?: string }>("videos/generations", { body });
+  const data = await zhipu<{ id?: string; task_status?: string }>("videos/generations", { body, auth: input.auth });
   if (!data.id) throw new Error("CogVideoX returned no task id");
   return data.id;
 }
 
-export async function getVideoTask(id: string): Promise<VideoTask> {
+const _loggedTasks = new Set<string>();
+
+export async function getVideoTask(
+  id: string,
+  opts: { auth?: ZhipuAuth; usage?: { provider?: string; model?: string; seconds?: number; costUsd?: number | null; projectId?: string } } = {}
+): Promise<VideoTask> {
   const data = await zhipu<{
     task_status?: string;
     video_result?: { url?: string; cover_image_url?: string }[];
-  }>(`async-result/${encodeURIComponent(id)}`);
+  }>(`async-result/${encodeURIComponent(id)}`, { auth: opts.auth });
   const status = (data.task_status as VideoTask["status"]) ?? "PROCESSING";
   const first = data.video_result?.[0];
+  if (status === "SUCCESS" && first?.url && !_loggedTasks.has(id)) {
+    _loggedTasks.add(id);
+    logAiUsage({
+      provider: opts.auth ? (opts.usage?.provider ?? "zhipu-paid") : "glm",
+      model: opts.usage?.model ?? ZHIPU_FREE.video,
+      capability: "video",
+      // Zhipu doesn't publish CogVideoX-Flash's clip length; the catalogue assumes 5 s.
+      videoSeconds: opts.usage?.seconds ?? 5,
+      costUsd: opts.auth ? (opts.usage?.costUsd ?? null) : 0,
+      projectId: opts.usage?.projectId,
+    });
+  }
   return { id, status, videoUrl: first?.url, coverUrl: first?.cover_image_url };
 }
 
@@ -122,7 +171,10 @@ export async function persistResult(url: string, folder: string, filename: strin
 }
 
 /** Free image for a prompt, stored in our asset storage. */
-export async function generateImagePersisted(prompt: string, opts: { aspectRatio?: string; folder?: string } = {}): Promise<string> {
+export async function generateImagePersisted(
+  prompt: string,
+  opts: Parameters<typeof generateImage>[1] & { folder?: string } = {}
+): Promise<string> {
   const url = await generateImage(prompt, opts);
   return persistResult(url, opts.folder ?? "glm-images", `cogview-${Date.now()}.png`);
 }

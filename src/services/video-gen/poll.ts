@@ -1,6 +1,20 @@
 import { prisma } from "@/lib/db";
 import { pMap } from "@/lib/parallel";
 import { getVideoModel } from "@/services/video-gen/models";
+import { logAiUsage } from "@/services/ai/usage";
+
+/** Paid video usage row, priced from the model table's costPerSecond. */
+function logPaidVideo(job: Pick<FalVideoJob, "model" | "projectId">, provider: string, seconds: number) {
+  const def = getVideoModel(job.model);
+  logAiUsage({
+    provider,
+    model: job.model,
+    capability: "video",
+    videoSeconds: seconds,
+    costUsd: def ? def.costPerSecond * seconds : null,
+    projectId: job.projectId,
+  });
+}
 import type { FalVideoJob } from "@/generated/prisma/client";
 
 /**
@@ -101,6 +115,13 @@ export async function pollVeoOperation(operationId: string): Promise<VeoPollResu
     const videoUrl = videos[0]?.video?.uri || null;
 
     try {
+      if (videoUrl) {
+        const jobs = await prisma.falVideoJob.findMany({
+          where: { falRequestId: operationId, status: { notIn: ["completed", "failed"] } },
+          select: { model: true, projectId: true, durationSec: true },
+        });
+        for (const j of jobs) logPaidVideo(j, "veo", j.durationSec ?? 8);
+      }
       await prisma.falVideoJob.updateMany({
         where: { falRequestId: operationId },
         data: {
@@ -181,6 +202,7 @@ async function pollFalJob(
       }
     }
 
+    if (video?.url) logPaidVideo(job, "fal", (video?.duration as number | undefined) ?? job.durationSec ?? 5);
     const updated = await prisma.falVideoJob.update({
       where: { id: job.id },
       data: {

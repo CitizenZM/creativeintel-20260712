@@ -62,6 +62,10 @@ export interface LibtvVideoModel {
   settingsKeys: string[];
   verified: boolean;
   note?: string;
+  /** Bring-your-own paid Zhipu model id (e.g. cogvideox-3), rendered by the GLM executor. */
+  zhipuModel?: string;
+  /** The ModelProvider whose key renders it. */
+  providerId?: string;
 }
 
 export type LibtvModel = LibtvImageModel | LibtvVideoModel;
@@ -279,7 +283,44 @@ export function findImageModel(name: string): LibtvImageModel | null {
 }
 
 export function findVideoModel(name: string): LibtvVideoModel | null {
-  return VIDEO_MODELS.find((m) => m.name === name) ?? null;
+  return VIDEO_MODELS.find((m) => m.name === name) ?? _extraVideoModels.find((m) => m.name === name) ?? null;
+}
+
+// ─── Bring-your-own paid video models ────────────────────────────────────────
+// Registered at runtime by the AI settings loader (src/services/settings).
+// Their "credits" are US cents per clip — billed by Zhipu, not LibTV — so a
+// paid run always shows a non-zero cost and is never auto-approved.
+
+let _extraVideoModels: LibtvVideoModel[] = [];
+
+export function setExtraVideoModels(models: LibtvVideoModel[]): void {
+  _extraVideoModels = models;
+}
+
+export function extraVideoModels(): LibtvVideoModel[] {
+  return _extraVideoModels;
+}
+
+export function zhipuPaidVideoModel(input: {
+  name: string;
+  zhipuModel: string;
+  providerId: string;
+  usdPerClip: number;
+}): LibtvVideoModel {
+  return {
+    name: input.name,
+    engine: "glm",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [{ durationSec: 5, resolution: "1080P", credits: Math.max(1, Math.round(input.usdPerClip * 100)) }],
+    defaultDurationSec: 5,
+    defaultResolution: "1080P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: false,
+    note: `Paid Zhipu ${input.zhipuModel} on your own key — about $${input.usdPerClip.toFixed(2)} per clip, billed by Zhipu (cost shown in US cents, not LibTV credits).`,
+    zhipuModel: input.zhipuModel,
+    providerId: input.providerId,
+  };
 }
 
 /** Nearest allowed duration for a video model (>= requested where possible). */
@@ -340,6 +381,8 @@ export function videoSettings(
   const price = resolveVideoPrice(model, opts.durationSec, opts.resolution);
   const settings: LibtvSettings = { modeType: model.modeType, duration: price.durationSec };
   if (model.settingsKeys.includes("resolution")) settings.resolution = price.resolution;
+  if (model.zhipuModel) settings.zhipuModel = model.zhipuModel;
+  if (model.providerId) settings.providerId = model.providerId;
   return settings;
 }
 
@@ -503,23 +546,28 @@ export interface ModelOption {
   note?: string;
   durations?: number[];
   engine: RenderEngine;
+  /** The default the AI settings page picked for this capability. */
+  preferred?: boolean;
 }
 
 /**
  * Model pickers. Strict free mode offers only the zero-credit server engines
- * (GLM, and ComfyUI — the operator's own GPU costs no credits). ComfyUI models
- * appear only when a node is configured (COMFYUI_URL).
+ * (GLM, and ComfyUI — the operator's own GPU costs no credits); bring-your-own
+ * paid video models are never offered there. ComfyUI models appear only when a
+ * node is configured (COMFYUI_URL). `preferred` marks the defaults picked in
+ * Settings → AI engines.
  */
 export function modelOptions(
   freeOnly = false,
-  comfyAvailable = !!process.env.COMFYUI_URL?.trim()
+  comfyAvailable = !!process.env.COMFYUI_URL?.trim(),
+  preferred: { imageModel?: string; videoModel?: string } = {}
 ): { image: ModelOption[]; video: ModelOption[] } {
   const offered = (engine: RenderEngine | undefined) => {
     if (engine === "comfyui" && !comfyAvailable) return false;
     return freeOnly ? engine === "glm" || engine === "comfyui" : true;
   };
   const images = IMAGE_MODELS.filter((m) => offered(m.engine));
-  const videos = VIDEO_MODELS.filter((m) => offered(m.engine));
+  const videos = [...VIDEO_MODELS, ..._extraVideoModels].filter((m) => offered(m.engine) && !(freeOnly && m.zhipuModel));
   return {
     image: images.map((m) => ({
       name: m.name,
@@ -529,6 +577,7 @@ export function modelOptions(
       verified: m.verified,
       note: m.note,
       engine: m.engine ?? ("libtv" as const),
+      preferred: m.name === preferred.imageModel || undefined,
     })),
     video: videos.map((m) => {
       const price = resolveVideoPrice(m, m.defaultDurationSec, m.defaultResolution);
@@ -536,11 +585,14 @@ export function modelOptions(
         name: m.name,
         modality: "video" as const,
         credits: price.credits,
-        unit: `credits / ${price.durationSec}s ${price.resolution}`,
+        unit: m.zhipuModel
+          ? `US¢ / ${price.durationSec}s clip (Zhipu bill)`
+          : `credits / ${price.durationSec}s ${price.resolution}`,
         verified: m.verified,
         note: m.note,
         durations: Array.from(new Set(m.prices.map((p) => p.durationSec))).sort((a, b) => a - b),
         engine: m.engine ?? ("libtv" as const),
+        preferred: m.name === preferred.videoModel || undefined,
       };
     }),
   };

@@ -18,6 +18,7 @@
  */
 import { NextResponse } from "next/server";
 import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
+import { loadAiSettings } from "@/services/settings/ai-settings";
 import { prisma } from "@/lib/db";
 import { pMap } from "@/lib/parallel";
 import {
@@ -42,6 +43,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  await loadAiSettings();
   if (isStrictFree()) {
     return NextResponse.json({ error: new PaidFeatureDisabledError("fal / Veo video generation").message }, { status: 402 });
   }

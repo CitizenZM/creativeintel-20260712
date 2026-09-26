@@ -5,6 +5,8 @@
  */
 import { NextResponse } from "next/server";
 import { isStrictFree } from "@/lib/cost-mode";
+import { loadAiSettings } from "@/services/settings/ai-settings";
+import { videoDefaults } from "@/services/settings/ai-settings-core";
 import {
   compileRunFromStoryboard,
   LibtvCompileError,
@@ -21,13 +23,15 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
+  const snap = await loadAiSettings();
   const [runs, completeness] = await Promise.all([
     listRuns(projectId),
     getBrandKitCompleteness(projectId),
   ]);
   return NextResponse.json({
     runs,
-    models: modelOptions(isStrictFree()),
+    // The render engine picked in Settings → AI engines comes back as `preferred`.
+    models: modelOptions(isStrictFree(), undefined, videoDefaults(snap.settings.video, isStrictFree(), snap.providers)),
     brandKit: completeness,
     limits: { maxRunCredits: maxRunCredits(), defaultBudgetMode: DEFAULT_BUDGET_MODE },
   });

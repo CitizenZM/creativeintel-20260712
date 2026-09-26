@@ -8,6 +8,7 @@ import { approveRun, getRunWithJobs } from "@/services/video-gen/libtv-queue";
 import { driveServerRun } from "@/services/video-gen/server-engines";
 import { isServerEngine } from "@/services/video-gen/libtv-pricing";
 import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
+import { loadAiSettings } from "@/services/settings/ai-settings";
 import { getBrandKitCompleteness } from "@/services/brand-kit";
 
 export const dynamic = "force-dynamic";
@@ -26,11 +27,14 @@ export async function POST(
     return NextResponse.json({ error: "Run not found" }, { status: 404 });
   }
 
-  // LibTV spends credits; strict free mode only renders with the zero-credit
-  // server engines (GLM, or the operator's own ComfyUI GPU).
-  if (isStrictFree() && !isServerEngine(existing.executor)) {
+  // LibTV spends credits, and so does a bring-your-own paid Zhipu model (a
+  // server-engine run with a non-zero estimate); strict free mode only renders
+  // zero-cost runs on the server engines (GLM, or the operator's own ComfyUI GPU).
+  await loadAiSettings();
+  if (isStrictFree() && (!isServerEngine(existing.executor) || existing.creditsEstimated > 0)) {
+    const what = isServerEngine(existing.executor) ? "Rendering with a paid model" : "Rendering on LibTV";
     return NextResponse.json(
-      { error: new PaidFeatureDisabledError("Rendering on LibTV").message + " Compile the run with the GLM or ComfyUI models instead." },
+      { error: new PaidFeatureDisabledError(what).message + " Compile the run with the free GLM or ComfyUI models instead." },
       { status: 402 }
     );
   }
