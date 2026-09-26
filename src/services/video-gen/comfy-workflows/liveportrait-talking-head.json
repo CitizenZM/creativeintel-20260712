@@ -1,6 +1,6 @@
 {
   "1": { "class_type": "DownloadAndLoadLivePortraitModels", "inputs": { "precision": "fp16", "mode": "human" } },
-  "2": { "class_type": "LivePortraitLoadMediaPipeCropper", "inputs": { "landmarkrunner_onnx_device": "CUDA", "keep_model_loaded": true } },
+  "2": { "class_type": "LivePortraitLoadMediaPipeCropper", "inputs": { "landmarkrunner_onnx_device": "CPU", "keep_model_loaded": true } },
   "3": { "class_type": "LoadImage", "inputs": { "image": "{{image}}" } },
   "4": {
     "class_type": "VHS_LoadVideo",
