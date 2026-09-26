@@ -3,6 +3,7 @@
  * script / studio prompts inject. `getBrandTruthForPrompts` is consumed by other
  * modules; keep its signature stable.
  */
+import { SERVICE_CATEGORIES } from "@/lib/validations";
 import { prisma } from "@/lib/db";
 
 export interface BrandColor {
@@ -106,7 +107,12 @@ export async function getBrandKitCompleteness(projectId: string): Promise<BrandK
   const hasLandingUrl = isFilled(kit.landingUrl);
   const hasSummary = isFilled(kit.productSummary);
   const hasClaims = Array.isArray(kit.claimsAllowed); // an explicit empty array counts
-  const hasDimensions = !!dims && [dims.height, dims.width, dims.depth].some((v) => typeof v === "number" && v > 0);
+  // Dimensions keep generated scenes at the right scale for a physical product;
+  // a service (SaaS, finance, an accelerator…) has none to give.
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { category: true } }).catch(() => null);
+  const needsDimensions = !(project?.category && SERVICE_CATEGORIES.has(project.category));
+  const hasDimensions =
+    !needsDimensions || (!!dims && [dims.height, dims.width, dims.depth].some((v) => typeof v === "number" && v > 0));
 
   const checks: Array<{ ok: boolean; weight: number; label: string }> = [
     { ok: hasLogo, weight: WEIGHTS.logo, label: "Brand logo (at least 1)" },

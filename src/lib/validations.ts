@@ -25,7 +25,7 @@ const NON_PDP_MESSAGE =
  * Categories whose "product" is a service or program. They have no PDP, so the
  * offering's own landing page (even a homepage) is the right thing to read.
  */
-const SERVICE_CATEGORIES = new Set(["SaaS & Software", "Financial Services", "Education", "Entertainment", "Other"]);
+export const SERVICE_CATEGORIES = new Set(["SaaS & Software", "Financial Services", "Education", "Entertainment", "Other"]);
 const STOREFRONT_SUBDOMAINS = new Set(["www", "shop", "store", "m", "en", "us"]);
 
 /** true when the URL is a storefront root / listing page rather than a PDP. */
