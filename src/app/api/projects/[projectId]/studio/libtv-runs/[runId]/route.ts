@@ -1,5 +1,6 @@
 import { NextResponse, after } from "next/server";
-import { driveGlmRun } from "@/services/video-gen/glm-executor";
+import { driveServerRun } from "@/services/video-gen/server-engines";
+import { isServerEngine } from "@/services/video-gen/libtv-pricing";
 import { getRunWithJobs } from "@/services/video-gen/libtv-queue";
 
 export const dynamic = "force-dynamic";
@@ -15,14 +16,14 @@ export async function GET(
   if (!run || run.projectId !== projectId) {
     return NextResponse.json({ error: "Run not found" }, { status: 404 });
   }
-  // Studio polls this while a run renders: keep a GLM run moving between cron
-  // sweeps when nothing has touched it for a while.
+  // Studio polls this while a run renders: keep a server-rendered (GLM /
+  // ComfyUI) run moving between cron sweeps when nothing has touched it for a while.
   if (
-    run.executor === "glm" &&
+    isServerEngine(run.executor) &&
     ["approved", "claimed", "running"].includes(run.status) &&
     Date.now() - new Date(run.updatedAt).getTime() > 20_000
   ) {
-    after(() => driveGlmRun(runId, 60_000).then(() => undefined));
+    after(() => driveServerRun(run.executor, runId, 60_000).then(() => undefined));
   }
   return NextResponse.json({ run });
 }

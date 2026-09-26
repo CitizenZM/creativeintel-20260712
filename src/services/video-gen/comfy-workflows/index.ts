@@ -204,7 +204,7 @@ export function findOutputs(outputs: Record<string, RawNodeOutput> | undefined |
   const tempLast = (a: ComfyFileRef, b: ComfyFileRef) => Number(a.type === "temp") - Number(b.type === "temp");
   images.sort(tempLast);
   videos.sort((a, b) => a.rank - b.rank);
-  return { images, videos: videos.map(({ rank: _rank, ...v }) => v) };
+  return { images, videos: videos.map((v) => ({ filename: v.filename, subfolder: v.subfolder, type: v.type, nodeId: v.nodeId })) };
 }
 
 export type HistoryState =
@@ -218,8 +218,8 @@ type HistoryEntry = {
 };
 
 /** Interpret GET /history/{prompt_id}: `{}` until the prompt finishes. */
-export function parseHistory(history: Record<string, HistoryEntry> | null | undefined, promptId: string): HistoryState {
-  const entry = history?.[promptId];
+export function parseHistory(history: Record<string, unknown> | null | undefined, promptId: string): HistoryState {
+  const entry = history?.[promptId] as HistoryEntry | undefined;
   if (!entry) return { state: "pending" };
   const status = entry.status;
   if (status?.status_str === "error") {

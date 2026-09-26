@@ -17,8 +17,25 @@ export interface LibtvVideoPrice {
   credits: number;
 }
 
-/** Which executor renders a model: LibTV (credits) or Zhipu GLM (free, server-side). */
-export type RenderEngine = "libtv" | "glm";
+/**
+ * Which executor renders a model: LibTV (credits, Mac worker), Zhipu GLM (free
+ * cloud, server-side) or ComfyUI (self-hosted GPU, server-side, free per clip).
+ */
+export type RenderEngine = "libtv" | "glm" | "comfyui";
+
+/** Engines the Next.js server drives itself (server-executor.ts), never the Mac worker. */
+export const SERVER_ENGINES = ["glm", "comfyui"] as const;
+export type ServerEngine = (typeof SERVER_ENGINES)[number];
+
+export function isServerEngine(engine: string | null | undefined): engine is ServerEngine {
+  return (SERVER_ENGINES as readonly string[]).includes(engine ?? "");
+}
+
+export function engineLabel(engine: string | null | undefined): string {
+  if (engine === "glm") return "GLM (free)";
+  if (engine === "comfyui") return "ComfyUI (self-hosted)";
+  return "LibTV";
+}
 
 export interface LibtvImageModel {
   name: string;
@@ -98,6 +115,19 @@ export const IMAGE_MODELS: LibtvImageModel[] = [
     settingsKeys: ["modeType", "ratio"],
     verified: false,
     note: "Zhipu free model, rendered on the server — 0 credits. Text-only: product-accurate frames come from the packshot.",
+  },
+  {
+    name: "ComfyUI Image (self-hosted)",
+    engine: "comfyui",
+    modality: "image",
+    modeType: "text2image",
+    creditsPerImage: 0,
+    quality: "SDXL ~1MP",
+    qualityKey: "quality",
+    ratios: ["9:16", "16:9", "1:1", "3:4", "4:3"],
+    settingsKeys: ["modeType", "ratio"],
+    verified: false,
+    note: "Your own ComfyUI GPU node (COMFYUI_URL) — 0 credits, you pay only for the GPU. Checkpoint set by COMFYUI_IMAGE_CHECKPOINT.",
   },
 ];
 
@@ -202,6 +232,21 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     verified: false,
     note: "Zhipu free image-to-video, rendered on the server — 0 credits, watermarked.",
   },
+  {
+    name: "ComfyUI Video (self-hosted)",
+    engine: "comfyui",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [
+      { durationSec: 4, resolution: "720P", credits: 0 },
+      { durationSec: 5, resolution: "720P", credits: 0 },
+    ],
+    defaultDurationSec: 5,
+    defaultResolution: "720P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: false,
+    note: "Wan 2.2 TI2V 5B image-to-video on your ComfyUI GPU node — 0 credits, no watermark. ~3–10 min per clip depending on the GPU.",
+  },
 ];
 
 export const DEFAULT_IMAGE_MODEL = "Seedream 4.0";
@@ -210,9 +255,23 @@ export const DEFAULT_VIDEO_MODEL = "Hailuo 2.3 Fast";
 export const GLM_IMAGE_MODEL = "GLM CogView-3-Flash";
 export const GLM_VIDEO_MODEL = "GLM CogVideoX-Flash";
 
-/** The engine a run needs: GLM only when its video model is a GLM model. */
+export const COMFY_IMAGE_MODEL = "ComfyUI Image (self-hosted)";
+export const COMFY_VIDEO_MODEL = "ComfyUI Video (self-hosted)";
+
+/** The engine a run needs: the video model decides (GLM / ComfyUI models carry their engine). */
 export function engineFor(videoModel: string): RenderEngine {
   return findVideoModel(videoModel)?.engine ?? "libtv";
+}
+
+/**
+ * A server-side image model only renders on its own engine; paired with another
+ * engine's video model it would be sent somewhere that cannot render it.
+ * Returns the image model's engine when that happens, else null.
+ */
+export function mismatchedImageEngine(imageModel: string, videoModel: string): RenderEngine | null {
+  const imageEngine = findImageModel(imageModel)?.engine;
+  if (!imageEngine) return null;
+  return imageEngine === engineFor(videoModel) ? null : imageEngine;
 }
 
 export function findImageModel(name: string): LibtvImageModel | null {
@@ -443,12 +502,24 @@ export interface ModelOption {
   verified: boolean;
   note?: string;
   durations?: number[];
+  engine: RenderEngine;
 }
 
-export function modelOptions(freeOnly = false): { image: ModelOption[]; video: ModelOption[] } {
-  // Strict free mode offers only the zero-credit GLM engine.
-  const images = freeOnly ? IMAGE_MODELS.filter((m) => m.engine === "glm") : IMAGE_MODELS;
-  const videos = freeOnly ? VIDEO_MODELS.filter((m) => m.engine === "glm") : VIDEO_MODELS;
+/**
+ * Model pickers. Strict free mode offers only the zero-credit server engines
+ * (GLM, and ComfyUI — the operator's own GPU costs no credits). ComfyUI models
+ * appear only when a node is configured (COMFYUI_URL).
+ */
+export function modelOptions(
+  freeOnly = false,
+  comfyAvailable = !!process.env.COMFYUI_URL?.trim()
+): { image: ModelOption[]; video: ModelOption[] } {
+  const offered = (engine: RenderEngine | undefined) => {
+    if (engine === "comfyui" && !comfyAvailable) return false;
+    return freeOnly ? engine === "glm" || engine === "comfyui" : true;
+  };
+  const images = IMAGE_MODELS.filter((m) => offered(m.engine));
+  const videos = VIDEO_MODELS.filter((m) => offered(m.engine));
   return {
     image: images.map((m) => ({
       name: m.name,
@@ -457,6 +528,7 @@ export function modelOptions(freeOnly = false): { image: ModelOption[]; video: M
       unit: `credits / ${m.quality} image`,
       verified: m.verified,
       note: m.note,
+      engine: m.engine ?? ("libtv" as const),
     })),
     video: videos.map((m) => {
       const price = resolveVideoPrice(m, m.defaultDurationSec, m.defaultResolution);
@@ -468,6 +540,7 @@ export function modelOptions(freeOnly = false): { image: ModelOption[]; video: M
         verified: m.verified,
         note: m.note,
         durations: Array.from(new Set(m.prices.map((p) => p.durationSec))).sort((a, b) => a - b),
+        engine: m.engine ?? ("libtv" as const),
       };
     }),
   };

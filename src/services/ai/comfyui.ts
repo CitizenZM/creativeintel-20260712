@@ -9,6 +9,7 @@
  *   GET  /view?filename=&subfolder=&type=   raw output bytes
  *   POST /upload/image      multipart image, subfolder, type, overwrite → { name, subfolder, type }
  *   GET  /system_stats      { system: { comfyui_version, … }, devices: [{ name, type, vram_total, vram_free }] }
+ *   GET  /queue             { queue_running: [[number, prompt_id, …]], queue_pending: [[number, prompt_id, …]] }
  *
  * Env: COMFYUI_URL (required), COMFYUI_TOKEN (optional, sent as Bearer — for a
  * token proxy), COMFYUI_CF_ACCESS_CLIENT_ID/SECRET (optional, Cloudflare Access
@@ -121,9 +122,20 @@ export async function queuePrompt(
 }
 
 /** Raw GET /history/{id} — parse it with `parseHistory` from comfy-workflows. */
-export async function getHistory(promptId: string): Promise<Record<string, never> | Record<string, unknown>> {
+export async function getHistory(promptId: string): Promise<Record<string, unknown>> {
   const res = await comfyRequest(`/history/${encodeURIComponent(promptId)}`, { timeoutMs: 20_000 });
   return (await res.json()) as Record<string, unknown>;
+}
+
+/**
+ * Whether a prompt is still waiting or running. History lives in memory on the
+ * ComfyUI box, so a prompt that is neither queued nor in history was lost to a
+ * restart.
+ */
+export async function isPromptQueued(promptId: string): Promise<boolean> {
+  const res = await comfyRequest("/queue", { timeoutMs: 20_000 });
+  const data = (await res.json()) as { queue_running?: unknown[][]; queue_pending?: unknown[][] };
+  return [...(data.queue_running ?? []), ...(data.queue_pending ?? [])].some((item) => Array.isArray(item) && item[1] === promptId);
 }
 
 /** Download one output file through /view. */

@@ -7,6 +7,7 @@ import {
   getHistory,
   getSystemStats,
   isComfyConfigured,
+  isPromptQueued,
   queuePrompt,
   summariseSystemStats,
   uploadImage,
@@ -141,6 +142,16 @@ describe("history, outputs and uploads", () => {
     expect(form.get("overwrite")).toBe("true");
     expect(form.get("type")).toBe("input");
     expect((form.get("image") as File).name).toBe("k1.png");
+  });
+});
+
+describe("isPromptQueued", () => {
+  it("finds the prompt in the running or pending queue", async () => {
+    fetchMock.mockImplementation(async () => json({ queue_running: [[0, "run-1", {}, {}, []]], queue_pending: [[1, "wait-1", {}, {}, []]] }));
+    expect(await isPromptQueued("run-1")).toBe(true);
+    expect(await isPromptQueued("wait-1")).toBe(true);
+    expect(await isPromptQueued("gone")).toBe(false);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://comfy.example.com/queue");
   });
 });
 

@@ -5,12 +5,13 @@
  */
 import { NextResponse, after } from "next/server";
 import { approveRun, getRunWithJobs } from "@/services/video-gen/libtv-queue";
-import { driveGlmRun } from "@/services/video-gen/glm-executor";
+import { driveServerRun } from "@/services/video-gen/server-engines";
+import { isServerEngine } from "@/services/video-gen/libtv-pricing";
 import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
 import { getBrandKitCompleteness } from "@/services/brand-kit";
 
 export const dynamic = "force-dynamic";
-// GLM runs render on the server right after approval.
+// GLM and ComfyUI runs render on the server right after approval.
 export const maxDuration = 300;
 
 export async function POST(
@@ -25,10 +26,11 @@ export async function POST(
     return NextResponse.json({ error: "Run not found" }, { status: 404 });
   }
 
-  // LibTV spends credits; strict free mode only renders with the free GLM engine.
-  if (isStrictFree() && existing.executor !== "glm") {
+  // LibTV spends credits; strict free mode only renders with the zero-credit
+  // server engines (GLM, or the operator's own ComfyUI GPU).
+  if (isStrictFree() && !isServerEngine(existing.executor)) {
     return NextResponse.json(
-      { error: new PaidFeatureDisabledError("Rendering on LibTV").message + " Compile the run with the GLM models instead." },
+      { error: new PaidFeatureDisabledError("Rendering on LibTV").message + " Compile the run with the GLM or ComfyUI models instead." },
       { status: 402 }
     );
   }
@@ -64,8 +66,8 @@ export async function POST(
     );
   }
 
-  // Free GLM runs start rendering immediately on the server.
-  if (run.executor === "glm") after(() => driveGlmRun(runId, 280_000).then(() => undefined));
+  // Server-rendered runs (GLM, ComfyUI) start immediately.
+  if (isServerEngine(run.executor)) after(() => driveServerRun(run.executor, runId, 280_000).then(() => undefined));
 
   return NextResponse.json({ run });
 }
