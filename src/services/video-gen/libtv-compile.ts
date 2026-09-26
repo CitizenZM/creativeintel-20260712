@@ -40,6 +40,7 @@ import {
 } from "./libtv-pricing";
 import { isStrictFree } from "@/lib/cost-mode";
 import { isComfyConfigured } from "@/services/ai/comfyui";
+import { isZhipuConfigured } from "@/services/ai/zhipu";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { videoDefaults } from "@/services/settings/ai-settings-core";
 
@@ -280,6 +281,9 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
       `"${imageModel}" renders only on ${engineLabel(strayImageEngine)}, but the clip model "${videoModel}" renders on ${engineLabel(executor)}. Pick a keyframe model from the same engine.`,
       400
     );
+  }
+  if (executor === "glm" && !isZhipuConfigured()) {
+    throw new LibtvCompileError("The free GLM engine needs a Zhipu key — set ZHIPU_API_KEY (bigmodel.cn) and redeploy.", 409);
   }
   if (executor === "comfyui" && !isComfyConfigured()) {
     throw new LibtvCompileError("ComfyUI is not configured — set COMFYUI_URL to your GPU node (see docs/comfyui-node.md).", 409);

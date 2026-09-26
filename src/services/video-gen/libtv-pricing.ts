@@ -560,10 +560,13 @@ export interface ModelOption {
 export function modelOptions(
   freeOnly = false,
   comfyAvailable = !!process.env.COMFYUI_URL?.trim(),
-  preferred: { imageModel?: string; videoModel?: string } = {}
+  preferred: { imageModel?: string; videoModel?: string } = {},
+  glmAvailable = !!(process.env.ZHIPU_API_KEY || process.env.BIGMODEL_API_KEY)
 ): { image: ModelOption[]; video: ModelOption[] } {
   const offered = (engine: RenderEngine | undefined) => {
     if (engine === "comfyui" && !comfyAvailable) return false;
+    // Without a Zhipu key a GLM run compiles, then fails on its first job.
+    if (engine === "glm" && !glmAvailable) return false;
     return freeOnly ? engine === "glm" || engine === "comfyui" : true;
   };
   const images = IMAGE_MODELS.filter((m) => offered(m.engine));
