@@ -316,7 +316,7 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
   "studio.render": {
     label: "Render for free",
     explain:
-      "Free runs (GLM, or your own ComfyUI GPU) render on the server at 0 credits. Runs that spend LibTV credits still wait for your approval.",
+      "Free runs (GLM, your own ComfyUI GPU, or the keyless animatic) render on the server at 0 credits. Runs that spend LibTV credits still wait for your approval.",
     auto: true,
     run: async (projectId, onProgress) => {
       type Run = { id: string; status: string; creditsEstimated: number; executor?: string; error?: string | null; jobs?: { status: string }[] };
@@ -324,7 +324,9 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
       const active = runs.find((r) => ["approved", "claimed", "running", "assembling"].includes(r.status));
       let target = active;
       if (!target) {
-        const pending = runs.find((r) => r.status === "awaiting_approval");
+        const waiting = runs.filter((r) => r.status === "awaiting_approval");
+        // A free run waiting beside a LibTV one is the one to render for free.
+        const pending = waiting.find((r) => isServerEngine(r.executor) && r.creditsEstimated === 0) ?? waiting[0];
         if (!pending) throw new Error("No compiled run yet — compile one first.");
         // Only zero-cost server-engine runs are auto-approved. LibTV runs spend
         // credits; a server-engine run with a cost uses a bring-your-own paid model.
