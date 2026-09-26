@@ -99,7 +99,9 @@ export const scriptV2Schema = z.object({
   ctaVariants: z.array(z.string()).default([]),
   narrativeType: z.string().default("DEMONSTRATION"),
   targetEmotion: z.string().default(""),
-  predictedScore: z.coerce.number().default(70),
+  // Scored 0-100; a model that answers on a 0-10 scale ("8.5") would otherwise
+  // never win "Pick the best" against the 85s.
+  predictedScore: z.coerce.number().default(70).transform((v) => (v > 0 && v <= 10 ? Math.round(v * 10) : v)),
   platformTechniques: z.array(z.string()).default([]),
   scenes: z.array(scriptSceneSchema).default([]),
 });
@@ -257,6 +259,35 @@ const ABSOLUTE_CLAIM_PATTERNS: Array<{ regex: RegExp; label: string }> = [
   { regex: /\binstantly\s+reverses\b/i, label: "instantly reverses" },
   { regex: /\b100\s?%/i, label: "100%" },
 ];
+
+/**
+ * Social proof the model tends to invent: press mentions, star ratings, crowd
+ * sizes, rankings. Allowed only when the brand's own sources say it.
+ */
+const SOCIAL_PROOF_PATTERNS: RegExp[] = [
+  /\b(?:featured in|as seen (?:in|on))\b:?\s*([^.!?\n]+)/i,
+  /\b(?:five|5)[- ]star\b/i,
+  /\b(?:thousands|millions|hundreds) of (?:[a-z-]+ )?(?:customers|users|reviews|fans|founders|travell?ers|businesses)\b/i,
+  /(?:#1|\bno\.? ?1\b|\bnumber one\b|\bbest[- ]selling\b|\baward[- ]winning\b)/i,
+];
+
+/** Social-proof phrases in `text` that the brand's source text never states. */
+export function findUnsourcedSocialProof(text: string, sourceText: string): string[] {
+  const source = sourceText.toLowerCase();
+  const hits: string[] = [];
+  for (const regex of SOCIAL_PROOF_PATTERNS) {
+    const m = text.match(regex);
+    if (!m) continue;
+    if (m[1]) {
+      // "Featured in: TechCrunch, Forbes" — every outlet named must be sourced.
+      const outlets = m[1].split(/,|\band\b|&/).map((o) => o.trim()).filter((o) => o.length > 1);
+      if (outlets.some((o) => !source.includes(o.toLowerCase()))) hits.push(m[0].trim());
+    } else if (!source.includes(m[0].toLowerCase())) {
+      hits.push(m[0]);
+    }
+  }
+  return hits;
+}
 
 /** Words/phrases that hint at a deadline — used to check cta.urgency against the offer text. */
 const URGENCY_SIGNAL_REGEX =
@@ -503,6 +534,11 @@ export function auditScriptClaims(script: ScriptV2, opts: ScriptClaimsAuditInput
     }
     for (const hit of findAbsoluteMatches(field.text)) {
       violations.push({ path: field.path, text: hit, reason: `absolute/curative claim: "${hit}"` });
+    }
+    if (field.path !== "body (rendered)") {
+      for (const hit of findUnsourcedSocialProof(field.text, sourceText)) {
+        violations.push({ path: field.path, text: hit, reason: `unsourced social proof: "${hit}" is not in brand truth / briefing / claimsAllowed` });
+      }
     }
     // The rendered body repeats every field above plus structural timing
     // ("[BODY beat 1 …] 3–4.2s"), so numbers are only audited on the spoken /
