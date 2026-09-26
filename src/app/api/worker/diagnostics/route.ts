@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { describeMetaError, searchMetaAdLibrary } from "@/services/research/meta-ads";
-import { isZhipuConfigured, zhipuKey, ZHIPU_BASE_URL, ZHIPU_FREE } from "@/services/ai/zhipu";
+import { generateImage, getVideoTask, isZhipuConfigured, submitVideo, zhipuKey, ZHIPU_BASE_URL, ZHIPU_FREE } from "@/services/ai/zhipu";
 import { persistDataUrl } from "@/services/ai/image-engine";
 
 export const maxDuration = 60;
@@ -59,7 +59,37 @@ export async function GET(request: Request) {
     }),
   ]);
 
-  return NextResponse.json({ db, meta, zhipu, costMode: process.env.AI_COST_MODE ?? "default" });
+  // ?full=1 also exercises the free vision, image and video models (each call is free);
+  // ?task=<id> reports a submitted CogVideoX-Flash task.
+  const params = new URL(request.url).searchParams;
+  const extra: Record<string, unknown> = {};
+  const task = params.get("task");
+  if (task) extra.videoTask = await check(() => getVideoTask(task));
+  if (params.get("full") === "1" && isZhipuConfigured()) {
+    const sample = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png";
+    const [vision, image, video] = await Promise.all([
+      check(async () => {
+        const res = await fetch(`${ZHIPU_BASE_URL}chat/completions`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${zhipuKey()}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: ZHIPU_FREE.vision,
+            messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: sample } }, { type: "text", text: "In five words, what is in this image?" }] }],
+            max_tokens: 40,
+            thinking: { type: "disabled" },
+          }),
+          signal: AbortSignal.timeout(45_000),
+        });
+        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string }; choices?: { message?: { content?: string } }[] };
+        return { status: res.status, error: body.error?.message, answer: body.choices?.[0]?.message?.content?.slice(0, 120) };
+      }),
+      check(async () => ({ url: await generateImage("A studio product photo of an emerald green travel duffle bag", { aspectRatio: "9:16" }) })),
+      check(async () => ({ taskId: await submitVideo({ prompt: "Slow push-in on an emerald green travel duffle bag on a hotel bed, soft morning light", aspectRatio: "9:16" }) })),
+    ]);
+    Object.assign(extra, { vision, image, video });
+  }
+
+  return NextResponse.json({ db, meta, zhipu, ...extra, costMode: process.env.AI_COST_MODE ?? "default" });
 }
 
 /**

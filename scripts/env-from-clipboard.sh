@@ -17,8 +17,9 @@ matches() { [[ "$1" == "$prefix"* ]] && [[ ${#1} -ge 20 ]] && [[ "$1" =~ ^[A-Za-
 # between copying and running this.
 value="$(pbpaste | tr -d '[:space:]')"
 if ! matches "$value"; then
-  echo "Waiting up to 2 minutes — click Copy on the $name now…"
-  for _ in $(seq 1 120); do
+  wait_s="${WAIT_SECONDS:-120}"
+  echo "Waiting up to $((wait_s / 60)) minutes — click Copy on the $name now…"
+  for _ in $(seq 1 "$wait_s"); do
     sleep 1
     value="$(pbpaste | tr -d '[:space:]')"
     matches "$value" && break
