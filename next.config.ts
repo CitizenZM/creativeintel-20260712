@@ -8,9 +8,11 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/projects/[projectId]/studio/libtv-runs/**": [
       "./node_modules/.pnpm/ffmpeg-static@*/node_modules/ffmpeg-static/ffmpeg",
+      "./assets/fonts/**",
     ],
     "/api/cron/**": [
       "./node_modules/.pnpm/ffmpeg-static@*/node_modules/ffmpeg-static/ffmpeg",
+      "./assets/fonts/**",
     ],
   },
   turbopack: {
