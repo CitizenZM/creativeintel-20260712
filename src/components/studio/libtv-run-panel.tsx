@@ -16,7 +16,7 @@ import {
   ShieldCheck,
   Ban,
 } from "lucide-react";
-import { estimateBoard } from "@/services/video-gen/libtv-pricing";
+import { engineLabel, estimateBoard, isServerEngine } from "@/services/video-gen/libtv-pricing";
 import type {
   BrandKitReadiness,
   BudgetMode,
@@ -613,14 +613,23 @@ export function LibtvRunPanel({
           {activeRun.status === "approved" && (
             <p className="flex items-center gap-1.5 text-xs text-blue-700">
               <Play className="h-3.5 w-3.5" />
-              Approved — waiting for the local worker to claim it (<code className="rounded bg-muted px-1">npm run worker:libtv</code>).
+              {isServerEngine(activeRun.executor) ? (
+                <>Approved — {engineLabel(activeRun.executor)} is starting on the server.</>
+              ) : (
+                <>
+                  Approved — waiting for the local worker to claim it (<code className="rounded bg-muted px-1">npm run worker:libtv</code>).
+                </>
+              )}
             </p>
           )}
 
           {isRunActive(activeRun.status) && activeRun.status !== "approved" && (
             <p className="flex items-center gap-1.5 text-xs text-blue-700">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {activeRun.status === "assembling" ? "Assembling the cut locally…" : "Rendering on LibTV…"} polling every 5s
+              {activeRun.status === "assembling"
+                ? isServerEngine(activeRun.executor) ? "Assembling the master on the server…" : "Assembling the cut locally…"
+                : `Rendering with ${engineLabel(activeRun.executor)}…`}{" "}
+              polling every 5s
             </p>
           )}
 

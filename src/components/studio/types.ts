@@ -30,6 +30,8 @@ export interface LibtvRunView {
   scriptId: string | null;
   storyboardId: string | null;
   status: string;
+  /** "libtv" (Mac worker) or a server engine: glm | comfyui | animatic. */
+  executor?: string;
   canvasUuid: string | null;
   canvasUrl: string | null;
   canvasName: string | null;
