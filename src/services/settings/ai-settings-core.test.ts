@@ -5,6 +5,7 @@ import {
   engineOptions,
   envAvailability,
   normalizeSettings,
+  providerInputSchema,
   resolveStrictFree,
   routeOrder,
   videoDefaults,
@@ -131,5 +132,26 @@ describe("engineOptions", () => {
     expect(openai.disabledReason).toMatch(/Strict free mode/);
     expect(opts.find((o) => o.value === "glm")?.disabledReason).toBeUndefined();
     expect(opts.find((o) => o.value === "custom:p1")?.disabledReason).toMatch(/Strict free mode/);
+  });
+});
+
+describe("providerInputSchema", () => {
+  it("accepts a paid Zhipu video provider", () => {
+    const r = providerInputSchema.safeParse({
+      name: "My Zhipu",
+      type: "zhipu-paid",
+      apiKey: "abcdefgh.12345678",
+      models: { video: "cogvideox-3" },
+      prices: { perClipUsd: 0.14 },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects unknown types, extra fields and short keys", () => {
+    expect(providerInputSchema.safeParse({ name: "x", type: "azure", apiKey: "abcdefghij", models: {} }).success).toBe(false);
+    expect(
+      providerInputSchema.safeParse({ name: "x", type: "fal", apiKey: "abcdefghij", models: {}, admin: true }).success
+    ).toBe(false);
+    expect(providerInputSchema.safeParse({ name: "x", type: "fal", apiKey: "short", models: {} }).success).toBe(false);
   });
 });

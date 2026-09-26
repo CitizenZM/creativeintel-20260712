@@ -252,3 +252,30 @@ export function engineOptions(
   }
   return options;
 }
+
+// ─── Bring-your-own provider input (POST /api/settings/ai/providers) ────────
+
+const modelId = z.string().trim().max(120).optional();
+const usd = z.number().nonnegative().max(10_000).optional();
+
+export const providerInputSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1, "Name is required")
+      .max(60)
+      .refine((v) => !v.includes("·"), "Name can't contain “·”"),
+    type: z.enum(PROVIDER_TYPES),
+    baseUrl: z.string().trim().max(500).nullable().optional(),
+    apiKey: z.string().trim().min(8, "API key looks too short").max(1000),
+    models: z.object({ text: modelId, vision: modelId, image: modelId, video: modelId }).strict(),
+    prices: z
+      .object({ inputPerMTokUsd: usd, outputPerMTokUsd: usd, perImageUsd: usd, perClipUsd: usd })
+      .strict()
+      .nullable()
+      .optional(),
+  })
+  .strict();
+
+export type ProviderInputBody = z.infer<typeof providerInputSchema>;
