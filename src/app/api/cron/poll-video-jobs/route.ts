@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { pollAllActiveJobs } from "@/services/video-gen/poll";
 import { advanceActiveServerRuns } from "@/services/video-gen/server-engines";
 
-export const maxDuration = 60;
+// Long enough to assemble a finished server-rendered run (see ASSEMBLY_RESERVE_MS).
+export const maxDuration = 300;
 
 /**
  * Vercel Cron target — sweeps queued/processing/generating FalVideoJob rows
@@ -27,6 +28,6 @@ export async function GET(request: Request) {
   const summary = await pollAllActiveJobs();
   // Also advance server-rendered Studio runs — GLM and ComfyUI render from
   // here, not on the Mac worker.
-  const server = await advanceActiveServerRuns(40_000).catch(() => ({ glm: 0, comfyui: 0, animatic: 0 }));
+  const server = await advanceActiveServerRuns(240_000).catch(() => ({ glm: 0, comfyui: 0, animatic: 0 }));
   return NextResponse.json({ ...summary, glmRuns: server.glm, comfyuiRuns: server.comfyui });
 }

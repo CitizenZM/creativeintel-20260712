@@ -9,7 +9,7 @@
  * assemble.py — no beat grid or music.
  */
 import { execFile } from "node:child_process";
-import { access, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -60,6 +60,7 @@ function pangoEscape(text: string): string {
 async function ensureFontconfig(fontFile: string): Promise<void> {
   if (process.env.FONTCONFIG_FILE) return;
   const conf = path.join(tmpdir(), "creativeintel-fonts.conf");
+  await mkdir(path.join(tmpdir(), "fontconfig-cache"), { recursive: true }).catch(() => {});
   await writeFile(
     conf,
     `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig><dir>${path.dirname(fontFile)}</dir><cachedir>${path.join(tmpdir(), "fontconfig-cache")}</cachedir></fontconfig>\n`

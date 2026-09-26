@@ -51,7 +51,9 @@ const db = vi.hoisted(() => {
         return { count: 1 };
       }),
       findMany: vi.fn(async ({ where }: { where: { executor: string; status: unknown } }) =>
-        [...store.runs.values()].filter((r) => r.executor === where.executor && matches(r.status, where.status)).map((r) => ({ id: r.id }))
+        [...store.runs.values()]
+          .filter((r) => r.executor === where.executor && matches(r.status, where.status))
+          .map((r) => ({ id: r.id, status: r.status, jobs: store.jobs.filter((j) => j.runId === r.id).map((j) => ({ status: j.status })) }))
       ),
     },
     libtvJob: {
@@ -285,14 +287,50 @@ describe("driveRun / advanceActiveRuns", () => {
     const adapter = fakeAdapter();
     let polls = 0;
     adapter.pollVideo = vi.fn(async (): Promise<TaskResult> => (++polls >= 2 ? { status: "SUCCESS", url: "https://cdn/V1.mp4" } : { status: "PROCESSING" }));
-    expect(await driveRun(adapter, "run1", 10_000, 0)).toBe("done");
+    expect(await driveRun(adapter, "run1", 10_000, 0, 0)).toBe("done");
   });
 
   it("only advances runs of its own engine", async () => {
     store.runs.set("other", { ...store.runs.get("run1")!, id: "other", executor: "glm" });
     const adapter = fakeAdapter();
     adapter.pollVideo = vi.fn(async (): Promise<TaskResult> => ({ status: "SUCCESS", url: "https://cdn/V1.mp4" }));
-    expect(await advanceActiveRuns(adapter, 5_000, 0)).toBe(1);
+    expect(await advanceActiveRuns(adapter, 5_000, 0, 0)).toBe(1);
     expect(db.libtvRun.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ executor: "comfyui" }) }));
+  });
+});
+
+describe("assembly timing", () => {
+  function allDone() {
+    for (const j of store.jobs) {
+      j.status = j.id === "k3" ? "skipped" : "completed";
+      j.resultUrl = `https://cdn/${j.nodeName}.png`;
+    }
+  }
+
+  it("leaves assembly to a fresh invocation when too little budget is left", async () => {
+    seed();
+    allDone();
+    Object.assign(store.runs.get("run1")!, { status: "running" });
+    expect(await tickRun(fakeAdapter(), "run1", { remainingMs: 30_000 })).toBe("running");
+    expect(store.runs.get("run1")!.status).toBe("running");
+    expect(assemble).not.toHaveBeenCalled();
+    expect(await tickRun(fakeAdapter(), "run1", { remainingMs: 200_000 })).toBe("done");
+    expect(store.runs.get("run1")!.masterMp4Url).toBe("https://cdn/master.mp4");
+  });
+
+  it("re-assembles a run that was killed mid-assembly", async () => {
+    seed();
+    allDone();
+    Object.assign(store.runs.get("run1")!, { status: "assembling", updatedAt: new Date(Date.now() - 10 * 60_000) });
+    expect(await tickRun(fakeAdapter(), "run1")).toBe("done");
+    expect(store.runs.get("run1")!.status).toBe("completed");
+  });
+
+  it("does not touch an assembly that is still in progress", async () => {
+    seed();
+    allDone();
+    Object.assign(store.runs.get("run1")!, { status: "assembling", updatedAt: new Date() });
+    expect(await tickRun(fakeAdapter(), "run1")).toBe("idle");
+    expect(assemble).not.toHaveBeenCalled();
   });
 });

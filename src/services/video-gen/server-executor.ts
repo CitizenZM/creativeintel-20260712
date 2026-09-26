@@ -54,6 +54,14 @@ export interface EngineAdapter {
 }
 
 const TERMINAL_JOB = new Set(["completed", "skipped", "failed"]);
+/**
+ * Assembly downloads every clip and encodes the master — about a minute. It only
+ * starts with this much of the invocation's budget left, so a function limit can
+ * never kill it half-way; a fresh invocation (the status poll) picks it up.
+ */
+export const ASSEMBLY_RESERVE_MS = 150_000;
+/** An "assembling" run untouched this long was killed mid-assembly: assemble again. */
+export const STALE_ASSEMBLY_MS = 6 * 60_000;
 const ACTIVE_RUN = ["approved", "claimed", "running", "assembling"];
 
 async function claimJob(jobId: string): Promise<boolean> {
@@ -80,10 +88,24 @@ async function applyTaskResult(adapter: EngineAdapter, job: LibtvJob, result: Ta
   }
 }
 
-export async function tickRun(adapter: EngineAdapter, runId: string): Promise<TickResult> {
+export async function tickRun(
+  adapter: EngineAdapter,
+  runId: string,
+  opts: { remainingMs?: number; reserveMs?: number } = {}
+): Promise<TickResult> {
   const run = await prisma.libtvRun.findUnique({ where: { id: runId }, include: { jobs: true } });
   if (!run || run.executor !== adapter.engine) return "idle";
   if (!ACTIVE_RUN.includes(run.status)) return "idle";
+  if (run.status === "assembling") {
+    if (Date.now() - run.updatedAt.getTime() < STALE_ASSEMBLY_MS) return "idle"; // another invocation is on it
+    const { count } = await prisma.libtvRun.updateMany({
+      where: { id: runId, status: "assembling", updatedAt: run.updatedAt },
+      data: { status: "running" },
+    });
+    if (count !== 1) return "idle";
+    console.warn(`[${adapter.engine}] run ${runId} was stuck assembling — assembling again`);
+    run.status = "running";
+  }
   if (!adapter.isConfigured()) {
     await runFailed(runId, adapter.notConfiguredError);
     return "failed";
@@ -186,6 +208,7 @@ export async function tickRun(adapter: EngineAdapter, runId: string): Promise<Ti
     return "failed";
   }
   if (!now.every((x) => TERMINAL_JOB.has(x.status))) return "running";
+  if (opts.remainingMs !== undefined && opts.remainingMs < (opts.reserveMs ?? ASSEMBLY_RESERVE_MS)) return "running"; // assemble in a fresh invocation
 
   const { count } = await prisma.libtvRun.updateMany({
     where: { id: runId, status: { in: ["running", "claimed", "approved"] } },
@@ -221,11 +244,17 @@ async function storyboardFrames(storyboardId: string | null): Promise<AssembleFr
 }
 
 /** Keep ticking a run until it settles or the time budget runs out. */
-export async function driveRun(adapter: EngineAdapter, runId: string, budgetMs = 270_000, sleepMs = 8000): Promise<TickResult> {
+export async function driveRun(
+  adapter: EngineAdapter,
+  runId: string,
+  budgetMs = 270_000,
+  sleepMs = 8000,
+  reserveMs = ASSEMBLY_RESERVE_MS
+): Promise<TickResult> {
   const deadline = Date.now() + budgetMs;
   let result: TickResult = "running";
   while (Date.now() < deadline) {
-    result = await tickRun(adapter, runId).catch((err) => {
+    result = await tickRun(adapter, runId, { remainingMs: deadline - Date.now(), reserveMs }).catch((err) => {
       console.warn(`[${adapter.engine}] tick ${runId} failed:`, errorText(err));
       return "running" as TickResult;
     });
@@ -235,15 +264,31 @@ export async function driveRun(adapter: EngineAdapter, runId: string, budgetMs =
   return result;
 }
 
-/** Cron sweep: advance every active run of this engine a little. */
-export async function advanceActiveRuns(adapter: EngineAdapter, budgetMs = 50_000, sleepMs = 8000): Promise<number> {
+/**
+ * Cron sweep: advance every active run of this engine a little. A run whose
+ * jobs are all done (or a stuck assembly) goes first with the whole budget, so
+ * it can assemble even when nobody has Studio open.
+ */
+export async function advanceActiveRuns(
+  adapter: EngineAdapter,
+  budgetMs = 50_000,
+  sleepMs = 8000,
+  reserveMs = ASSEMBLY_RESERVE_MS
+): Promise<number> {
   const runs = await prisma.libtvRun.findMany({
-    where: { executor: adapter.engine, status: { in: ["approved", "claimed", "running"] } },
-    select: { id: true },
+    where: { executor: adapter.engine, status: { in: ["approved", "claimed", "running", "assembling"] } },
+    select: { id: true, status: true, jobs: { select: { status: true } } },
     take: 5,
   });
   if (!runs.length) return 0;
-  const share = Math.max(10_000, Math.floor(budgetMs / runs.length));
-  for (const r of runs) await driveRun(adapter, r.id, share, sleepMs);
+  const deadline = Date.now() + budgetMs;
+  const ready = (r: (typeof runs)[number]) => r.status === "assembling" || (r.jobs ?? []).every((j) => TERMINAL_JOB.has(j.status));
+  const ordered = [...runs.filter(ready), ...runs.filter((r) => !ready(r))];
+  for (const [i, r] of ordered.entries()) {
+    const left = deadline - Date.now();
+    if (left <= 0) break;
+    const share = ready(r) ? left : Math.max(10_000, Math.floor(left / (ordered.length - i)));
+    await driveRun(adapter, r.id, share, sleepMs, reserveMs);
+  }
   return runs.length;
 }
