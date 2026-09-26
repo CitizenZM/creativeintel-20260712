@@ -376,7 +376,7 @@ export async function POST(
   const envResults = await Promise.all(
     envList.map(async (env) => {
       // Sanitize the imagePrompt — remove brand/product names that could cause wrong-image generation
-      const cleanedPrompt = sanitizeEnvPrompt(env.imagePrompt || env.name, project.brandName, project.productPageTitle || project.productName);
+      const cleanedPrompt = sanitizeEnvPrompt(env.imagePrompt || env.name, project.brandName, project.productName || project.productPageTitle);
       // Environment prompts describe the ROOM only — no brand, no product, no animals
       const envPrompt = `${cleanedPrompt}. Shot on ARRI ALEXA, 35mm lens, cinematic composition, realistic lighting, commercial interior photography quality.`;
       const url = await generateAIImage(envPrompt, 1024, 768, Math.floor(Math.random() * 999));

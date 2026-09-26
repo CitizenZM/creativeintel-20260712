@@ -167,7 +167,7 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
     const campaign = getCampaignPlatform(campaignSelection?.platform);
 
     const brandProductName =
-      project.productPageTitle || project.productName || undefined;
+      project.productName || project.productPageTitle || undefined;
     const owners = [
       {
         name: project.brandName,

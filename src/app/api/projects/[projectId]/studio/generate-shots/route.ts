@@ -153,7 +153,7 @@ async function handlePost(
   }
 
   const productName =
-    project.productPageTitle || project.productName || project.brand?.valueProposition || project.brandName;
+    project.productName || project.productPageTitle || project.brand?.valueProposition || project.brandName;
   const brandContext: BrandContext = {
     brandName: project.brandName,
     productName: productName || project.brandName,

@@ -303,8 +303,11 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
   // Product page details are scraped, not typed — their status follows the
   // confirm flow (productConfirmedAt) rather than a per-field mark.
   const urlStatus = fieldStatus(data?.productUrl, marks.productUrl);
-  const nameStatus = data?.productPageTitle
-    ? (data.productConfirmedAt ? "confirmed" : "suggested")
+  // A name the user typed (it differs from the scraped title) is theirs — only a
+  // name copied from the page waits for the product confirmation.
+  const nameFromPage = !!data?.productPageTitle && (!data?.productName || data.productName === data.productPageTitle);
+  const nameStatus = nameFromPage
+    ? (data?.productConfirmedAt ? "confirmed" : "suggested")
     : fieldStatus(data?.productName, marks.productName);
   const imagesStatus = fieldStatus(allImages.length > 0 ? allImages : null, undefined);
   const fieldStatuses = [urlStatus, nameStatus, imagesStatus];
@@ -344,7 +347,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
         <div className="flex-1">
           <p className={cn("text-sm font-semibold", hasProduct ? "text-emerald-800" : "text-amber-800")}>
             {hasProduct
-              ? `Product defined: ${data?.productPageTitle || data?.productName || "Product identified"}`
+              ? `Product defined: ${data?.productName || data?.productPageTitle || "Product identified"}`
               : "No product defined — AI will guess which product to use"}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -514,7 +517,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
             <Package className="h-3.5 w-3.5" /> Product Name
           </span>
         }
-        onConfirm={nameStatus === "suggested" ? () => (data?.productPageTitle ? confirmProduct() : confirmField("productName")) : undefined}
+        onConfirm={nameStatus === "suggested" ? () => (nameFromPage ? confirmProduct() : confirmField("productName")) : undefined}
         confirming={confirmingField === "productName"}
       >
         {editingName ? (
@@ -531,7 +534,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
           </div>
         ) : (
           <button onClick={() => setEditingName(true)} className="text-sm text-left w-full hover:bg-muted/50 rounded px-2 py-1 transition-colors flex items-center gap-2 group">
-            {data?.productPageTitle || data?.productName || <span className="text-muted-foreground italic">Click to add product name…</span>}
+            {data?.productName || data?.productPageTitle || <span className="text-muted-foreground italic">Click to add product name…</span>}
             <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 ml-auto" />
           </button>
         )}

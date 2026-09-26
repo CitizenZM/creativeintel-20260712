@@ -1281,7 +1281,7 @@ export async function runDeepAnalysisStage(projectId: string): Promise<number> {
     brandName: project.brandName,
     category: project.category || undefined,
     productDescription: project.productPageText?.slice(0, 400) || undefined,
-    productName: project.productPageTitle || project.productName || undefined,
+    productName: project.productName || project.productPageTitle || undefined,
     campaignGoal: project.campaignGoal || undefined,
     platform: (campaignSel?.platform as string | null) || undefined,
     targetDurationSec: (campaignSel?.totalDurationSec as number | null) || undefined,
