@@ -98,6 +98,8 @@ export interface ModelOptionView {
   verified: boolean;
   note?: string;
   durations?: number[];
+  /** "libtv" | "glm" | "comfyui" — the video model decides which engine renders the run. */
+  engine?: string;
 }
 
 export interface BrandKitReadiness {

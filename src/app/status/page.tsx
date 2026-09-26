@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { Header } from "@/components/layout/header";
 import { collectSources, type JobSourceStatus, type JobStep } from "@/services/research/job-progress";
 import { getStorageStatus } from "@/services/storage";
+import { getSystemStats, isComfyConfigured, summariseSystemStats } from "@/services/ai/comfyui";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +50,23 @@ function stamp(d: Date | null) {
   return d ? `${STAMP.format(d)} UTC` : "never";
 }
 
+type ComfyStatus =
+  | { state: "off" }
+  | { state: "down"; error: string }
+  | ({ state: "up" } & ReturnType<typeof summariseSystemStats>);
+
+/** Reachability of the self-hosted ComfyUI render node (GET /system_stats). */
+async function comfyStatus(): Promise<ComfyStatus> {
+  if (!isComfyConfigured()) return { state: "off" };
+  try {
+    return { state: "up", ...summariseSystemStats(await getSystemStats(4000)) };
+  } catch (err) {
+    return { state: "down", error: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
+  }
+}
+
 export default async function StatusPage() {
+  const comfyPromise = comfyStatus();
   const [recentJobs, lastAdTask, lastFetchTask, queued, failedTasks, freshRows, recentFailedRows, beatRows] = await Promise.all([
     prisma.researchJob.findMany({
       where: { status: "complete" },
@@ -87,6 +104,7 @@ export default async function StatusPage() {
     `,
   ]);
   const recentFailed = Number(recentFailedRows[0]?.failed ?? 0);
+  const comfy = await comfyPromise;
 
   // Roll every recent run's per-source outcome into one row per source, keeping
   // the most recent note so the page says why something is not working.
@@ -134,6 +152,7 @@ export default async function StatusPage() {
     ["YOUTUBE_API_KEY", !!process.env.YOUTUBE_API_KEY, "YouTube search (HTML fallback works without it)"],
     ["FAL_KEY", !!process.env.FAL_KEY, "Storyboard frame images"],
     ["WORKER_TOKEN", !!process.env.WORKER_TOKEN, "Local worker authentication"],
+    ["COMFYUI_URL", isComfyConfigured(), "Self-hosted ComfyUI GPU render node (optional)"],
   ] as const;
 
   return (
@@ -167,6 +186,25 @@ export default async function StatusPage() {
                 Asset storage
               </span>
               <span className="text-xs text-muted-foreground">{storage.provider}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+              <span className="flex items-center gap-2">
+                <Dot ok={comfy.state === "up"} warn={comfy.state === "off"} />
+                ComfyUI render node (self-hosted GPU)
+              </span>
+              <span className="text-xs text-muted-foreground text-right break-words">
+                {comfy.state === "off"
+                  ? "not configured — set COMFYUI_URL to render clips on your own GPU"
+                  : comfy.state === "down"
+                    ? `unreachable · ${comfy.error}`
+                    : [
+                        comfy.gpu ?? "no GPU reported",
+                        comfy.vramTotalGb !== null ? `${comfy.vramTotalGb} GB VRAM (${comfy.vramFreeGb ?? "?"} GB free)` : null,
+                        comfy.version ? `ComfyUI ${comfy.version}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+              </span>
             </div>
           </div>
           {!workerOnline && (

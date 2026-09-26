@@ -1,0 +1,69 @@
+{
+  "1": { "class_type": "DownloadAndLoadLivePortraitModels", "inputs": { "precision": "fp16", "mode": "human" } },
+  "2": { "class_type": "LivePortraitLoadMediaPipeCropper", "inputs": { "landmarkrunner_onnx_device": "CPU", "keep_model_loaded": true } },
+  "3": { "class_type": "LoadImage", "inputs": { "image": "{{image}}" } },
+  "4": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "video": "{{driving_video}}",
+      "force_rate": "{{fps}}",
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": "{{frames}}",
+      "skip_first_frames": 0,
+      "select_every_nth": 1
+    }
+  },
+  "5": {
+    "class_type": "LivePortraitCropper",
+    "inputs": {
+      "pipeline": ["1", 0],
+      "cropper": ["2", 0],
+      "source_image": ["3", 0],
+      "dsize": 512,
+      "scale": 2.3,
+      "vx_ratio": 0,
+      "vy_ratio": -0.125,
+      "face_index": 0,
+      "face_index_order": "large-small",
+      "rotate": true
+    }
+  },
+  "6": {
+    "class_type": "LivePortraitProcess",
+    "inputs": {
+      "pipeline": ["1", 0],
+      "crop_info": ["5", 1],
+      "source_image": ["3", 0],
+      "driving_images": ["4", 0],
+      "lip_zero": false,
+      "lip_zero_threshold": 0.03,
+      "stitching": true,
+      "delta_multiplier": 1,
+      "mismatch_method": "constant",
+      "relative_motion_mode": "relative",
+      "driving_smooth_observation_variance": 0.000003,
+      "expression_friendly": false,
+      "expression_friendly_multiplier": 1
+    }
+  },
+  "7": {
+    "class_type": "LivePortraitComposite",
+    "inputs": { "source_image": ["3", 0], "cropped_image": ["6", 0], "liveportrait_out": ["6", 1] }
+  },
+  "8": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": ["7", 0],
+      "frame_rate": "{{fps}}",
+      "loop_count": 0,
+      "filename_prefix": "creativeintel/talking-head",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true,
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true
+    }
+  }
+}

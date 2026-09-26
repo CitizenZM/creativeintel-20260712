@@ -39,8 +39,11 @@ import {
   GLM_IMAGE_MODEL,
   GLM_VIDEO_MODEL,
   engineFor,
+  engineLabel,
+  mismatchedImageEngine,
 } from "./libtv-pricing";
 import { isStrictFree } from "@/lib/cost-mode";
+import { isComfyConfigured } from "@/services/ai/comfyui";
 
 export const PRODUCT_LOCK_CLAUSE =
   "product stays exactly the same size, shape and label throughout — it must not grow, warp or re-letter";
@@ -267,6 +270,18 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
     aspectRatio = "9:16",
   } = input;
   const executor = engineFor(videoModel);
+  // The video model picks the engine; a GLM / ComfyUI keyframe model cannot
+  // be rendered by any other engine, so refuse the pair instead of failing mid-run.
+  const strayImageEngine = mismatchedImageEngine(imageModel, videoModel);
+  if (strayImageEngine) {
+    throw new LibtvCompileError(
+      `"${imageModel}" renders only on ${engineLabel(strayImageEngine)}, but the clip model "${videoModel}" renders on ${engineLabel(executor)}. Pick a keyframe model from the same engine.`,
+      400
+    );
+  }
+  if (executor === "comfyui" && !isComfyConfigured()) {
+    throw new LibtvCompileError("ComfyUI is not configured — set COMFYUI_URL to your GPU node (see docs/comfyui-node.md).", 409);
+  }
   const budgetMode: BudgetMode = isBudgetMode(input.budgetMode) ? input.budgetMode : DEFAULT_BUDGET_MODE;
 
   const [project, storyboard, kit] = await Promise.all([

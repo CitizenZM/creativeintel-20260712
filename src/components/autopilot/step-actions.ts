@@ -5,6 +5,7 @@
  * result for the user to confirm or edit.
  */
 import { STYLE_CATEGORIES, isGoalType, isRecommendedFor } from "@/lib/style-categories";
+import { engineLabel, isServerEngine } from "@/services/video-gen/libtv-pricing";
 
 export interface ActionProgress {
   percent: number | null;
@@ -310,7 +311,8 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
   },
   "studio.render": {
     label: "Render for free",
-    explain: "Free GLM runs render on the server at 0 credits. Runs that spend LibTV credits still wait for your approval.",
+    explain:
+      "Free runs (GLM, or your own ComfyUI GPU) render on the server at 0 credits. Runs that spend LibTV credits still wait for your approval.",
     auto: true,
     run: async (projectId, onProgress) => {
       type Run = { id: string; status: string; creditsEstimated: number; executor?: string; error?: string | null; jobs?: { status: string }[] };
@@ -320,7 +322,7 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
       if (!target) {
         const pending = runs.find((r) => r.status === "awaiting_approval");
         if (!pending) throw new Error("No compiled run yet — compile one first.");
-        if (pending.executor !== "glm" || pending.creditsEstimated > 0) {
+        if (!isServerEngine(pending.executor) || pending.creditsEstimated > 0) {
           throw new Error(`This run spends ${pending.creditsEstimated} LibTV credits — approve it yourself in Studio.`);
         }
         await api(`/api/projects/${projectId}/studio/libtv-runs/${pending.id}/approve`, { json: {} });
@@ -334,7 +336,10 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
         onProgress({
           percent: jobs.length ? Math.round((done / jobs.length) * 95) : null,
           etaSeconds: null,
-          message: run.status === "assembling" ? "Assembling the master video" : `Rendering with GLM (free) — ${done}/${jobs.length} steps`,
+          message:
+            run.status === "assembling"
+              ? "Assembling the master video"
+              : `Rendering with ${engineLabel(run.executor ?? target.executor)} — ${done}/${jobs.length} steps`,
         });
         if (run.status === "completed") return "Rendered the master video for free — it's in Deliver.";
         if (run.status === "failed" || run.status === "cancelled") throw new Error(run.error || `Render ${run.status}`);
@@ -348,7 +353,7 @@ export const MANUAL_HINTS: Record<string, string> = {
   "setup.product": "Enter the product name or paste the product page URL.",
   "setup.confirmProduct": "Check the product details we read from your page, then click Confirm.",
   "creative.approve": "Open the storyboard and approve each frame (✓), or use “Approve all frames”.",
-  "studio.render": "Free GLM runs render automatically. A LibTV run spends credits — approve it in Studio.",
+  "studio.render": "Free GLM / ComfyUI runs render automatically. A LibTV run spends credits — approve it in Studio.",
   "deliver.master": "Appears here once a studio run finishes rendering.",
 };
 

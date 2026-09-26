@@ -140,7 +140,7 @@ export interface ClaimedRunPayload {
 
 export async function claimNextRun(workerId: string): Promise<ClaimedRunPayload | null> {
   const candidates = await prisma.libtvRun.findMany({
-    // GLM runs render on the server (glm-executor), never on the Mac worker.
+    // GLM / ComfyUI runs render on the server (server-executor), never on the Mac worker.
     where: { status: "approved", executor: "libtv" },
     orderBy: { approvedAt: "asc" },
     take: 10,

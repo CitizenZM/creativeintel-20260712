@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { pollAllActiveJobs } from "@/services/video-gen/poll";
-import { advanceActiveGlmRuns } from "@/services/video-gen/glm-executor";
+import { advanceActiveServerRuns } from "@/services/video-gen/server-engines";
 
 export const maxDuration = 60;
 
@@ -25,7 +25,8 @@ export async function GET(request: Request) {
   }
 
   const summary = await pollAllActiveJobs();
-  // Also advance free GLM Studio runs (they render on the server, not the Mac).
-  const glmRuns = await advanceActiveGlmRuns(40_000).catch(() => 0);
-  return NextResponse.json({ ...summary, glmRuns });
+  // Also advance server-rendered Studio runs — GLM and ComfyUI render from
+  // here, not on the Mac worker.
+  const server = await advanceActiveServerRuns(40_000).catch(() => ({ glm: 0, comfyui: 0 }));
+  return NextResponse.json({ ...summary, glmRuns: server.glm, comfyuiRuns: server.comfyui });
 }

@@ -95,7 +95,8 @@ export function LibtvRunPanel({
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // The server may offer a different model list (strict free mode offers only
-  // the GLM engine) — never compile with a model that isn't on offer.
+  // the GLM / ComfyUI engines; ComfyUI only when a node is configured) — never
+  // compile with a model that isn't on offer.
   if (models.image.length && !models.image.some((m) => m.name === imageModel)) setImageModel(models.image[0].name);
   if (models.video.length && !models.video.some((m) => m.name === videoModel)) {
     setVideoModel(models.video[0].name);
@@ -371,7 +372,15 @@ export function LibtvRunPanel({
           </span>
           <select
             value={videoModel}
-            onChange={(e) => setVideoModel(e.target.value)}
+            onChange={(e) => {
+              setVideoModel(e.target.value);
+              // GLM / ComfyUI keyframes only render on their own engine: keep the pair aligned.
+              const engine = models.video.find((m) => m.name === e.target.value)?.engine ?? "libtv";
+              if ((imageOption?.engine ?? "libtv") !== engine) {
+                const match = models.image.find((m) => (m.engine ?? "libtv") === engine);
+                if (match) setImageModel(match.name);
+              }
+            }}
             className="h-9 w-full rounded-md border border-border bg-background px-2 text-xs"
           >
             {models.video.map((m) => (
