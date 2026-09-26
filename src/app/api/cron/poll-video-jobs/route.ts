@@ -27,6 +27,6 @@ export async function GET(request: Request) {
   const summary = await pollAllActiveJobs();
   // Also advance server-rendered Studio runs — GLM and ComfyUI render from
   // here, not on the Mac worker.
-  const server = await advanceActiveServerRuns(40_000).catch(() => ({ glm: 0, comfyui: 0 }));
+  const server = await advanceActiveServerRuns(40_000).catch(() => ({ glm: 0, comfyui: 0, animatic: 0 }));
   return NextResponse.json({ ...summary, glmRuns: server.glm, comfyuiRuns: server.comfyui });
 }

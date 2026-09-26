@@ -5,6 +5,8 @@
  */
 import { z } from "zod";
 import {
+  ANIMATIC_IMAGE_MODEL,
+  ANIMATIC_VIDEO_MODEL,
   COMFY_IMAGE_MODEL,
   COMFY_VIDEO_MODEL,
   DEFAULT_IMAGE_MODEL,
@@ -31,11 +33,11 @@ export const BUILTIN_ENGINES: Record<Capability, string[]> = {
   text: ["glm", "openai", "gemini", "anthropic", "openrouter"],
   vision: ["glm", "openai", "gemini", "anthropic", "openrouter"],
   image: ["glm", "openai", "fal", "pollinations"],
-  video: ["glm", "comfyui", "libtv"],
+  video: ["glm", "comfyui", "animatic", "libtv"],
 };
 
 /** Engines that never cost money (ComfyUI is the operator's own GPU: 0 credits). */
-export const FREE_ENGINES = new Set(["glm", "pollinations", "comfyui"]);
+export const FREE_ENGINES = new Set(["glm", "pollinations", "comfyui", "animatic"]);
 
 const ENGINE_LABELS: Record<Capability, Record<string, string>> = {
   text: {
@@ -61,6 +63,7 @@ const ENGINE_LABELS: Record<Capability, Record<string, string>> = {
   video: {
     glm: "Zhipu CogVideoX-Flash (free, server-side)",
     comfyui: "ComfyUI (your own GPU node)",
+    animatic: "Free animatic (Pollinations stills + zoom/pan, no key)",
     libtv: "LibTV (credits, local worker)",
   },
 };
@@ -195,11 +198,15 @@ export function videoDefaults(
   choice: string,
   strictFree: boolean,
   providers: CustomProviderInfo[],
-  opts: { comfyAvailable?: boolean } = {}
+  opts: { comfyAvailable?: boolean; glmAvailable?: boolean } = {}
 ): { imageModel: string; videoModel: string } {
+  const glmAvailable = opts.glmAvailable ?? true;
   const glm = { imageModel: GLM_IMAGE_MODEL, videoModel: GLM_VIDEO_MODEL };
+  const animatic = { imageModel: ANIMATIC_IMAGE_MODEL, videoModel: ANIMATIC_VIDEO_MODEL };
   if (choice === "comfyui" && opts.comfyAvailable) return { imageModel: COMFY_IMAGE_MODEL, videoModel: COMFY_VIDEO_MODEL };
-  if (strictFree || choice === "glm") return glm;
+  if (choice === "animatic") return animatic;
+  // GLM without its key can't render — the keyless animatic is the free fallback.
+  if (strictFree || choice === "glm") return glmAvailable ? glm : animatic;
   if (choice.startsWith(CUSTOM_PREFIX)) {
     const p = providers.find((x) => x.id === choice.slice(CUSTOM_PREFIX.length));
     if (p && providerServes(p, "video")) return { imageModel: GLM_IMAGE_MODEL, videoModel: customVideoModelName(p) };

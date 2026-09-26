@@ -21,10 +21,10 @@ export interface LibtvVideoPrice {
  * Which executor renders a model: LibTV (credits, Mac worker), Zhipu GLM (free
  * cloud, server-side) or ComfyUI (self-hosted GPU, server-side, free per clip).
  */
-export type RenderEngine = "libtv" | "glm" | "comfyui";
+export type RenderEngine = "libtv" | "glm" | "comfyui" | "animatic";
 
 /** Engines the Next.js server drives itself (server-executor.ts), never the Mac worker. */
-export const SERVER_ENGINES = ["glm", "comfyui"] as const;
+export const SERVER_ENGINES = ["glm", "comfyui", "animatic"] as const;
 export type ServerEngine = (typeof SERVER_ENGINES)[number];
 
 export function isServerEngine(engine: string | null | undefined): engine is ServerEngine {
@@ -34,6 +34,7 @@ export function isServerEngine(engine: string | null | undefined): engine is Ser
 export function engineLabel(engine: string | null | undefined): string {
   if (engine === "glm") return "GLM (free)";
   if (engine === "comfyui") return "ComfyUI (self-hosted)";
+  if (engine === "animatic") return "Animatic (free, no key)";
   return "LibTV";
 }
 
@@ -119,6 +120,19 @@ export const IMAGE_MODELS: LibtvImageModel[] = [
     settingsKeys: ["modeType", "ratio"],
     verified: false,
     note: "Zhipu free model, rendered on the server — 0 credits. Text-only: product-accurate frames come from the packshot.",
+  },
+  {
+    name: "Free Stills (Pollinations)",
+    engine: "animatic",
+    modality: "image",
+    modeType: "text2image",
+    creditsPerImage: 0,
+    quality: "1024px",
+    qualityKey: "quality",
+    ratios: ["9:16", "16:9", "1:1", "3:4", "4:3"],
+    settingsKeys: ["modeType", "ratio"],
+    verified: false,
+    note: "Free keyframes from Pollinations (Flux) — no key, no credits. Pairs with the free animatic clips.",
   },
   {
     name: "ComfyUI Image (self-hosted)",
@@ -237,6 +251,22 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     note: "Zhipu free image-to-video, rendered on the server — 0 credits, watermarked.",
   },
   {
+    name: "Free Animatic (zoom & pan)",
+    engine: "animatic",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [
+      { durationSec: 4, resolution: "1080P", credits: 0 },
+      { durationSec: 5, resolution: "1080P", credits: 0 },
+      { durationSec: 6, resolution: "1080P", credits: 0 },
+    ],
+    defaultDurationSec: 5,
+    defaultResolution: "1080P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: true,
+    note: "Always available, no key: each keyframe is animated with a slow zoom and pan on the server (FFmpeg). An animatic to review timing and story — not AI motion.",
+  },
+  {
     name: "ComfyUI Video (self-hosted)",
     engine: "comfyui",
     modality: "video",
@@ -258,6 +288,9 @@ export const DEFAULT_VIDEO_MODEL = "Hailuo 2.3 Fast";
 
 export const GLM_IMAGE_MODEL = "GLM CogView-3-Flash";
 export const GLM_VIDEO_MODEL = "GLM CogVideoX-Flash";
+
+export const ANIMATIC_IMAGE_MODEL = "Free Stills (Pollinations)";
+export const ANIMATIC_VIDEO_MODEL = "Free Animatic (zoom & pan)";
 
 export const COMFY_IMAGE_MODEL = "ComfyUI Image (self-hosted)";
 export const COMFY_VIDEO_MODEL = "ComfyUI Video (self-hosted)";
@@ -567,7 +600,7 @@ export function modelOptions(
     if (engine === "comfyui" && !comfyAvailable) return false;
     // Without a Zhipu key a GLM run compiles, then fails on its first job.
     if (engine === "glm" && !glmAvailable) return false;
-    return freeOnly ? engine === "glm" || engine === "comfyui" : true;
+    return freeOnly ? engine === "glm" || engine === "comfyui" || engine === "animatic" : true;
   };
   const images = IMAGE_MODELS.filter((m) => offered(m.engine));
   const videos = [...VIDEO_MODELS, ..._extraVideoModels].filter((m) => offered(m.engine) && !(freeOnly && m.zhipuModel));

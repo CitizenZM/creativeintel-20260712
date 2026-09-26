@@ -44,7 +44,7 @@ export interface UsageSummary {
   };
 }
 
-const FREE_PROVIDERS = new Set(["glm", "pollinations", "comfyui"]);
+const FREE_PROVIDERS = new Set(["glm", "pollinations", "comfyui", "animatic"]);
 
 /**
  * Public list prices (USD) for the built-in env providers, whose calls are

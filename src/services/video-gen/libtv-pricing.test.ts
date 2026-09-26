@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANIMATIC_IMAGE_MODEL,
+  ANIMATIC_VIDEO_MODEL,
   COMFY_IMAGE_MODEL,
   COMFY_VIDEO_MODEL,
   GLM_IMAGE_MODEL,
@@ -51,7 +53,7 @@ describe("modelOptions", () => {
 
   it("hides ComfyUI when no node is configured", () => {
     expect(names(modelOptions(false, false))).not.toContain(COMFY_VIDEO_MODEL);
-    expect(names(modelOptions(true, false, {}, true))).toEqual([GLM_IMAGE_MODEL, GLM_VIDEO_MODEL]);
+    expect(names(modelOptions(true, false, {}, true))).toEqual([GLM_IMAGE_MODEL, ANIMATIC_IMAGE_MODEL, GLM_VIDEO_MODEL, ANIMATIC_VIDEO_MODEL]);
   });
 
   it("hides the GLM models when no Zhipu key is set", () => {

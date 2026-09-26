@@ -1,3 +1,4 @@
+import { isZhipuConfigured } from "@/services/ai/zhipu";
 /**
  * POST — compile a storyboard into a LibtvRun (status `awaiting_approval`).
  * GET  — list this project's runs with their node jobs and the model catalogue
@@ -35,7 +36,7 @@ export async function GET(
     models: modelOptions(
       isStrictFree(),
       undefined,
-      videoDefaults(snap.settings.video, isStrictFree(), snap.providers, { comfyAvailable: isComfyConfigured() })
+      videoDefaults(snap.settings.video, isStrictFree(), snap.providers, { comfyAvailable: isComfyConfigured(), glmAvailable: isZhipuConfigured() })
     ),
     brandKit: completeness,
     limits: { maxRunCredits: maxRunCredits(), defaultBudgetMode: DEFAULT_BUDGET_MODE },
