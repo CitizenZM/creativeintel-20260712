@@ -1,3 +1,4 @@
+import { COMPLIANCE_FLAG } from "@/lib/script-pick";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
@@ -126,11 +127,12 @@ export async function POST(
         `[scripts] compliance violations persisted for project ${projectId}, template ${template.id}:`,
         audit.violations
       );
-      generated = { ...generated, title: `⚠ ${generated.title}` };
+      generated = { ...generated, title: `${COMPLIANCE_FLAG}${generated.title}` };
     }
 
     const script = await persistScript(projectId, generated, {
       template,
+      complianceNotes: audit.ok ? undefined : audit.violations.map((v) => v.reason),
       videoType,
       totalDurationSec,
       angleTitle: angle?.title,

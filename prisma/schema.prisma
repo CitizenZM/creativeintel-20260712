@@ -497,6 +497,7 @@ model Script {
   predictedScore     Float?
   scenes             Json? // [{sceneNumber, startSec, endSec, segmentLabel, shotType, focalLength, cameraMovement, aperture, location, lighting, actorAction, productAction, voiceover, textOverlay, transition}]
   platformTechniques Json? // string[] — platform-playbook techniques applied (e.g. "native text overlay in frame 1")
+  complianceNotes    Json? // string[] — brand-rule violations that survived the rewrite (title carries ⚠)
 
   // Structured script (v2) — see src/services/ai/prompts/script-templates.ts
   videoType String? // PRODUCT_INTRO | PROMO_OFFER | AWARENESS_INTEREST

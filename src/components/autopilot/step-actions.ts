@@ -6,6 +6,7 @@
  */
 import { STYLE_CATEGORIES, isGoalType, isRecommendedFor } from "@/lib/style-categories";
 import { engineLabel, isServerEngine } from "@/services/video-gen/libtv-pricing";
+import { isFlaggedScript, pickBestScript } from "@/lib/script-pick";
 
 export interface ActionProgress {
   percent: number | null;
@@ -272,9 +273,12 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
       const all = await api<ScriptRow[]>(`/api/projects/${projectId}/creative/scripts`);
       const live = all.filter((s) => !s.deletedAt);
       if (!live.length) throw new Error("No scripts yet — write scripts first.");
-      const best = [...live].sort((a, b) => (b.predictedScore ?? 0) - (a.predictedScore ?? 0))[0];
+      const best = pickBestScript(live);
       await api(`/api/projects/${projectId}/creative/scripts`, { method: "PATCH", json: { ids: [best.id], status: "selected" } });
-      return `Selected "${best.title}" (highest predicted score) — select others too if you want.`;
+      const why = isFlaggedScript(best)
+        ? "every script still has a compliance warning — fix the flagged lines before producing it"
+        : "highest predicted score among scripts that passed the compliance check";
+      return `Selected "${best.title}" (${why}) — select others too if you want.`;
     },
   },
   "creative.approve": {
