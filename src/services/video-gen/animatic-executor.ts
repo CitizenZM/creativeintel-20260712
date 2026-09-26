@@ -55,14 +55,27 @@ async function store(buffer: Buffer, contentType: string, ctx: JobContext, ext: 
   return up.url;
 }
 
+/** Wait before retrying Pollinations: honour Retry-After on 429, else back off. */
+export function pollinationsBackoffMs(status: number, retryAfter: string | null, attempt: number): number {
+  const header = Number(retryAfter);
+  if (status === 429 && Number.isFinite(header) && header > 0) return Math.min(header, 60) * 1000;
+  return (status === 429 ? 10_000 : 3_000) * (attempt + 1);
+}
+
 async function pollinationsStill(prompt: string, ctx: JobContext): Promise<string> {
   const { width, height } = stillSize(ctx.aspectRatio);
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // The anonymous tier allows about one request at a time per IP: another run
+  // rendering in parallel gets 429s, so wait them out rather than fail the run.
+  for (let attempt = 0; attempt < 6; attempt++) {
     const seed = Math.floor(Math.random() * 999_999);
     const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, MAX_PROMPT_CHARS))}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=flux&nofeed=true`;
+    let status = 0;
+    let retryAfter: string | null = null;
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+      status = res.status;
+      retryAfter = res.headers.get("retry-after");
       const type = res.headers.get("content-type")?.split(";")[0] ?? "";
       if (!res.ok || !type.startsWith("image/")) throw new Error(`Pollinations ${res.status} ${type}`);
       const stored = await store(Buffer.from(await res.arrayBuffer()), type, ctx, type.includes("png") ? ".png" : ".jpg");
@@ -70,7 +83,7 @@ async function pollinationsStill(prompt: string, ctx: JobContext): Promise<strin
       return stored;
     } catch (err) {
       lastErr = err;
-      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, pollinationsBackoffMs(status, retryAfter, attempt)));
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error("Pollinations failed");
@@ -104,7 +117,8 @@ export const animaticAdapter: EngineAdapter = {
   workerId: "animatic-server",
   // FFmpeg on a serverless CPU: a couple of clips per tick keeps each tick short.
   maxVideosInFlight: 2,
-  imagesPerTick: 3,
+  // One keyframe at a time: Pollinations' free tier rate-limits parallel requests.
+  imagesPerTick: 1,
   isConfigured: () => true,
   notConfiguredError: "",
 
