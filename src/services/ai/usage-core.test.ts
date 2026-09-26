@@ -33,14 +33,16 @@ describe("summarizeUsage", () => {
 
     const openai = s.engines.find((e) => e.provider === "openai")!;
     expect(openai.free).toBe(false);
-    expect(openai.unpricedCalls).toBe(4);
-    expect(openai.costUsd).toBe(0);
+    // gpt-4o logs no cost, so it's estimated at list price: 4000 in + 800 out.
+    expect(openai.unpricedCalls).toBe(0);
+    expect(openai.costUsd).toBeCloseTo(0.018);
+    expect(openai.estimatedUsd).toBeCloseTo(0.018);
 
     expect(s.totals.inputTokens).toBe(5500);
     expect(s.totals.outputTokens).toBe(1050);
     expect(s.totals.videoMinutes).toBeCloseTo(25 / 60);
-    expect(s.totals.paidSpendUsd).toBeCloseTo(0.28);
-    expect(s.totals.unpricedPaidCalls).toBe(4);
+    expect(s.totals.paidSpendUsd).toBeCloseTo(0.298);
+    expect(s.totals.unpricedPaidCalls).toBe(0);
     expect(s.totals.freeCalls).toBe(15);
     // Most-used engine first.
     expect(s.engines[0].provider).toBe("glm");
@@ -64,5 +66,21 @@ describe("costForTokens", () => {
 describe("monthStartUtc", () => {
   it("is midnight UTC on the first of the month", () => {
     expect(monthStartUtc(new Date("2026-09-25T13:00:00Z")).toISOString()).toBe("2026-09-01T00:00:00.000Z");
+  });
+});
+
+describe("list-price estimates", () => {
+  it("prices unpriced env-provider calls at list price", async () => {
+    const { summarizeUsage, estimateListCost } = await import("./usage-core");
+    expect(estimateListCost({ model: "gpt-4o", inputTokens: 1_000_000, outputTokens: 100_000, images: 0 })).toBeCloseTo(3.5);
+    expect(estimateListCost({ model: "gpt-image-1", inputTokens: 0, outputTokens: 0, images: 10 })).toBeCloseTo(0.42);
+    expect(estimateListCost({ model: "unknown-model", inputTokens: 5, outputTokens: 5, images: 0 })).toBeNull();
+    const s = summarizeUsage([
+      { provider: "openai", model: "gpt-4o", capability: "text", calls: 2, pricedCalls: 0, inputTokens: 1_000_000, outputTokens: 0, images: 0, videoSeconds: 0, costUsd: null },
+      { provider: "openai", model: "mystery", capability: "text", calls: 1, pricedCalls: 0, inputTokens: 10, outputTokens: 10, images: 0, videoSeconds: 0, costUsd: null },
+    ]);
+    expect(s.totals.paidSpendUsd).toBeCloseTo(2.5);
+    expect(s.totals.unpricedPaidCalls).toBe(1);
+    expect(s.engines[0].estimatedUsd).toBeCloseTo(2.5);
   });
 });
