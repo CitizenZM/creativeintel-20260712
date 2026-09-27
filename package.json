@@ -32,6 +32,7 @@
     "jsonrepair": "^3.15.0",
     "lucide-react": "^1.8.0",
     "mammoth": "^1.12.0",
+    "msedge-tts": "2.0.8",
     "next": "16.2.3",
     "openai": "^6.34.0",
     "pdf-parse": "^2.4.5",

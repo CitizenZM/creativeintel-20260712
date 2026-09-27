@@ -717,6 +717,8 @@ model LibtvRun {
   creditCap        Int?
   approvedAt       DateTime?
   masterMp4Url     String?
+  voiceoverUrl     String? // the master's voiceover alone (mp3), for re-mixing in an editor
+  subtitlesUrl     String? // SRT of the voiceover, timed to the master
   // The deliverable for its script, picked by the user (one per script).
   isFinal          Boolean   @default(false)
   // Set when this run re-renders chosen scenes of an earlier run.
