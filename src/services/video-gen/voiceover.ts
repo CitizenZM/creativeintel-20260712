@@ -75,27 +75,47 @@ export function placeLines(lines: VoLine[], durations: number[], totalSec: numbe
   return out;
 }
 
+const alnum = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+
 /**
- * Edge TTS word boundaries drop punctuation ("receipts" for "receipts?"). Map
- * each word back onto the line's own text so subtitles keep it.
+ * Subtitles show the script's own words. Edge TTS word boundaries drop
+ * punctuation ("receipts" for "receipts?") and split numbers and abbreviations
+ * ("2,100+" → "2" + "100", "BT.2020" → "BT" + "2020"), so walk the script's
+ * tokens and give each the timing of the TTS words it covers.
  */
-export function withSourcePunctuation(words: Word[], lineText: string): Word[] {
-  let cursor = 0;
-  const lower = lineText.toLowerCase();
-  return words.map((w) => {
-    const at = lower.indexOf(w.text.toLowerCase(), cursor);
-    if (at < 0) return w;
-    let end = at + w.text.length;
-    while (end < lineText.length && /[.,!?;:%)"'’”…-]/.test(lineText[end]) && lineText[end] !== " ") end++;
-    cursor = end;
-    return { ...w, text: lineText.slice(at, end) };
-  });
+export function alignToSource(words: Word[], lineText: string): Word[] {
+  const tokens = lineText.split(/\s+/).filter(Boolean);
+  const out: Word[] = [];
+  let w = 0;
+  for (const token of tokens) {
+    const want = alnum(token);
+    if (!want) {
+      // Pure punctuation ("—"): ride on the previous word.
+      if (out.length) out[out.length - 1] = { ...out[out.length - 1], text: `${out[out.length - 1].text} ${token}` };
+      continue;
+    }
+    const first = w < words.length ? words[w] : null;
+    let got = "";
+    let last = first;
+    while (w < words.length && got.length < want.length) {
+      const next = alnum(words[w].text);
+      if (got && !want.startsWith(got + next)) break;
+      got += next;
+      last = words[w];
+      w++;
+    }
+    const prev = out[out.length - 1];
+    const startSec = first ? first.startSec : prev ? prev.startSec + prev.durSec : 0;
+    const endSec = last ? last.startSec + last.durSec : startSec + 0.3;
+    out.push({ text: token, startSec, durSec: Math.max(0.05, endSec - startSec) });
+  }
+  return out;
 }
 
 /** Subtitle cues of a few words each, breaking at punctuation, timed from the TTS word boundaries. */
 export function subtitleCues(words: Word[], placement: Placement, maxChars = 32, lineText?: string): SubtitleCue[] {
   const at = (t: number) => placement.startSec + t / placement.tempo;
-  const src = lineText ? withSourcePunctuation(words, lineText) : words;
+  const src = lineText ? alignToSource(words, lineText) : words;
   const groups: Word[][] = [];
   let cur: Word[] = [];
   for (const w of src) {
