@@ -73,8 +73,19 @@ async function runJob(
   // A background job gets one serverless run (~170-250 s). When free models are
   // slow it ends part-way ("partial") or is cut off (stale) — both resume where
   // they stopped, so carry on with a fresh job instead of handing back an error.
+  let misses = 0;
   for (let round = 1; ; round++) {
-    const { job } = await api<{ job: JobView }>(`/api/projects/${projectId}/jobs/${jobId}`);
+    // A dropped poll ("Failed to fetch") says nothing about the job: retry it.
+    let job: JobView;
+    try {
+      ({ job } = await api<{ job: JobView }>(`/api/projects/${projectId}/jobs/${jobId}`));
+      misses = 0;
+    } catch (err) {
+      if (++misses > 10) throw err;
+      round--;
+      await wait(3000);
+      continue;
+    }
     onProgress({
       percent: job.percent ?? null,
       etaSeconds: job.etaSeconds ?? null,

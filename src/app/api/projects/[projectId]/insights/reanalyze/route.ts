@@ -24,9 +24,9 @@ const BUDGET_MS = Number(process.env.ANALYSIS_BUDGET_MS) || 80_000;
 // A background run keeps making passes until everything is analysed or this
 // much of the function's 300s is spent, leaving room to write the result.
 // Kept well under 300 s: an AI call in flight when the budget runs out can take
-// up to ~110 s more (claude-client CALL_BUDGET_MS). Autopilot continues a
+// up to ~150 s more (claude-client CALL_BUDGET_MS). Autopilot continues a
 // partial run with a fresh job.
-const BACKGROUND_BUDGET_MS = 170_000;
+const BACKGROUND_BUDGET_MS = 130_000;
 
 const STEP_LABELS: { key: string; label: string }[] = [
   { key: "teardown", label: "Ad teardowns" },

@@ -56,7 +56,7 @@ function toJobSources(reports: SourceReport[]): JobSourceStatus[] {
  * that budget left, and its failure never throws away the ads already saved —
  * Insights runs the same analysis as its own job.
  */
-const MAX_ELAPSED_BEFORE_ANALYSIS_MS = 150_000;
+const MAX_ELAPSED_BEFORE_ANALYSIS_MS = 110_000;
 /** The TikTok "for you" corpus is a nice-to-have; skip it past this point. */
 const MAX_ELAPSED_FOR_EXTRAS_MS = 150_000;
 
@@ -309,8 +309,12 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
       await failStep(jobId, "AI analysis", "Not enough time left in this run — the ads are saved. Insights runs the analysis on its own.");
     } else {
       try {
+        // Stages stop starting new work at this deadline; a call already in
+        // flight may take up to ~150 s (claude-client CALL_BUDGET_MS) more.
+        const analysisBudgetMs = Math.max(15_000, 285_000 - (Date.now() - researchStartedAt) - 150_000);
         await runAnalysisPipeline(projectId, {
           jobId,
+          budgetMs: analysisBudgetMs,
           onProgress: (step: string, pct: number) => {
             void updateStep(jobId, "AI analysis", pct, step);
           },

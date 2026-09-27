@@ -35,3 +35,12 @@ describe("isTransientError in the production bundle", () => {
     expect(isTransientError(Object.assign(new Error("Request timed out."), { name: "rB" }))).toBe(true);
   });
 });
+
+describe("requestTimeoutMs", () => {
+  it("gives slow fallback models room for a long answer, but never the whole run", async () => {
+    const { requestTimeoutMs } = await import("./claude-client");
+    expect(requestTimeoutMs("glm-4.7-flash", 1000)).toBe(30_000);
+    expect(requestTimeoutMs("glm-4-flash-250414", 4096)).toBeGreaterThan(100_000);
+    expect(requestTimeoutMs("glm-4-air-250414", 16000)).toBe(140_000);
+  });
+});
