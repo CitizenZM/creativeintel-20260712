@@ -49,11 +49,66 @@ const _customClients = new Map<string, { apiKey: string; baseUrl: string | null;
  * stuck request could eat a whole 300 s serverless invocation ("Run stopped
  * before it finished"). Fail fast and let the fallback ladder take over.
  */
-const CALL_OPTS = { timeout: 60_000, maxRetries: 0 } as const;
+const CALL_OPTS = { timeout: 140_000, maxRetries: 0 } as const;
 /** A whole call — every model and provider it falls back through — ends by this. */
-const CALL_BUDGET_MS = 110_000;
-// Free Zhipu models answer 429 at peak times; moving to the next model beats waiting.
-const GLM_OPTS = { timeout: 45_000, maxRetries: 0 } as const;
+const CALL_BUDGET_MS = 150_000;
+// Free Zhipu models answer 429 at peak times; moving to the next model beats retrying.
+const GLM_OPTS = { timeout: 140_000, maxRetries: 0 } as const;
+
+/**
+ * Output tokens per second, measured on production (diagnostics ?bench=1,
+ * ~1,600-token JSON): GLM-4.7-Flash ≈ 125, gpt-4o-mini ≈ 120, GLM-4-Flash ≈ 52,
+ * GLM-4-Air ≈ 60. A fixed timeout either cut the slow fallbacks off mid-answer
+ * (45 s) or let a stuck call eat the run, so each request's timeout follows the
+ * model's speed and the answer's size.
+ */
+const TOKENS_PER_SEC: Record<string, number> = {
+  "glm-4.7-flash": 100,
+  "gpt-4o-mini": 100,
+  "gpt-4o": 60,
+  "glm-4-flash-250414": 40,
+  "glm-4-air-250414": 45,
+};
+
+export function requestTimeoutMs(model: string, maxTokens: number): number {
+  const tps = TOKENS_PER_SEC[model] ?? 50;
+  return Math.round(Math.min(140_000, Math.max(30_000, 15_000 + (maxTokens / tps) * 1000)));
+}
+
+/**
+ * Free GLM models allow very little concurrency per account; parallel batches
+ * mostly earn 429s. Hold at most this many free-GLM calls in flight per
+ * instance — a call that waits too long for a slot moves to the next model.
+ */
+const GLM_FREE_CONCURRENCY = 2;
+const GLM_SLOT_WAIT_MS = 20_000;
+let _glmActive = 0;
+const _glmWaiting: Array<() => void> = [];
+
+async function acquireGlmSlot(): Promise<(() => void) | null> {
+  if (_glmActive >= GLM_FREE_CONCURRENCY) {
+    const got = await new Promise<boolean>((resolve) => {
+      const wake = () => resolve(true);
+      _glmWaiting.push(wake);
+      setTimeout(() => {
+        const i = _glmWaiting.indexOf(wake);
+        if (i >= 0) {
+          _glmWaiting.splice(i, 1);
+          resolve(false);
+        }
+      }, GLM_SLOT_WAIT_MS);
+    });
+    if (!got) return null;
+  }
+  _glmActive++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    _glmActive--;
+    _glmWaiting.shift()?.();
+  };
+}
 
 let _openai: OpenAI | null = null;
 let _gemini: OpenAI | null = null;
@@ -431,26 +486,33 @@ async function createOnRoute(
   // answer, not a thinking trace, so switch thinking off.
   const zhipuFamily = provider === "glm" || (customId(provider) && cachedProvider(customId(provider)!)?.type === "zhipu-paid");
   const extra = zhipuFamily ? ({ thinking: { type: "disabled" } } as Record<string, unknown>) : {};
+  const reqOpts = { timeout: requestTimeoutMs(modelToUse, effectiveMaxTokens), maxRetries: 0 };
   try {
-    return await client.chat.completions.create({
-      model: modelToUse,
-      max_tokens: effectiveMaxTokens,
-      messages: preparedMessages,
-      response_format: { type: "json_object" },
-      ...extra,
-    });
+    return await client.chat.completions.create(
+      {
+        model: modelToUse,
+        max_tokens: effectiveMaxTokens,
+        messages: preparedMessages,
+        response_format: { type: "json_object" },
+        ...extra,
+      },
+      reqOpts
+    );
   } catch (err) {
     const status = (err as { status?: number } | null)?.status;
     // Only a request the model rejects (400/422) is worth retrying without
     // response_format; a 429 or timeout would just wait twice.
     if (status !== 400 && status !== 422) throw err;
     // Some models/providers reject response_format — retry without it.
-    return await client.chat.completions.create({
-      model: modelToUse,
-      max_tokens: effectiveMaxTokens,
-      messages: preparedMessages,
-      ...extra,
-    });
+    return await client.chat.completions.create(
+      {
+        model: modelToUse,
+        max_tokens: effectiveMaxTokens,
+        messages: preparedMessages,
+        ...extra,
+      },
+      reqOpts
+    );
   }
 }
 
@@ -495,6 +557,12 @@ async function tryModels(
   let lastErr: unknown;
   for (const [i, model] of models.entries()) {
     if (i > 0 && Date.now() > deadlineAt) break; // out of time for this call — let the caller fall back
+    const release = provider === "glm" && ZHIPU_FREE_MODELS.has(model) ? await acquireGlmSlot() : () => {};
+    if (!release) {
+      lastErr = Object.assign(new Error(`${model}: no free slot (free-tier concurrency)`), { status: 429 });
+      console.warn(`[ai] ${provider} ${model} busy locally — trying ${models[i + 1] ?? "the next provider"}`);
+      continue;
+    }
     try {
       const response = await createOnRoute(client, provider, messages, model, maxTokens);
       recordUsage(provider, model, capability, response.usage);
@@ -507,6 +575,8 @@ async function tryModels(
         continue;
       }
       throw err;
+    } finally {
+      release();
     }
   }
   throw lastErr;
