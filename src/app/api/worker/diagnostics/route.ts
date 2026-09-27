@@ -21,7 +21,8 @@ function isAuthorized(request: Request): boolean {
 async function check(fn: () => Promise<unknown>) {
   const started = Date.now();
   try {
-    return { ok: true, ms: Date.now() - started, detail: await fn() };
+    const detail = await fn();
+    return { ok: true, ms: Date.now() - started, detail };
   } catch (err) {
     return { ok: false, ms: Date.now() - started, error: err instanceof Error ? err.message : String(err) };
   }
@@ -95,6 +96,45 @@ export async function GET(request: Request) {
       check(async () => ({ taskId: await submitVideo({ prompt: "Slow push-in on an emerald green travel duffle bag on a hotel bed, soft morning light", aspectRatio: "9:16" }) })),
     ]);
     Object.assign(extra, { vision, image, video });
+  }
+
+  // ?bench=1 times the same long JSON answer on each text model the ladder uses.
+  if (params.get("bench") === "1") {
+    const prompt =
+      'Return JSON {"items":[...]} with 40 objects {"id":n,"hook":"a 12-word ad hook for a 4K TV","score":0-100,"why":"one sentence"}.';
+    const models: [string, string, string][] = [
+      ["glm", ZHIPU_BASE_URL, "glm-4.7-flash"],
+      ["glm", ZHIPU_BASE_URL, "glm-4-flash-250414"],
+      ["glm", ZHIPU_BASE_URL, "glm-4-air-250414"],
+      ["openai", "https://api.openai.com/v1/", "gpt-4o-mini"],
+    ];
+    extra.bench = await Promise.all(
+      models.map(async ([provider, base, model]) => {
+        const key = provider === "glm" ? zhipuKey() : process.env.OPENAI_API_KEY;
+        if (!key) return { model, skipped: "no key" };
+        const t0 = Date.now();
+        try {
+          const res = await fetch(`${base}chat/completions`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model,
+              max_tokens: 4000,
+              response_format: { type: "json_object" },
+              messages: [{ role: "user", content: prompt }],
+              ...(model.startsWith("glm-4.7") ? { thinking: { type: "disabled" } } : {}),
+            }),
+            signal: AbortSignal.timeout(150_000),
+          });
+          const body = (await res.json().catch(() => ({}))) as { usage?: { completion_tokens?: number }; error?: { message?: string } };
+          const secs = (Date.now() - t0) / 1000;
+          const out = body.usage?.completion_tokens ?? 0;
+          return { model, status: res.status, secs, outTokens: out, tokPerSec: out ? Math.round(out / secs) : 0, error: body.error?.message?.slice(0, 80) };
+        } catch (err) {
+          return { model, secs: (Date.now() - t0) / 1000, error: err instanceof Error ? err.message.slice(0, 80) : String(err) };
+        }
+      })
+    );
   }
 
   return NextResponse.json({ db, meta, zhipu, ...extra, costMode: process.env.AI_COST_MODE ?? "default" });
