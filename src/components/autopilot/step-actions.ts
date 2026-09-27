@@ -49,6 +49,7 @@ type JobView = {
   error: string | null;
   done: number;
   total: number;
+  result?: { partial?: boolean } | null;
 };
 
 /** Start (or join) a background job and poll it to the end. */
@@ -69,20 +70,35 @@ async function runJob(
     jobId = started.jobId;
   }
   if (!jobId) throw new Error(`${label} did not start`);
-  for (;;) {
+  // A background job gets one serverless run (~170-250 s). When free models are
+  // slow it ends part-way ("partial") or is cut off (stale) — both resume where
+  // they stopped, so carry on with a fresh job instead of handing back an error.
+  for (let round = 1; ; round++) {
     const { job } = await api<{ job: JobView }>(`/api/projects/${projectId}/jobs/${jobId}`);
     onProgress({
       percent: job.percent ?? null,
       etaSeconds: job.etaSeconds ?? null,
-      message: job.currentStep ? `${label} — ${job.currentStep}` : label,
+      message: `${job.currentStep ? `${label} — ${job.currentStep}` : label}${round > 1 ? ` (continuing, round ${round})` : ""}`,
     });
     if (["completed", "failed", "cancelled"].includes(job.status)) {
+      const resumable = (job.status === "completed" && job.result?.partial) || (job.status === "failed" && /stopped before/i.test(job.error ?? ""));
+      if (resumable && round < MAX_JOB_ROUNDS) {
+        const next = await api<{ jobId?: string }>(url, { json: { ...body, background: true } }).catch(() => null);
+        if (next?.jobId && next.jobId !== jobId) {
+          jobId = next.jobId;
+          continue;
+        }
+      }
       if (job.status !== "completed") throw new Error(job.error || `${label} ${job.status}`);
       return job;
     }
+    round--; // still the same round while the job runs
     await wait(2000);
   }
 }
+
+/** How many serverless runs one AI step may take before it reports back. */
+const MAX_JOB_ROUNDS = 5;
 
 /** Start (or join) competitor research and poll it to the end. */
 async function runResearch(projectId: string, onProgress: (p: ActionProgress) => void): Promise<void> {
