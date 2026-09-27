@@ -39,8 +39,10 @@ export async function POST(
     );
   }
 
+  // An incomplete Brand Kit costs quality, not money, on a free run — so only a
+  // run that spends credits is held back; a free one renders with a warning.
   const completeness = await getBrandKitCompleteness(projectId);
-  if (!completeness.ready.studio) {
+  if (!completeness.ready.studio && existing.creditsEstimated > 0) {
     return NextResponse.json(
       {
         error: "Brand kit is not ready for studio generation",
