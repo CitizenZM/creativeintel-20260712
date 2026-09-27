@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { createJob, failJob, jobWriter, cancelRequested, runningJob, type JobStep } from "@/services/jobs";
 import { createHash } from "node:crypto";
 import {
+  runBrandStage,
   runContentScoringStage,
   runCompetitorIntelStage,
   runAdTeardownStage,
@@ -39,12 +40,16 @@ export async function POST(
   const { projectId } = await params;
   const body = (await req.json().catch(() => ({}))) as { background?: boolean; force?: boolean };
 
-  const scored = await prisma.contentAsset.count({
-    where: { projectId, overallScore: { not: null } },
-  });
-  if (scored === 0) {
+  // Research may have saved the ads but left their AI analysis (scoring
+  // included) to this step — each pass scores what is new first, so any
+  // collected ad is enough to start.
+  const [scored, collected] = await Promise.all([
+    prisma.contentAsset.count({ where: { projectId, overallScore: { not: null } } }),
+    prisma.contentAsset.count({ where: { projectId, excluded: false } }),
+  ]);
+  if (collected === 0) {
     return NextResponse.json(
-      { error: "No scored content yet. Run research first." },
+      { error: "No ads collected yet — run research, or paste reference videos in Research." },
       { status: 400 }
     );
   }
@@ -94,7 +99,7 @@ async function runAnalysisJob(projectId: string, jobId: string) {
   const write = jobWriter(jobId);
   const started = Date.now();
   const steps: JobStep[] = STEP_LABELS.map((s) => ({ ...s, status: "queued" }));
-  const teardownTotal = await prisma.contentAsset.count({ where: { projectId, overallScore: { not: null } } });
+  const teardownTotal = await prisma.contentAsset.count({ where: { projectId, excluded: false } });
 
   await write({ status: "running", startedAt: new Date(), total: 100, steps, currentStep: "Ad teardowns" });
 
@@ -220,8 +225,10 @@ async function reanalyzePass(projectId: string, deadline: number) {
     }
   };
 
-  // Catch up only what is new: ads not yet scored and competitors never
-  // profiled (both no-ops when nothing was added).
+  // Catch up only what is new: the brand profile if research never got to it,
+  // ads not yet scored and competitors never profiled (no-ops when done).
+  const brand = await prisma.brand.findUnique({ where: { projectId }, select: { brandPromise: true } }).catch(() => null);
+  if (!brand?.brandPromise) await run("brand", () => runBrandStage(projectId));
   await run("scoring", async () => (await runContentScoringStage(projectId, deadline)).count);
   await run("competitor_intel", () => runCompetitorIntelStage(projectId, deadline, { onlyMissing: true }));
 
