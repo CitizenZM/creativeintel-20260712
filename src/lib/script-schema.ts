@@ -101,7 +101,10 @@ export const scriptV2Schema = z.object({
   targetEmotion: z.string().default(""),
   // Scored 0-100; a model that answers on a 0-10 scale ("8.5") would otherwise
   // never win "Pick the best" against the 85s.
-  predictedScore: z.coerce.number().default(70).transform((v) => (v > 0 && v <= 10 ? Math.round(v * 10) : v)),
+  predictedScore: z.coerce
+    .number()
+    .default(70)
+    .transform((v) => (v > 0 && v <= 1 ? Math.round(v * 100) : v > 1 && v <= 10 ? Math.round(v * 10) : v)),
   platformTechniques: z.array(z.string()).default([]),
   scenes: z.array(scriptSceneSchema).default([]),
 });

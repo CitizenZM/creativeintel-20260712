@@ -102,13 +102,20 @@ class JobCancelled extends Error {}
  * outcome as it happens. Items not yet started when a cancel lands are
  * marked cancelled; items already running finish.
  */
+/** Latest start for a batch item; one item then has ~100 s before the 300 s limit. */
+const BATCH_START_DEADLINE_MS = 180_000;
+
 export async function runJobItems<T>(
   jobId: string,
   items: readonly T[],
   describe: (item: T, index: number) => { key: string; label: string },
   worker: (item: T, index: number) => Promise<{ id?: string } | void>,
-  options: { concurrency?: number } = {}
+  options: { concurrency?: number; deadlineMs?: number } = {}
 ) {
+  // A batch lives in one 300 s serverless run. Items not started by the deadline
+  // are left for a retry (the job's Retry re-runs failed items) instead of the
+  // run being killed mid-item and the whole job going stale.
+  const startBy = Date.now() + (options.deadlineMs ?? BATCH_START_DEADLINE_MS);
   const write = createWriter(jobId);
   const steps: JobStep[] = items.map((item, i) => ({ ...describe(item, i), status: "queued" }));
   let done = 0;
@@ -127,6 +134,14 @@ export async function runJobItems<T>(
         steps[i] = { ...steps[i], status: "cancelled" };
         await write({ steps });
         throw new JobCancelled();
+      }
+      if (Date.now() > startBy) {
+        failed += 1;
+        const error = "Not started — this run ran out of time. Retry to write it.";
+        failures.push({ key: steps[i].key, label: steps[i].label, error });
+        steps[i] = { ...steps[i], status: "failed", error };
+        await write({ steps, done, failed });
+        return;
       }
       steps[i] = { ...steps[i], status: "running" };
       await write({ steps, currentStep: steps[i].label });
