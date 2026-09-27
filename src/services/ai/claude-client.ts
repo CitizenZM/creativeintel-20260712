@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { jsonrepair } from "jsonrepair";
 import { ZodSchema } from "zod";
-import { isStrictFree } from "@/lib/cost-mode";
+import { isStrictFree, paidFallbackAllowed } from "@/lib/cost-mode";
 import { ZHIPU_BASE_URL, ZHIPU_FREE, zhipuKey } from "./zhipu";
 import { cachedAiSettings, cachedProvider, loadAiSettings } from "@/services/settings/ai-settings";
 import { CUSTOM_PREFIX, routeOrder } from "@/services/settings/ai-settings-core";
@@ -44,6 +44,15 @@ const GEMINI_IMAGE_MAX_BYTES = 6 * 1024 * 1024;
 const _disabledProviders = new Set<Route>();
 const _customClients = new Map<string, { apiKey: string; baseUrl: string | null; client: OpenAI }>();
 
+/**
+ * Bounded calls. The SDK default is a 10-minute timeout with 2 retries, so one
+ * stuck request could eat a whole 300 s serverless invocation ("Run stopped
+ * before it finished"). Fail fast and let the fallback ladder take over.
+ */
+const CALL_OPTS = { timeout: 60_000, maxRetries: 1 } as const;
+// Free Zhipu models answer 429 at peak times; moving to the next model beats waiting.
+const GLM_OPTS = { timeout: 45_000, maxRetries: 0 } as const;
+
 let _openai: OpenAI | null = null;
 let _gemini: OpenAI | null = null;
 let _openrouter: OpenAI | null = null;
@@ -54,13 +63,13 @@ let _glm: OpenAI | null = null;
 function glmClient(): OpenAI | null {
   const apiKey = zhipuKey();
   if (_disabledProviders.has("glm") || !apiKey) return null;
-  if (!_glm) _glm = new OpenAI({ apiKey, baseURL: ZHIPU_BASE_URL });
+  if (!_glm) _glm = new OpenAI({ apiKey, baseURL: ZHIPU_BASE_URL, ...GLM_OPTS });
   return _glm;
 }
 
 function anthropicClient(): OpenAI | null {
   if (_disabledProviders.has("anthropic") || !process.env.ANTHROPIC_API_KEY) return null;
-  if (!_anthropic) _anthropic = new OpenAI({ apiKey: process.env.ANTHROPIC_API_KEY, baseURL: ANTHROPIC_BASE_URL });
+  if (!_anthropic) _anthropic = new OpenAI({ apiKey: process.env.ANTHROPIC_API_KEY, baseURL: ANTHROPIC_BASE_URL, ...CALL_OPTS });
   return _anthropic;
 }
 
@@ -70,14 +79,14 @@ function geminiApiKey(): string | undefined {
 
 function openaiClient(): OpenAI | null {
   if (_disabledProviders.has("openai") || !process.env.OPENAI_API_KEY) return null;
-  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, ...CALL_OPTS });
   return _openai;
 }
 
 function geminiClient(): OpenAI | null {
   const apiKey = geminiApiKey();
   if (_disabledProviders.has("gemini") || !apiKey) return null;
-  if (!_gemini) _gemini = new OpenAI({ apiKey, baseURL: GEMINI_BASE_URL });
+  if (!_gemini) _gemini = new OpenAI({ apiKey, baseURL: GEMINI_BASE_URL, ...CALL_OPTS });
   return _gemini;
 }
 
@@ -87,6 +96,7 @@ function openrouterClient(): OpenAI | null {
     _openrouter = new OpenAI({
       apiKey: process.env.OPENROUTER_API_KEY,
       baseURL: "https://openrouter.ai/api/v1",
+      ...CALL_OPTS,
       defaultHeaders: {
         "HTTP-Referer": "https://creativeintel.vercel.app",
         "X-Title": "CreativeIntel OS",
@@ -108,7 +118,7 @@ function customClient(route: Route): OpenAI | null {
   const baseUrl = p.baseUrl || (p.type === "zhipu-paid" ? ZHIPU_BASE_URL : null);
   const hit = _customClients.get(p.id);
   if (hit && hit.apiKey === p.apiKey && hit.baseUrl === baseUrl) return hit.client;
-  const client = new OpenAI({ apiKey: p.apiKey, baseURL: baseUrl ?? undefined });
+  const client = new OpenAI({ apiKey: p.apiKey, baseURL: baseUrl ?? undefined, ...CALL_OPTS });
   _customClients.set(p.id, { apiKey: p.apiKey, baseUrl, client });
   return client;
 }
@@ -134,12 +144,35 @@ function forcedProvider(): ProviderName | null {
  */
 function providerOrder(capability: TextCapability = "text"): Route[] {
   const choice = cachedAiSettings().settings[capability];
-  return routeOrder(choice, BASE_ORDER, {
+  const order = routeOrder(choice, BASE_ORDER, {
     strictFree: isStrictFree(),
     freeIds: ["glm"],
     forced: forcedProvider(),
   }) as Route[];
+  // Strict free with paid fallback: free GLM first, then the paid providers,
+  // reached only when every free model is busy or times out.
+  if (isStrictFree() && paidFallbackAllowed() && !forcedProvider()) {
+    for (const p of BASE_ORDER) if (!order.includes(p)) order.push(p);
+  }
+  return order;
 }
+
+/**
+ * Zhipu models to try on the glm route, in order. Each free model has its own
+ * rate limit, so a second free model often answers when the first is busy;
+ * the cheap stable paid tier (GLM-4-Air ≈ ¥0.5 per million tokens, GLM-4.6V-
+ * FlashX for vision) only when paid calls are allowed.
+ */
+export function glmModelLadder(first: string, capability: TextCapability, allowPaid: boolean): string[] {
+  const ladder =
+    capability === "vision"
+      ? [first, ...(allowPaid ? ["glm-4.6v-flashx"] : [])]
+      : [first, ZHIPU_FREE_TEXT_ALT, ...(allowPaid ? ["glm-4-air-250414"] : [])];
+  return [...new Set(ladder.filter(Boolean))];
+}
+
+const ZHIPU_FREE_TEXT_ALT = "glm-4-flash-250414";
+const ZHIPU_FREE_MODELS = new Set<string>([ZHIPU_FREE.text, ZHIPU_FREE.vision, ZHIPU_FREE_TEXT_ALT]);
 
 /** Best-guess active provider for label/vision-model resolution. Never throws. */
 function activeProvider(capability: TextCapability = "text"): Route {
@@ -159,6 +192,18 @@ function isAuthError(err: unknown): boolean {
 function isRateLimitError(err: unknown): boolean {
   const status = (err as { status?: number } | null)?.status;
   return status === 429;
+}
+
+/**
+ * Worth trying the next model/provider: rate limits, provider outages (5xx) and
+ * timeouts / dropped connections. A 4xx about the request itself is not.
+ */
+export function isTransientError(err: unknown): boolean {
+  const e = err as { status?: number; name?: string; constructor?: { name?: string } } | null;
+  const status = e?.status;
+  if (status === 429 || (typeof status === "number" && status >= 500)) return true;
+  const name = `${e?.name ?? ""} ${e?.constructor?.name ?? ""}`;
+  return status === undefined && /Timeout|Connection|Abort/i.test(name);
 }
 
 /** Translate a bare OpenAI model id into OpenRouter's namespaced form. */
@@ -390,7 +435,10 @@ async function createOnRoute(
       ...extra,
     });
   } catch (err) {
-    if (isAuthError(err)) throw err;
+    const status = (err as { status?: number } | null)?.status;
+    // Only a request the model rejects (400/422) is worth retrying without
+    // response_format; a 429 or timeout would just wait twice.
+    if (status !== 400 && status !== 422) throw err;
     // Some models/providers reject response_format — retry without it.
     return await client.chat.completions.create({
       model: modelToUse,
@@ -414,8 +462,47 @@ function recordUsage(provider: Route, model: string, capability: TextCapability,
   const outputTokens = usage?.completion_tokens ?? 0;
   const id = customId(provider);
   const costUsd =
-    provider === "glm" ? 0 : id ? costForTokens(cachedProvider(id)?.prices, inputTokens, outputTokens) : null;
+    provider === "glm"
+      ? ZHIPU_FREE_MODELS.has(model)
+        ? 0
+        : null
+      : id
+        ? costForTokens(cachedProvider(id)?.prices, inputTokens, outputTokens)
+        : null;
   logAiUsage({ provider, model, capability, inputTokens, outputTokens, costUsd });
+}
+
+function describeErr(err: unknown): string {
+  const e = err as { status?: number; name?: string; message?: string } | null;
+  return e?.status ? `${e.status}` : (e?.name || String(e?.message ?? err)).slice(0, 60);
+}
+
+/** Try each model of a route in turn, moving on when one is busy, down or slow. */
+async function tryModels(
+  client: OpenAI,
+  provider: Route,
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  models: string[],
+  maxTokens: number,
+  capability: TextCapability
+) {
+  let lastErr: unknown;
+  for (const [i, model] of models.entries()) {
+    try {
+      const response = await createOnRoute(client, provider, messages, model, maxTokens);
+      recordUsage(provider, model, capability, response.usage);
+      if (i > 0) console.warn(`[ai] ${provider}: answered by fallback model ${model}`);
+      return response;
+    } catch (err) {
+      lastErr = err;
+      if (i < models.length - 1 && (isRateLimitError(err) || isTransientError(err))) {
+        console.warn(`[ai] ${provider} ${model} unavailable (${describeErr(err)}) — trying ${models[i + 1]}`);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
 async function callModel(
@@ -438,9 +525,9 @@ async function callModel(
       modelOverride && !customId(provider)
         ? adaptModelForProvider(modelOverride, provider)
         : modelFor(provider, tier, capability);
+    const models = provider === "glm" ? glmModelLadder(modelToUse, capability, !isStrictFree() || paidFallbackAllowed()) : [modelToUse];
     try {
-      const response = await createOnRoute(client, provider, messages, modelToUse, maxTokens);
-      recordUsage(provider, modelToUse, capability, response.usage);
+      const response = await tryModels(client, provider, messages, models, maxTokens, capability);
       return response;
     } catch (err) {
       if (isAuthError(err)) {
@@ -454,8 +541,8 @@ async function callModel(
         lastErr = err;
         continue;
       }
-      if (isRateLimitError(err)) {
-        console.warn(`[ai] ${provider} rate-limited (429) — trying the next provider`);
+      if (isRateLimitError(err) || isTransientError(err)) {
+        console.warn(`[ai] ${provider} unavailable (${describeErr(err)}) — trying the next provider`);
         lastErr = err;
         continue;
       }

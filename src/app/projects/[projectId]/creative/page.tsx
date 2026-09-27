@@ -27,6 +27,7 @@ import { ScoreBar, StatusBadge } from "@/components/dashboard/status-badge";
 import { StoryboardFrameCard, type StoryboardFrameData } from "@/components/creative/storyboard-frame-card";
 import { TemplatePicker, videoTypeBadgeClass, videoTypeLabel } from "@/components/creative/template-picker";
 import { ScriptCard, type ScriptData } from "@/components/creative/script-card";
+import { ManualScriptForm } from "@/components/creative/manual-script-form";
 import { StoryboardTimeline } from "@/components/creative/storyboard-timeline";
 import { LookControls } from "@/components/creative/look-controls";
 import { NextStepHint } from "@/components/layout/next-step-hint";
@@ -976,6 +977,8 @@ export default function CreativePage() {
             Write {effectiveTemplates.length} script{effectiveTemplates.length !== 1 ? "s" : ""}
           </Button>
         )}
+
+        <ManualScriptForm projectId={projectId} onCreated={(script) => setScripts((prev) => [script, ...prev])} />
 
         {scriptsJob.job && (
           <JobProgress

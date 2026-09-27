@@ -8,7 +8,7 @@ import { formatDuration } from "@/lib/format-duration";
 import type { StageCriterion } from "@/services/project-stages";
 import { focusSection, stageForPath } from "@/components/layout/use-project-stages";
 import { markStagesStale } from "@/lib/stage-events";
-import { MANUAL_HINTS, STEP_ACTIONS, approveAllFrames } from "./step-actions";
+import { MANUAL_HINTS, PLAN_B, STEP_ACTIONS, approveAllFrames } from "./step-actions";
 import { runStep, useStepRun, AUTOPILOT_DONE } from "./step-runner";
 
 /** Where on its page each check is done. */
@@ -127,6 +127,12 @@ export function StepItem({ projectId, criterion, compact = false }: { projectId:
           )}
           {run.status === "done" && run.message && <p className="text-[var(--status-healthy-fg)]">{run.message}</p>}
           {run.status === "error" && run.message && <p className="text-[var(--status-urgent-fg)]">{run.message}</p>}
+          {run.status === "error" && PLAN_B[id] && (
+            <p className="rounded border border-dashed border-border px-2 py-1 text-foreground" data-testid="plan-b">
+              <span className="font-semibold">Plan B — do it yourself:</span> {PLAN_B[id]}{" "}
+              <span className="text-muted-foreground">Or skip this step with Next step → Skip for now.</span>
+            </p>
+          )}
           {note && <p className="rounded bg-muted px-2 py-1 text-foreground">{note}</p>}
 
           <div className="flex flex-wrap items-center gap-1.5">

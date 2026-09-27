@@ -360,6 +360,28 @@ export const STEP_ACTIONS: Record<string, StepAction> = {
   },
 };
 
+/**
+ * Plan B when a step's AI action fails (free models busy, timeouts): how to do
+ * the same thing by hand. Any step can also be skipped from the Next step alert.
+ */
+export const PLAN_B: Record<string, string> = {
+  "setup.brandKit": "Upload the logo and product photos and type the colours, CTAs and claims yourself in the Brand Kit below.",
+  "setup.confirmProduct": "Fix the product name, photos or description below, then click Confirm.",
+  "research.run": "Paste competitor ad URLs under “Your reference videos”, or skip research — Creative works without it.",
+  "research.competitors": "Type competitor names and websites into “Add competitor”.",
+  "research.coverage": "Skip it — the competitors already researched are enough to continue.",
+  "research.ads": "Paste ad URLs you like under “Your reference videos”, or skip ahead.",
+  "research.paid": "Skip it — scripts can be written without verified paid ads.",
+  "insights.analyze": "Skip the analysis: pick an ad style yourself and add your own selling points.",
+  "insights.style": "Click “Use this style” on the style you want.",
+  "insights.picks": "Add your own selling point in the Selling points panel, or tick one the analysis found.",
+  "creative.scripts": "Click “Write a script yourself” — hook, one line per shot, and a CTA; no AI needed.",
+  "creative.select": "Tick “Select script” on the script you want to produce.",
+  "creative.approve": "Draft the storyboard again — if the AI is busy it is built from the script's shots — then edit and approve the frames.",
+  "studio.compile": "Pick the free animatic models in Studio and click “Compile run”.",
+  "studio.render": "Try again, or compile with the free animatic engine — it needs no AI video model.",
+};
+
 /** The one step the user must do by hand, with where to do it. */
 export const MANUAL_HINTS: Record<string, string> = {
   "setup.product": "Enter the product name or paste the product page URL.",

@@ -18,6 +18,21 @@ export function setStrictFreeOverride(value: boolean | null): void {
   _dbOverride = value;
 }
 
+let _paidFallback = true;
+
+/** Set by the settings loader. */
+export function setPaidFallback(value: boolean): void {
+  _paidFallback = value;
+}
+
+/**
+ * Strict free mode, but a step may fall back to a cheap stable paid model when
+ * every free model is busy or times out (Settings → AI engines).
+ */
+export function paidFallbackAllowed(): boolean {
+  return _paidFallback;
+}
+
 export function isStrictFree(): boolean {
   if (typeof _dbOverride === "boolean") return _dbOverride;
   return process.env.AI_COST_MODE === "free";
