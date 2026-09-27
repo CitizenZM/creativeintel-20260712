@@ -23,5 +23,7 @@ describe("predictedScore", () => {
     const parsed = scriptV2Schema.shape.predictedScore.parse(8.5);
     expect(parsed).toBe(85);
     expect(scriptV2Schema.shape.predictedScore.parse(78)).toBe(78);
+    // …and a 0-1 answer ("0.9") too.
+    expect(scriptV2Schema.shape.predictedScore.parse(0.9)).toBe(90);
   });
 });
