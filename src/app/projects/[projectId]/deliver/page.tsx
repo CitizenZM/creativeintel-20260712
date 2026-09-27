@@ -159,6 +159,22 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
                           <Download className="h-3 w-3" /> Master
                         </a>
                       )}
+                      {run.voiceoverUrl && (
+                        <a
+                          href={run.voiceoverUrl}
+                          className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] font-medium hover:bg-muted"
+                        >
+                          <Download className="h-3 w-3" /> Voiceover (MP3)
+                        </a>
+                      )}
+                      {run.subtitlesUrl && (
+                        <a
+                          href={run.subtitlesUrl}
+                          className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] font-medium hover:bg-muted"
+                        >
+                          <Download className="h-3 w-3" /> Subtitles (SRT)
+                        </a>
+                      )}
                       {run.canvasUrl && (
                         <a
                           href={run.canvasUrl}

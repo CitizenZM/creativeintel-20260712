@@ -89,7 +89,7 @@ async function pollinationsStill(prompt: string, ctx: JobContext): Promise<strin
   throw lastErr instanceof Error ? lastErr : new Error("Pollinations failed");
 }
 
-async function animateStill(imageUrl: string, ctx: JobContext): Promise<string> {
+export async function animateStill(imageUrl: string, ctx: JobContext): Promise<string> {
   if (!ffmpegPath) throw new Error("ffmpeg is not available on this server");
   const res = await fetch(imageUrl, { signal: AbortSignal.timeout(60_000) });
   if (!res.ok) throw new Error(`Keyframe download ${res.status}`);

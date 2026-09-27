@@ -424,6 +424,8 @@ export interface RunDoneInput {
   masterMp4Url?: string | null;
   previewMp4Url?: string | null;
   contactSheetUrl?: string | null;
+  voiceoverUrl?: string | null;
+  subtitlesUrl?: string | null;
   creditsSpent?: number | null;
 }
 
@@ -442,6 +444,8 @@ export async function runDone(input: RunDoneInput) {
       masterMp4Url: input.masterMp4Url ?? undefined,
       previewMp4Url: input.previewMp4Url ?? undefined,
       contactSheetUrl: input.contactSheetUrl ?? undefined,
+      voiceoverUrl: input.voiceoverUrl ?? undefined,
+      subtitlesUrl: input.subtitlesUrl ?? undefined,
       creditsSpent: spent,
       error: null,
       completedAt: new Date(),

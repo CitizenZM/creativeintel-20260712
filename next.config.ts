@@ -2,7 +2,7 @@ import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["pg", "ffmpeg-static"],
+  serverExternalPackages: ["pg", "ffmpeg-static", "msedge-tts"],
   // The GLM executor assembles masters with ffmpeg on the server; ship the
   // binary with the functions that run it.
   outputFileTracingIncludes: {

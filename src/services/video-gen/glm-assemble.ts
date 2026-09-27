@@ -4,9 +4,11 @@
  * LibTV worker's assemble.py uses), hold CTA frames on their still, and concat
  * everything into one master MP4 with ffmpeg.
  *
- * Each frame's storyboard text overlay is burned in as a caption (Anton, OFL,
- * bundled in assets/fonts; drawn by sharp, overlaid by ffmpeg). Simpler than
- * assemble.py — no beat grid or music.
+ * Each frame's storyboard text overlay is burned in as a headline at the top
+ * (Anton, OFL). The storyboard voiceover is spoken with free Edge TTS, mixed in,
+ * and subtitled at the bottom from the same word timings (Montserrat, OFL);
+ * the voiceover MP3 and an SRT ship alongside the master. Fonts are bundled in
+ * assets/fonts, drawn by sharp and overlaid by ffmpeg. No beat grid or music.
  */
 import { execFile } from "node:child_process";
 import { access, mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
@@ -16,6 +18,7 @@ import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
 import type { LibtvJob } from "@/generated/prisma/client";
 import { uploadBuffer } from "@/services/storage";
+import { DEFAULT_VOICE, placeLines, planVoiceover, subtitleCues, synthesize, toSrt, type SubtitleCue } from "./voiceover";
 
 const run = promisify(execFile);
 const FPS = 30;
@@ -26,9 +29,12 @@ export interface AssembleFrame {
   endSec: number;
   /** The storyboard's on-screen text for this frame, burned in as a caption. */
   text?: string | null;
+  /** The storyboard's voiceover line for this frame (repeated across its beat). */
+  voiceover?: string | null;
 }
 
 export const CAPTION_FONT = path.join(process.cwd(), "assets/fonts/Anton-Regular.ttf");
+export const SUBTITLE_FONT = path.join(process.cwd(), "assets/fonts/Montserrat-Bold.ttf");
 
 /** Break caption text into at most three lines of about `width` characters. */
 export function wrapCaption(text: string, width = 22): string[] {
@@ -68,32 +74,51 @@ async function ensureFontconfig(fontFile: string): Promise<void> {
   process.env.FONTCONFIG_FILE = conf;
 }
 
-export async function captionPng(lines: string[], canvas: { w: number; h: number }, fontFile = CAPTION_FONT): Promise<Buffer> {
-  await ensureFontconfig(fontFile);
+async function textPng(
+  lines: string[],
+  canvas: { w: number; h: number },
+  style: { family: string; fontFile: string; size: number; boxAlpha: number; widthPct: number }
+): Promise<Buffer> {
+  await ensureFontconfig(style.fontFile);
   const sharp = (await import("sharp")).default;
-  const size = Math.round(canvas.w * 0.068);
-  const pad = Math.round(size * 0.35);
+  const pad = Math.round(style.size * 0.35);
   const text = await sharp({
     text: {
       text: `<span foreground="white">${pangoEscape(lines.join("\n"))}</span>`,
-      font: `Anton ${size}`,
-      fontfile: fontFile,
-      width: Math.round(canvas.w * 0.86),
+      font: `${style.family} ${style.size}`,
+      fontfile: style.fontFile,
+      width: Math.round(canvas.w * style.widthPct),
       align: "centre",
       rgba: true,
       dpi: 72,
-      spacing: Math.round(size * 0.2),
+      spacing: Math.round(style.size * 0.2),
     },
   })
     .png()
     .toBuffer();
   const { width = 1, height = 1 } = await sharp(text).metadata();
   return sharp({
-    create: { width: width + pad * 2, height: height + pad * 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0.55 } },
+    create: { width: width + pad * 2, height: height + pad * 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: style.boxAlpha } },
   })
     .composite([{ input: text, top: pad, left: pad }])
     .png()
     .toBuffer();
+}
+
+/** The headline caption: white Anton lines on a translucent box. */
+export function captionPng(lines: string[], canvas: { w: number; h: number }, fontFile = CAPTION_FONT): Promise<Buffer> {
+  return textPng(lines, canvas, { family: "Anton", fontFile, size: Math.round(canvas.w * 0.068), boxAlpha: 0.55, widthPct: 0.86 });
+}
+
+/** A subtitle cue: smaller Montserrat Bold on a darker box, for the bottom of the frame. */
+export function subtitlePng(text: string, canvas: { w: number; h: number }, fontFile = SUBTITLE_FONT): Promise<Buffer> {
+  return textPng(wrapCaption(text, 30).slice(0, 2), canvas, {
+    family: "Montserrat Bold",
+    fontFile,
+    size: Math.round(canvas.w * 0.045),
+    boxAlpha: 0.7,
+    widthPct: 0.9,
+  });
 }
 
 /**
@@ -111,9 +136,36 @@ export function fitStillFilter(canvas: { w: number; h: number }, fps = FPS): str
   ].join(";");
 }
 
-/** Filter graph: fit the source to the canvas, then lay the caption over the lower third. */
+/**
+ * Filter graph: fit the source to the canvas, then lay the headline in the top
+ * third — the bottom belongs to the subtitles.
+ */
 export function overlayGraph(baseVf: string): string {
-  return `[0:v]${baseVf}[base];[base][1:v]overlay=x=(W-w)/2:y=H*0.72-h/2:format=auto,format=yuv420p[out]`;
+  return `[0:v]${baseVf}[base];[base][1:v]overlay=x=(W-w)/2:y=H*0.17-h/2:format=auto,format=yuv420p[out]`;
+}
+
+/** Subtitle overlays: input i+first is shown between its cue's start and end, above the safe bottom edge. */
+export function subtitleGraph(cues: Pick<SubtitleCue, "startSec" | "endSec">[], firstInput: number): string {
+  if (!cues.length) return "[0:v]null[v]";
+  return cues
+    .map((c, i) => {
+      const from = i === 0 ? "[0:v]" : `[s${i - 1}]`;
+      const to = i === cues.length - 1 ? "[v]" : `[s${i}]`;
+      return `${from}[${firstInput + i}:v]overlay=x=(W-w)/2:y=H*0.84-h/2:enable='between(t,${c.startSec.toFixed(3)},${c.endSec.toFixed(3)})'${to}`;
+    })
+    .join(";");
+}
+
+async function durationOf(file: string): Promise<number> {
+  const { stderr } = await run(ffmpegPath!, ["-i", file]).catch((e) => e as { stderr: string });
+  const m = /Duration: (\d+):(\d+):([\d.]+)/.exec(String(stderr));
+  return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : 0;
+}
+
+export interface AssembledMaster {
+  masterUrl: string;
+  voiceoverUrl: string | null;
+  subtitlesUrl: string | null;
 }
 
 type Settings = {
@@ -170,7 +222,9 @@ export async function assembleGlmMaster(input: {
   aspectRatio: string;
   frames: AssembleFrame[];
   jobs: LibtvJob[];
-}): Promise<string> {
+  /** Edge TTS voice; defaults to TTS_VOICE or a US English neural voice. */
+  voice?: string;
+}): Promise<AssembledMaster> {
   if (!ffmpegPath) throw new Error("ffmpeg is not available on this server");
   const segments = planSegments(input.frames, input.jobs);
   if (!segments.length) throw new Error("Nothing to assemble — no finished clips");
@@ -225,15 +279,105 @@ export async function assembleGlmMaster(input: {
       timeout: 90_000,
     });
 
+    const totalSec = segments.reduce((sum, seg) => sum + seg.length, 0);
+    let finalFile = master;
+    let voiceoverUrl: string | null = null;
+    let subtitlesUrl: string | null = null;
+    try {
+      const voiced = await addVoiceoverAndSubtitles({ dir, master, frames: input.frames, totalSec, canvas: { w, h }, voice: input.voice });
+      if (voiced) {
+        finalFile = voiced.file;
+        const [vo, srt] = await Promise.all([
+          uploadBuffer({ buffer: await readFile(voiced.voiceoverFile), filename: `voiceover-${input.runId}.mp3`, contentType: "audio/mpeg", folder: "glm-masters" }),
+          uploadBuffer({ buffer: Buffer.from(voiced.srt, "utf8"), filename: `subtitles-${input.runId}.srt`, contentType: "application/x-subrip", folder: "glm-masters" }),
+        ]);
+        voiceoverUrl = vo.provider === "inline" ? null : vo.url;
+        subtitlesUrl = srt.provider === "inline" ? null : srt.url;
+      }
+    } catch (err) {
+      // Voice and subtitles must never cost the master: ship it silent instead.
+      console.warn(`[assemble] voiceover/subtitles failed for run ${input.runId}, shipping the silent master:`, err instanceof Error ? err.message.slice(0, 300) : err);
+    }
+
     const uploaded = await uploadBuffer({
-      buffer: await readFile(master),
+      buffer: await readFile(finalFile),
       filename: `master-${input.runId}.mp4`,
       contentType: "video/mp4",
       folder: "glm-masters",
     });
     if (uploaded.provider === "inline") throw new Error("No asset storage configured for the master video");
-    return uploaded.url;
+    return { masterUrl: uploaded.url, voiceoverUrl, subtitlesUrl };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * Speak the storyboard's voiceover, mix it under the silent master and burn in
+ * subtitles timed to the spoken words. Returns null when there is nothing to say.
+ */
+export async function addVoiceoverAndSubtitles(input: {
+  dir: string;
+  master: string;
+  frames: AssembleFrame[];
+  totalSec: number;
+  canvas: { w: number; h: number };
+  voice?: string;
+}): Promise<{ file: string; voiceoverFile: string; srt: string } | null> {
+  const lines = planVoiceover(input.frames);
+  if (!lines.length) return null;
+  const voice = input.voice || process.env.TTS_VOICE || DEFAULT_VOICE;
+
+  const spoken: { file: string; words: Awaited<ReturnType<typeof synthesize>>["words"]; duration: number }[] = [];
+  for (const [i, line] of lines.entries()) {
+    const { audio, words } = await synthesize(line.text, voice);
+    const file = path.join(input.dir, `vo${i}.mp3`);
+    await writeFile(file, audio);
+    spoken.push({ file, words, duration: (await durationOf(file)) || line.endSec - line.startSec });
+  }
+  const placements = placeLines(lines, spoken.map((s) => s.duration), input.totalSec);
+
+  // One voiceover track the length of the master.
+  const voiceoverFile = path.join(input.dir, "voiceover.mp3");
+  const mixInputs = spoken.flatMap((s) => ["-i", s.file]);
+  const chains = placements.map((p, i) => {
+    const delay = Math.round(p.startSec * 1000);
+    return `[${i}:a]atempo=${p.tempo.toFixed(3)},adelay=${delay}|${delay}[a${i}]`;
+  });
+  const mix = `${chains.join(";")};${placements.map((_, i) => `[a${i}]`).join("")}amix=inputs=${placements.length}:normalize=0,apad,atrim=0:${input.totalSec.toFixed(3)}[vo]`;
+  await run(ffmpegPath!, ["-y", "-v", "error", ...mixInputs, "-filter_complex", mix, "-map", "[vo]", "-ac", "2", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", "128k", voiceoverFile], {
+    timeout: 90_000,
+  });
+
+  // Subtitles from the TTS word timings, kept inside the video.
+  const cues = spoken
+    .flatMap((s, i) => subtitleCues(s.words, placements[i], 32, lines[i].text))
+    .map((c) => ({ ...c, endSec: Math.min(c.endSec, input.totalSec) }))
+    .filter((c) => c.endSec - c.startSec > 0.2);
+  const cueFiles: string[] = [];
+  for (const [i, cue] of cues.entries()) {
+    const file = path.join(input.dir, `sub${String(i).padStart(3, "0")}.png`);
+    await writeFile(file, await subtitlePng(cue.text, input.canvas));
+    cueFiles.push(file);
+  }
+
+  const out = path.join(input.dir, "master-voiced.mp4");
+  await run(
+    ffmpegPath!,
+    [
+      "-y", "-v", "error",
+      "-i", input.master,
+      "-i", voiceoverFile,
+      ...cueFiles.flatMap((f) => ["-i", f]),
+      "-filter_complex", subtitleGraph(cues, 2),
+      "-map", "[v]", "-map", "1:a",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+      "-c:a", "aac", "-b:a", "160k",
+      "-t", input.totalSec.toFixed(3),
+      "-movflags", "+faststart",
+      out,
+    ],
+    { timeout: 120_000 }
+  );
+  return { file: out, voiceoverFile, srt: toSrt(cues) };
 }

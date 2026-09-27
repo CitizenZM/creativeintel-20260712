@@ -100,7 +100,9 @@ const queue = vi.hoisted(() => ({
 }));
 vi.mock("./libtv-queue", () => queue);
 
-const assemble = vi.hoisted(() => vi.fn(async () => "https://cdn/master.mp4"));
+const assemble = vi.hoisted(() =>
+  vi.fn(async () => ({ masterUrl: "https://cdn/master.mp4", voiceoverUrl: "https://cdn/vo.mp3", subtitlesUrl: "https://cdn/subs.srt" }))
+);
 vi.mock("./glm-assemble", () => ({ assembleGlmMaster: assemble }));
 
 import { advanceActiveRuns, driveRun, NO_TEXT_IMAGE, NO_TEXT_VIDEO, tickRun, type EngineAdapter, type TaskResult } from "./server-executor";
@@ -198,10 +200,10 @@ describe("tickRun", () => {
     expect(statusOf("k3")).toBe("skipped");
     expect(store.jobs.find((j) => j.id === "k3")!.resultUrl).toBe("https://cdn/packshot.png");
     expect(adapter.generateImage).toHaveBeenCalledTimes(1);
-    expect(adapter.generateImage).toHaveBeenCalledWith(`${NO_TEXT_IMAGE} K1 prompt`, expect.objectContaining({ runId: "run1", nodeName: "K1", aspectRatio: "9:16" }));
+    expect(adapter.generateImage).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^${NO_TEXT_IMAGE} K1 prompt`)), expect.objectContaining({ runId: "run1", nodeName: "K1", aspectRatio: "9:16" }));
     // The clip starts off its finished keyframe in the same tick, using the job's own duration.
     expect(adapter.submitVideo).toHaveBeenCalledWith(
-      { prompt: `${NO_TEXT_VIDEO} V1 prompt`, imageUrl: "https://cdn/K1.png" },
+      { prompt: expect.stringMatching(new RegExp(`^${NO_TEXT_VIDEO} Steady, slow camera movement.* V1 prompt`)), imageUrl: "https://cdn/K1.png" },
       expect.objectContaining({ nodeName: "V1", durationSec: 4 })
     );
     expect(store.jobs.find((j) => j.id === "v1")!.nodeId).toBe("task-V1");
@@ -215,7 +217,13 @@ describe("tickRun", () => {
     const v1 = store.jobs.find((j) => j.id === "v1")!;
     expect([v1.status, v1.resultUrl, v1.remoteUrl]).toEqual(["completed", "https://cdn/V1.mp4", "https://remote/V1.mp4"]);
     expect(assemble).toHaveBeenCalledWith(expect.objectContaining({ runId: "run1", aspectRatio: "9:16", frames: expect.any(Array) }));
-    expect(queue.runDone).toHaveBeenCalledWith({ runId: "run1", masterMp4Url: "https://cdn/master.mp4", creditsSpent: 0 });
+    expect(queue.runDone).toHaveBeenCalledWith({
+      runId: "run1",
+      masterMp4Url: "https://cdn/master.mp4",
+      voiceoverUrl: "https://cdn/vo.mp3",
+      subtitlesUrl: "https://cdn/subs.srt",
+      creditsSpent: 0,
+    });
     expect(run.status).toBe("completed");
   });
 
@@ -248,7 +256,7 @@ describe("tickRun", () => {
     imageDone = true;
     await tickRun(adapter, "run1");
     expect([k1().status, k1().resultUrl]).toEqual(["completed", "https://cdn/img-K1.png"]);
-    expect(adapter.submitVideo).toHaveBeenCalledWith({ prompt: `${NO_TEXT_VIDEO} V1 prompt`, imageUrl: "https://cdn/img-K1.png" }, expect.anything());
+    expect(adapter.submitVideo).toHaveBeenCalledWith({ prompt: expect.stringContaining("V1 prompt"), imageUrl: "https://cdn/img-K1.png" }, expect.anything());
   });
 
   it("fails the run when a clip fails", async () => {
@@ -346,7 +354,23 @@ describe("no-text prompts", () => {
     const adapter = fakeAdapter();
     await tickRun(adapter, "run1");
     await tickRun(adapter, "run1");
-    expect((adapter.generateImage as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(`${NO_TEXT_IMAGE} K1 prompt`);
-    expect((adapter.submitVideo as ReturnType<typeof vi.fn>).mock.calls[0][0].prompt).toBe(`${NO_TEXT_VIDEO} V1 prompt`);
+    expect((adapter.generateImage as ReturnType<typeof vi.fn>).mock.calls[0][0].startsWith(`${NO_TEXT_IMAGE} K1 prompt`)).toBe(true);
+    expect((adapter.submitVideo as ReturnType<typeof vi.fn>).mock.calls[0][0].prompt.startsWith(NO_TEXT_VIDEO)).toBe(true);
+  });
+});
+
+describe("face-safe clips", () => {
+  it("holds a clip with people on its keyframe instead of sending it to the video model", async () => {
+    const animateStill = vi.fn(async () => "https://cdn/still-V1.mp4");
+    vi.doMock("./animatic-executor", () => ({ animateStill }));
+    seed();
+    store.jobs.find((j) => j.id === "k1")!.prompt = "A frustrated founder sweeps receipts off his desk";
+    const adapter = fakeAdapter();
+    await tickRun(adapter, "run1");
+    await tickRun(adapter, "run1");
+    expect(adapter.submitVideo).not.toHaveBeenCalled();
+    expect(animateStill).toHaveBeenCalledWith("https://cdn/K1.png", expect.objectContaining({ nodeName: "V1" }));
+    expect(store.jobs.find((j) => j.id === "v1")!.resultUrl).toBe("https://cdn/still-V1.mp4");
+    vi.doUnmock("./animatic-executor");
   });
 });

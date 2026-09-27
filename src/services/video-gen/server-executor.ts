@@ -17,6 +17,7 @@ import type { LibtvJob } from "@/generated/prisma/client";
 import { jobDone, jobFailed, runDone, runFailed } from "./libtv-queue";
 import { assembleGlmMaster, type AssembleFrame } from "./glm-assemble";
 import type { ServerEngine } from "./libtv-pricing";
+import { cleanFramePrompt, hasPeople, motionSafePrompt } from "./prompt-safety";
 
 export type TickResult = "idle" | "running" | "done" | "failed";
 
@@ -63,6 +64,12 @@ const TERMINAL_JOB = new Set(["completed", "skipped", "failed"]);
  */
 export const NO_TEXT_IMAGE = "No text, letters, words, numbers, logos, signage or watermarks anywhere in the image.";
 export const NO_TEXT_VIDEO = "No text, letters, logos or signage appear.";
+
+/** People in the clip or its keyframe → hold it as a still (FACE_SAFE_MOTION=off disables). */
+export function faceSafe(clipPrompt: string, keyframePrompt?: string | null): boolean {
+  if (process.env.FACE_SAFE_MOTION === "off") return false;
+  return hasPeople(clipPrompt) || (!!keyframePrompt && hasPeople(keyframePrompt));
+}
 
 export function withNoText(prompt: string, kind: "image" | "video"): string {
   const clause = kind === "image" ? NO_TEXT_IMAGE : NO_TEXT_VIDEO;
@@ -177,7 +184,7 @@ export async function tickRun(
           await jobDone({ jobId: j.id, resultUrl: urlOf(j.leftRefs ? (j.leftRefs as string[])[0] : "PROD-1"), skipped: true, creditsSpent: 0 });
           return;
         }
-        const out = await adapter.generateImage(withNoText(j.prompt, "image"), ctxFor(j));
+        const out = await adapter.generateImage(withNoText(cleanFramePrompt(j.prompt), "image"), ctxFor(j));
         if ("url" in out) await jobDone({ jobId: j.id, resultUrl: out.url, creditsSpent: 0 });
         else await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: out.taskId } });
       } catch (err) {
@@ -205,8 +212,19 @@ export async function tickRun(
     if (ref?.status === "failed") continue; // the run fails on the keyframe; don't add a second error
     const imageUrl = ref?.resultUrl ?? undefined;
     if (!(await claimJob(j.id))) continue;
+    // Free video models warp faces the moment people move: hold people shots on
+    // their (sharp) keyframe with a slow zoom, and give AI motion to the rest.
+    if (adapter.engine !== "animatic" && imageUrl && faceSafe(j.prompt, ref?.prompt)) {
+      try {
+        const { animateStill } = await import("./animatic-executor");
+        await jobDone({ jobId: j.id, resultUrl: await animateStill(imageUrl, ctxFor(j)), creditsSpent: 0 });
+      } catch (err) {
+        await jobFailed(j.id, errorText(err));
+      }
+      continue;
+    }
     try {
-      const taskId = await adapter.submitVideo({ prompt: withNoText(j.prompt, "video"), imageUrl }, ctxFor(j));
+      const taskId = await adapter.submitVideo({ prompt: withNoText(motionSafePrompt(cleanFramePrompt(j.prompt)), "video"), imageUrl }, ctxFor(j));
       await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: taskId } });
       inFlight++;
     } catch (err) {
@@ -234,7 +252,13 @@ export async function tickRun(
     const master = await assembleGlmMaster({ runId, aspectRatio: run.aspectRatio, frames, jobs: now as LibtvJob[] });
     // Free runs spend 0; bring-your-own paid clips record their cost.
     const spent = now.reduce((sum, x) => sum + (x.creditsSpent ?? 0), 0);
-    await runDone({ runId, masterMp4Url: master, creditsSpent: spent });
+    await runDone({
+      runId,
+      masterMp4Url: master.masterUrl,
+      voiceoverUrl: master.voiceoverUrl,
+      subtitlesUrl: master.subtitlesUrl,
+      creditsSpent: spent,
+    });
     return "done";
   } catch (err) {
     await runFailed(runId, `Assembly failed: ${errorText(err)}`);
@@ -247,13 +271,14 @@ async function storyboardFrames(storyboardId: string | null): Promise<AssembleFr
   const sb = await prisma.storyboard.findUnique({ where: { id: storyboardId }, select: { frames: true, frameSeconds: true } });
   const frameSeconds = sb?.frameSeconds || 2;
   const frames = Array.isArray(sb?.frames)
-    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null }[])
+    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null }[])
     : [];
   return frames.map((f, i) => ({
     frameNumber: f.frameNumber ?? i + 1,
     startSec: Number.isFinite(f.startSec) ? f.startSec! : i * frameSeconds,
     endSec: Number.isFinite(f.endSec) ? f.endSec! : (i + 1) * frameSeconds,
     text: typeof f.textOverlay === "string" ? f.textOverlay : null,
+    voiceover: typeof f.voiceover === "string" ? f.voiceover : null,
   }));
 }
 
