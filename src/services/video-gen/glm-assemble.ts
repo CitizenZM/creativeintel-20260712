@@ -132,7 +132,7 @@ export function fitStillFilter(canvas: { w: number; h: number }, fps = FPS): str
     "split=2[bg][fg]",
     `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=40:2[bgb]`,
     `[fg]scale=${w}:${h}:force_original_aspect_ratio=decrease[fgs]`,
-    `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,fps=${fps},format=yuv420p`,
+    `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,fps=${fps},setsar=1,format=yuv420p`,
   ].join(";");
 }
 
@@ -146,12 +146,13 @@ export function overlayGraph(baseVf: string): string {
 
 /** Subtitle overlays: input i+first is shown between its cue's start and end, above the safe bottom edge. */
 export function subtitleGraph(cues: Pick<SubtitleCue, "startSec" | "endSec">[], firstInput: number): string {
-  if (!cues.length) return "[0:v]null[v]";
+  if (!cues.length) return "[0:v]setsar=1[v]";
   return cues
     .map((c, i) => {
       const from = i === 0 ? "[0:v]" : `[s${i - 1}]`;
       const to = i === cues.length - 1 ? "[v]" : `[s${i}]`;
-      return `${from}[${firstInput + i}:v]overlay=x=(W-w)/2:y=H*0.84-h/2:enable='between(t,${c.startSec.toFixed(3)},${c.endSec.toFixed(3)})'${to}`;
+      const tail = i === cues.length - 1 ? ",setsar=1" : "";
+      return `${from}[${firstInput + i}:v]overlay=x=(W-w)/2:y=H*0.84-h/2:enable='between(t,${c.startSec.toFixed(3)},${c.endSec.toFixed(3)})'${tail}${to}`;
     })
     .join(";");
 }
@@ -230,7 +231,7 @@ export async function assembleGlmMaster(input: {
   if (!segments.length) throw new Error("Nothing to assemble — no finished clips");
 
   const { w, h } = canvasFor(input.aspectRatio);
-  const vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},fps=${FPS},format=yuv420p`;
+  const vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},fps=${FPS},setsar=1,format=yuv420p`;
   const dir = await mkdtemp(path.join(tmpdir(), `glm-${input.runId}-`));
   const hasCaptionFont = await access(CAPTION_FONT).then(() => true, () => false);
   if (!hasCaptionFont) console.warn(`[assemble] caption font missing at ${CAPTION_FONT} — rendering without captions`);
@@ -344,7 +345,7 @@ export async function addVoiceoverAndSubtitles(input: {
     const delay = Math.round(p.startSec * 1000);
     return `[${i}:a]atempo=${p.tempo.toFixed(3)},adelay=${delay}|${delay}[a${i}]`;
   });
-  const mix = `${chains.join(";")};${placements.map((_, i) => `[a${i}]`).join("")}amix=inputs=${placements.length}:normalize=0,apad,atrim=0:${input.totalSec.toFixed(3)}[vo]`;
+  const mix = `${chains.join(";")};${placements.map((_, i) => `[a${i}]`).join("")}amix=inputs=${placements.length}:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,apad,atrim=0:${input.totalSec.toFixed(3)}[vo]`;
   await run(ffmpegPath!, ["-y", "-v", "error", ...mixInputs, "-filter_complex", mix, "-map", "[vo]", "-ac", "2", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", "128k", voiceoverFile], {
     timeout: 90_000,
   });
