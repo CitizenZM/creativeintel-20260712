@@ -12,7 +12,7 @@
  * Decrypted keys stay in this process's memory; nothing here returns them to
  * a client — use toProviderView() for anything that leaves the server.
  */
-import { setStrictFreeOverride } from "@/lib/cost-mode";
+import { setPaidFallback, setStrictFreeOverride } from "@/lib/cost-mode";
 import { assertSafeUrl } from "@/lib/safe-fetch";
 import { decryptSecret, encryptSecret, last4, settingsKeyFromEnv } from "@/lib/settings-crypto";
 import { setExtraVideoModels, zhipuPaidVideoModel } from "@/services/video-gen/libtv-pricing";
@@ -97,6 +97,7 @@ function resolveRow(row: ProviderRow, key: Buffer | null): ResolvedProvider {
 function apply(snap: AiSettingsSnapshot): AiSettingsSnapshot {
   _snap = snap;
   setStrictFreeOverride(snap.settings.strictFree);
+  setPaidFallback(snap.settings.paidFallback);
   setExtraVideoModels(
     snap.providers
       .filter((p) => p.type === "zhipu-paid" && providerServes(p, "video"))

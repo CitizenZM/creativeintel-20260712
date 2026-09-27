@@ -62,6 +62,9 @@ export const LIST_PRICES: Record<string, { inPerM?: number; outPerM?: number; pe
   "claude-haiku-4-5": { inPerM: 1, outPerM: 5 },
   "gemini-2.5-flash": { inPerM: 0.3, outPerM: 2.5 },
   "gemini-2.5-pro": { inPerM: 1.25, outPerM: 10 },
+  // Zhipu paid fallbacks (¥ list price at ≈ ¥7.2 per US$).
+  "glm-4-air-250414": { inPerM: 0.07, outPerM: 0.07 },
+  "glm-4.6v-flashx": { inPerM: 0.04, outPerM: 0.42 },
 };
 
 /** List-price estimate for a usage bucket, or null when the model isn't listed. */
@@ -80,7 +83,8 @@ export function isFreeProvider(provider: string): boolean {
 export function summarizeUsage(groups: UsageGroup[]): UsageSummary {
   const byProvider = new Map<string, EngineUsage>();
   for (const row of groups) {
-    const free = isFreeProvider(row.provider);
+    // The glm route is free except for its paid fallback models (GLM-4-Air …).
+    const free = isFreeProvider(row.provider) && !(row.provider === "glm" && LIST_PRICES[row.model]);
     const e =
       byProvider.get(row.provider) ??
       ({

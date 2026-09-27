@@ -86,6 +86,11 @@ export interface AiEngineSettings {
   video: string;
   /** null = follow env AI_COST_MODE. */
   strictFree: boolean | null;
+  /**
+   * In strict free mode, when every free model is busy (429) or times out, fall
+   * back to a cheap stable paid model instead of failing the step.
+   */
+  paidFallback: boolean;
 }
 
 export const DEFAULT_AI_SETTINGS: AiEngineSettings = {
@@ -94,6 +99,7 @@ export const DEFAULT_AI_SETTINGS: AiEngineSettings = {
   image: "auto",
   video: "auto",
   strictFree: null,
+  paidFallback: true,
 };
 
 export const CUSTOM_PREFIX = "custom:";
@@ -113,6 +119,7 @@ export function normalizeSettings(raw: unknown): AiEngineSettings {
     if (isValidChoice(cap, src[cap])) out[cap] = src[cap] as string;
   }
   if (typeof src.strictFree === "boolean") out.strictFree = src.strictFree;
+  if (typeof src.paidFallback === "boolean") out.paidFallback = src.paidFallback;
   return out;
 }
 
@@ -124,6 +131,7 @@ export const settingsPatchSchema = z
     image: z.string().refine((v) => isValidChoice("image", v), "Unknown image engine"),
     video: z.string().refine((v) => isValidChoice("video", v), "Unknown video engine"),
     strictFree: z.boolean().nullable(),
+    paidFallback: z.boolean(),
   })
   .partial()
   .strict();

@@ -13,6 +13,9 @@ import {
 
 // Lenient schema — the LLM may omit or rename fields. Frames are then stamped
 // onto the exact 2-second grid by repairFrames().
+
+/** Style label on a board built from the script because the AI was unavailable. */
+export const SCRIPT_BUILT_STYLE = "Built from the script (AI unavailable) — edit any frame";
 const frameSchema = z.object({
   frameNumber: z.coerce.number().optional(),
   duration: z.string().optional().default(""),
@@ -190,12 +193,24 @@ export async function buildStoryboardCreateData(
   // the default gpt-4o route; longer boards are padded by repairFrames.
   const maxTokens = Math.min(16000, 2500 + frameCount * 780);
 
-  const result = await analyzeWithClaude({
-    systemPrompt: prompt.system,
-    userPrompt: prompt.user,
-    responseSchema: storyboardSchema,
-    maxTokens,
-  });
+  // Plan B: when every model is busy or down, build the board straight from the
+  // script's own shots (same 2 s grid) rather than failing the step. Every frame
+  // stays editable, and Studio writes prompts from the frame's scene text.
+  let result: { title: string; style?: string; frames: Parameters<typeof repairFrames>[0] };
+  try {
+    result = await analyzeWithClaude({
+      systemPrompt: prompt.system,
+      userPrompt: prompt.user,
+      responseSchema: storyboardSchema,
+      maxTokens,
+    });
+  } catch (err) {
+    console.warn(
+      `[storyboard] AI unavailable for script ${script.id}, building the board from the script:`,
+      err instanceof Error ? err.message.slice(0, 200) : err
+    );
+    result = { title: script.title, style: SCRIPT_BUILT_STYLE, frames: [] };
+  }
 
   const frames = repairFrames(result.frames, windows, scenes);
 

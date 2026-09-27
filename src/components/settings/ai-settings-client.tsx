@@ -155,6 +155,31 @@ export function AiSettingsClient({ initial }: { initial: AiSettingsView }) {
               ZHIPU_API_KEY is not set — free text, vision, image and video calls will fail until it is.
             </p>
           )}
+          {strict.effective && (
+            <div className="mt-3 flex items-start justify-between gap-4 border-t border-border pt-3">
+              <div className="min-w-0">
+                <p className="font-medium">
+                  {view.settings.paidFallback ? "Paid fallback on — steps don't fail when free models are busy" : "Paid fallback off — free models only"}
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Free models answer &quot;too many requests&quot; at peak times. Text tries GLM-4.7-Flash, then GLM-4-Flash (also free),
+                  then GLM-4-Air (about ¥0.5 per million tokens), then OpenAI; vision tries GLM-4.6V-Flash, then GLM-4.6V-FlashX.
+                  Paid models are only reached when every free one fails, and the spend shows below.
+                </p>
+              </div>
+              <label className="flex shrink-0 cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  className="h-4 w-4 accent-foreground"
+                  checked={view.settings.paidFallback}
+                  disabled={saving === "paidFallback"}
+                  onChange={(e) => save("paidFallback", { paidFallback: e.target.checked })}
+                />
+                <span className="text-xs text-muted-foreground">{saved === "paidFallback" ? "Saved" : "Fallback"}</span>
+              </label>
+            </div>
+          )}
         </div>
       </section>
 

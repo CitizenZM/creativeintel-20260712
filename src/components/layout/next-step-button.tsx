@@ -12,8 +12,9 @@ type Gap = StageCriterion;
 
 /**
  * The header's Next Step control.
- * - On a stage page whose checks are not all met: stays put and shows what is
- *   still missing, each with a link that scrolls to the input that fixes it.
+ * - On a stage page whose checks are not all met: shows what is still missing,
+ *   each with a link that scrolls to the input that fixes it, and a "Skip for
+ *   now" that moves on anyway — no stage is locked behind another.
  * - When the current stage is done: moves on to the next stage.
  * - Anywhere else: goes to the first unfinished stage.
  * Every click gives visible feedback (press animation, and a shake when blocked).
@@ -67,6 +68,10 @@ export function NextStepButton({ projectId, initial }: { projectId: string; init
 
 
 
+  // Nothing is locked: from an unfinished stage the user may move on anyway.
+  const gapStage = gaps ? stages.find((s) => s.id === gaps.stage.id) ?? null : null;
+  const skipTo = gapStage ? stages[stages.indexOf(gapStage) + 1] ?? null : null;
+
   if (!data && !initial) return null;
   const allDone = stages.length > 0 && stages.every((s) => s.state === "done");
   if (allDone && (!current || !following)) return null;
@@ -116,12 +121,27 @@ export function NextStepButton({ projectId, initial }: { projectId: string; init
               <X className="h-4 w-4" />
             </button>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">Complete these to continue:</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Finish these for the best result — or skip ahead and come back later.
+          </p>
           <div className="mt-2 max-h-[60vh] space-y-1.5 overflow-y-auto">
             {gaps.items.map((g) => (
               <StepItem key={g.id ?? g.label} projectId={projectId} criterion={g} compact />
             ))}
           </div>
+          {skipTo && (
+            <button
+              type="button"
+              onClick={() => {
+                setGaps(null);
+                router.push(skipTo.href);
+              }}
+              className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs font-medium hover:bg-muted"
+              data-testid="skip-stage"
+            >
+              Skip for now — go to {skipTo.label} <ArrowRight className="h-3 w-3" />
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -18,7 +18,7 @@ import { runAnalysisPipeline } from "@/services/ai/analysis-pipeline";
 import {
   startStep,
   updateStep,
-  completeStep,
+  completeStep, failStep,
   recordStepSources,
   failJob,
   completeJob,
@@ -50,7 +50,16 @@ function toJobSources(reports: SourceReport[]): JobSourceStatus[] {
   }));
 }
 
+/**
+ * The research request lives in one 300 s invocation. AI analysis is the slow,
+ * failure-prone tail (free models rate-limit), so it only starts with enough of
+ * that budget left, and its failure never throws away the ads already saved —
+ * Insights runs the same analysis as its own job.
+ */
+const MAX_ELAPSED_BEFORE_ANALYSIS_MS = 150_000;
+
 export async function runResearch(projectId: string, jobId: string): Promise<void> {
+  const researchStartedAt = Date.now();
   try {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
@@ -288,18 +297,32 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
     // Step 5: AI analysis. The pipeline now reads assets back from the DB;
     // it is no longer handed a video list.
     await startStep(jobId, "AI analysis");
-    await runAnalysisPipeline(projectId, {
-      jobId,
-      onProgress: (step: string, pct: number) => {
-        void updateStep(jobId, "AI analysis", pct, step);
-      },
-    });
-    await completeStep(jobId, "AI analysis");
+    let analyzed = false;
+    if (Date.now() - researchStartedAt > MAX_ELAPSED_BEFORE_ANALYSIS_MS) {
+      await failStep(jobId, "AI analysis", "Not enough time left in this run — the ads are saved. Insights runs the analysis on its own.");
+    } else {
+      try {
+        await runAnalysisPipeline(projectId, {
+          jobId,
+          onProgress: (step: string, pct: number) => {
+            void updateStep(jobId, "AI analysis", pct, step);
+          },
+        });
+        await completeStep(jobId, "AI analysis");
+        analyzed = true;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[research] AI analysis failed for ${projectId}, keeping the collected ads:`, msg.slice(0, 200));
+        await failStep(jobId, "AI analysis", `AI analysis failed (${msg.slice(0, 160)}) — the ads are saved. Run the analysis again from Insights.`);
+      }
+    }
 
-    await prisma.project.update({
-      where: { id: projectId },
-      data: { status: "ANALYZED" },
-    });
+    if (analyzed) {
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { status: "ANALYZED" },
+      });
+    }
     await completeJob(jobId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Research failed";
