@@ -58,6 +58,15 @@ describe("subtitleCues", () => {
     expect(cues.map((c) => c.text)).toEqual(["Tired of managing piles of receipts?", "Meet Ramp."]);
   });
 
+  it("keeps numbers and abbreviations the TTS splits into several words", () => {
+    // Edge TTS reports "2,100+" as "2" + "100" and "BT.2020" as "BT" + "2020".
+    const tts = ["Over", "2", "100", "local", "dimming", "zones", "and", "BT", "2020", "colour"].map((text, i) => ({ text, startSec: i * 0.4, durSec: 0.35 }));
+    const cues = subtitleCues(tts, { startSec: 0, tempo: 1 }, 40, "Over 2,100+ local dimming zones and BT.2020 colour.");
+    expect(cues.map((c) => c.text).join(" ")).toBe("Over 2,100+ local dimming zones and BT.2020 colour.");
+    expect(cues[0].startSec).toBeCloseTo(0);
+    expect(cues.at(-1)!.endSec).toBeCloseTo(9 * 0.4 + 0.35);
+  });
+
   it("writes SRT", () => {
     expect(toSrt([{ startSec: 1.5, endSec: 3.25, text: "Meet Ramp." }])).toBe("1\n00:00:01,500 --> 00:00:03,250\nMeet Ramp.\n");
   });
