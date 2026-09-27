@@ -57,6 +57,8 @@ function toJobSources(reports: SourceReport[]): JobSourceStatus[] {
  * Insights runs the same analysis as its own job.
  */
 const MAX_ELAPSED_BEFORE_ANALYSIS_MS = 150_000;
+/** The TikTok "for you" corpus is a nice-to-have; skip it past this point. */
+const MAX_ELAPSED_FOR_EXTRAS_MS = 150_000;
 
 export async function runResearch(projectId: string, jobId: string): Promise<void> {
   const researchStartedAt = Date.now();
@@ -213,7 +215,9 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
         );
         return candidates;
       },
-      { concurrency: Math.min(CONCURRENCY, 3) }
+      // All owners at once: each source is capped at 60 s, so the step's wall
+      // time stays about one source deadline instead of stacking rounds.
+      { concurrency: Math.max(1, owners.length) }
     );
 
     const groups: ClassifyGroup[] = owners.flatMap((owner, i) => {
@@ -256,14 +260,17 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
 
     // Brand-agnostic TikTok top-ads feed: stored as unowned corpus, never
     // allowed to occupy a competitor's Top-N slot.
-    const forYou = await fetchTikTokForYouFeed({
-      industry: project.category ?? undefined,
-      region: "US",
-      limit: 20,
-      advertiserNames: [project.brandName, ...project.competitors.map((c) => c.name)],
-    });
-    allCandidates.push(...forYou.candidates);
-    await recordStepSources(jobId, AD_DISCOVERY_STEP, toJobSources([forYou.report]));
+    // Optional extra corpus — only when there is time to spare in this run.
+    if (Date.now() - researchStartedAt < MAX_ELAPSED_FOR_EXTRAS_MS) {
+      const forYou = await fetchTikTokForYouFeed({
+        industry: project.category ?? undefined,
+        region: "US",
+        limit: 20,
+        advertiserNames: [project.brandName, ...project.competitors.map((c) => c.name)],
+      });
+      allCandidates.push(...forYou.candidates);
+      await recordStepSources(jobId, AD_DISCOVERY_STEP, toJobSources([forYou.report]));
+    }
 
     await completeStep(jobId, AD_DISCOVERY_STEP);
 

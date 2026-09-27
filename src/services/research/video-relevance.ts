@@ -9,6 +9,7 @@
  * Candidates that already carry ad-library evidence skip the LLM entirely; a
  * cheap regex pre-filter drops the obviously-irrelevant before spending tokens.
  */
+import { pMapSettled } from "@/lib/parallel";
 import { z } from "zod";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import type { AdCandidate } from "./ad-candidate";
@@ -265,9 +266,12 @@ const SHARED_CHUNK = 40;
  * system prompt and business context are paid once per chunk instead of
  * once per competitor.
  */
+/** Total time the shared classifier may spend before scoring the rest deterministically. */
+const CLASSIFY_DEADLINE_MS = 75_000;
+
 export async function classifyAdCandidateGroups(
   groups: ClassifyGroup[],
-  opts: ClassifyOptions & { chunkSize?: number } = {}
+  opts: ClassifyOptions & { chunkSize?: number; deadlineMs?: number } = {}
 ): Promise<{ byKey: Map<string, AdCandidate[]>; degraded: boolean; classifiedCount: number; calls: number }> {
   const prepared = groups.map((g) => ({ group: g, ...prepareForClassification(g.candidates, g.ctx, opts) }));
   const flat = prepared.flatMap((p, gi) => p.batch.map((c) => ({ gi, c })));
@@ -276,19 +280,42 @@ export async function classifyAdCandidateGroups(
   let degraded = false;
   let calls = 0;
 
-  for (let start = 0; start < flat.length; start += chunkSize) {
-    const chunk = flat.slice(start, start + chunkSize);
-    calls += 1;
-    try {
-      const out = await llmMultiBrandClassifier(
-        chunk.map((x) => ({ candidate: x.c, brand: prepared[x.gi].group.ctx })),
-        prepared.map((p) => p.group.ctx)
-      );
-      out.forEach((v, i) => (verdicts[start + i] = v));
-    } catch {
-      degraded = true;
-    }
-  }
+  // Chunks run a few at a time under one deadline: research lives in a single
+  // 300 s invocation and free models can be slow or rate-limited. A chunk not
+  // back in time falls back to deterministic scoring, like a failed one.
+  const starts: number[] = [];
+  for (let start = 0; start < flat.length; start += chunkSize) starts.push(start);
+  const deadlineAt = Date.now() + (opts.deadlineMs ?? CLASSIFY_DEADLINE_MS);
+  await pMapSettled(
+    starts,
+    async (start) => {
+      const chunk = flat.slice(start, start + chunkSize);
+      const left = deadlineAt - Date.now();
+      if (left <= 0) {
+        degraded = true;
+        return;
+      }
+      calls += 1;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const out = await Promise.race([
+          llmMultiBrandClassifier(
+            chunk.map((x) => ({ candidate: x.c, brand: prepared[x.gi].group.ctx })),
+            prepared.map((p) => p.group.ctx)
+          ),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("classifier deadline")), left);
+          }),
+        ]);
+        out.forEach((v, i) => (verdicts[start + i] = v));
+      } catch {
+        degraded = true;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    { concurrency: 3 }
+  );
 
   const byKey = new Map<string, AdCandidate[]>();
   let cursor = 0;
