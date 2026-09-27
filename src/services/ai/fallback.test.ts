@@ -27,3 +27,11 @@ describe("isTransientError", () => {
     expect(isTransientError(new Error("Zod parse failed"))).toBe(false);
   });
 });
+
+describe("isTransientError in the production bundle", () => {
+  it("recognises the SDK's timeout by class, whatever its minified name", async () => {
+    const { APIConnectionTimeoutError } = await import("openai");
+    expect(isTransientError(new APIConnectionTimeoutError())).toBe(true);
+    expect(isTransientError(Object.assign(new Error("Request timed out."), { name: "rB" }))).toBe(true);
+  });
+});

@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { APIConnectionError } from "openai";
 import { jsonrepair } from "jsonrepair";
 import { ZodSchema } from "zod";
 import { isStrictFree, paidFallbackAllowed } from "@/lib/cost-mode";
@@ -49,7 +49,9 @@ const _customClients = new Map<string, { apiKey: string; baseUrl: string | null;
  * stuck request could eat a whole 300 s serverless invocation ("Run stopped
  * before it finished"). Fail fast and let the fallback ladder take over.
  */
-const CALL_OPTS = { timeout: 60_000, maxRetries: 1 } as const;
+const CALL_OPTS = { timeout: 60_000, maxRetries: 0 } as const;
+/** A whole call — every model and provider it falls back through — ends by this. */
+const CALL_BUDGET_MS = 110_000;
 // Free Zhipu models answer 429 at peak times; moving to the next model beats waiting.
 const GLM_OPTS = { timeout: 45_000, maxRetries: 0 } as const;
 
@@ -199,11 +201,14 @@ function isRateLimitError(err: unknown): boolean {
  * timeouts / dropped connections. A 4xx about the request itself is not.
  */
 export function isTransientError(err: unknown): boolean {
-  const e = err as { status?: number; name?: string; constructor?: { name?: string } } | null;
+  // Class names are minified in the production bundle, so check the SDK class
+  // itself (timeouts are APIConnectionTimeoutError, a subclass) and the message.
+  if (err instanceof APIConnectionError) return true;
+  const e = err as { status?: number; name?: string; message?: string } | null;
   const status = e?.status;
   if (status === 429 || (typeof status === "number" && status >= 500)) return true;
-  const name = `${e?.name ?? ""} ${e?.constructor?.name ?? ""}`;
-  return status === undefined && /Timeout|Connection|Abort/i.test(name);
+  const text = `${e?.name ?? ""} ${e?.message ?? ""}`;
+  return status === undefined && /timed? ?out|timeout|connection|ECONNRESET|socket hang up|fetch failed|aborted/i.test(text);
 }
 
 /** Translate a bare OpenAI model id into OpenRouter's namespaced form. */
@@ -484,10 +489,12 @@ async function tryModels(
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
   models: string[],
   maxTokens: number,
-  capability: TextCapability
+  capability: TextCapability,
+  deadlineAt = Date.now() + CALL_BUDGET_MS
 ) {
   let lastErr: unknown;
   for (const [i, model] of models.entries()) {
+    if (i > 0 && Date.now() > deadlineAt) break; // out of time for this call — let the caller fall back
     try {
       const response = await createOnRoute(client, provider, messages, model, maxTokens);
       recordUsage(provider, model, capability, response.usage);
@@ -515,10 +522,12 @@ async function callModel(
   const order = providerOrder(capability);
   let lastErr: unknown;
   let tried = false;
+  const deadlineAt = Date.now() + CALL_BUDGET_MS;
 
   for (const provider of order) {
     const client = clientFor(provider);
     if (!client) continue;
+    if (tried && Date.now() > deadlineAt) break;
     tried = true;
     // A bring-your-own provider always uses its own configured model ids.
     const modelToUse =
@@ -527,7 +536,7 @@ async function callModel(
         : modelFor(provider, tier, capability);
     const models = provider === "glm" ? glmModelLadder(modelToUse, capability, !isStrictFree() || paidFallbackAllowed()) : [modelToUse];
     try {
-      const response = await tryModels(client, provider, messages, models, maxTokens, capability);
+      const response = await tryModels(client, provider, messages, models, maxTokens, capability, deadlineAt);
       return response;
     } catch (err) {
       if (isAuthError(err)) {
