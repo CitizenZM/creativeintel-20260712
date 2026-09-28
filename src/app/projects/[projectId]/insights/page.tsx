@@ -21,6 +21,7 @@ import { StylePicker, type StyleCategoryView } from "@/components/insights/style
 import { STYLE_CATEGORIES, isGoalType, isRecommendedFor, sanitizeStyleCategories } from "@/lib/style-categories";
 import { getConfiguredModelLabel } from "@/services/ai/claude-client";
 import { loadAiSettings } from "@/services/settings/ai-settings";
+import { VisionModelPicker } from "@/components/settings/vision-model-picker";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -257,6 +258,13 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
             competitorSummaries.some((c) => c.adCount > 0) &&
             competitorSummaries.every((c) => c.teardownCount === 0)
           }
+        />
+        <VisionModelPicker
+          className="basis-full"
+          adCount={Math.max(
+            0,
+            competitorSummaries.reduce((n, c) => n + c.adCount - c.teardownCount, 0)
+          )}
         />
       </div>
 

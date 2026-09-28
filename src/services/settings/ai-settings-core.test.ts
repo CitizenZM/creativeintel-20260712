@@ -6,9 +6,12 @@ import {
   envAvailability,
   normalizeSettings,
   providerInputSchema,
+  recommendedVisionModel,
   resolveStrictFree,
   routeOrder,
+  settingsPatchSchema,
   videoDefaults,
+  visionModelOptions,
   type CustomProviderInfo,
 } from "./ai-settings-core";
 
@@ -171,5 +174,33 @@ describe("providerInputSchema", () => {
       providerInputSchema.safeParse({ name: "x", type: "fal", apiKey: "abcdefghij", models: {}, admin: true }).success
     ).toBe(false);
     expect(providerInputSchema.safeParse({ name: "x", type: "fal", apiKey: "short", models: {} }).success).toBe(false);
+  });
+});
+
+describe("vision model picker", () => {
+  const env = (connected: string[]) =>
+    envAvailability(Object.fromEntries(connected.map((k) => [k, "x"])) as Record<string, string>);
+
+  it("keeps a known vision model and drops an unknown one", () => {
+    expect(normalizeSettings({ visionModel: "gpt-4o" }).visionModel).toBe("gpt-4o");
+    expect(normalizeSettings({ visionModel: "gpt-9" }).visionModel).toBeNull();
+    expect(settingsPatchSchema.safeParse({ visionModel: "gemini-3.8-flash" }).success).toBe(true);
+    expect(settingsPatchSchema.safeParse({ visionModel: "nope" }).success).toBe(false);
+    expect(settingsPatchSchema.safeParse({ visionModel: null }).success).toBe(true);
+  });
+
+  it("recommends free GLM in strict free mode, else Gemini Flash, else GPT-4o", () => {
+    expect(recommendedVisionModel({ env: env(["ZHIPU_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY"]), strictFree: true })).toBe("glm-4.6v-flash");
+    expect(recommendedVisionModel({ env: env(["ZHIPU_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY"]), strictFree: false })).toBe("gemini-3.8-flash");
+    expect(recommendedVisionModel({ env: env(["ZHIPU_API_KEY", "OPENAI_API_KEY"]), strictFree: false })).toBe("gpt-4o");
+    expect(recommendedVisionModel({ env: env(["ZHIPU_API_KEY"]), strictFree: false })).toBe("glm-4.6v-flash");
+  });
+
+  it("marks one option recommended and disables paid or unconnected ones", () => {
+    const opts = visionModelOptions({ env: env(["ZHIPU_API_KEY", "OPENAI_API_KEY"]), strictFree: true });
+    expect(opts.filter((o) => o.recommended).map((o) => o.model)).toEqual(["glm-4.6v-flash"]);
+    expect(opts.find((o) => o.model === "glm-4.6v-flash")?.disabledReason).toBeUndefined();
+    expect(opts.find((o) => o.model === "gpt-4o")?.disabledReason).toBe("Strict free mode is on");
+    expect(opts.find((o) => o.model === "gemini-3.8-flash")?.disabledReason).toMatch(/^Not connected/);
   });
 });

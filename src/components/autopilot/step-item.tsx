@@ -10,6 +10,7 @@ import { focusSection, stageForPath } from "@/components/layout/use-project-stag
 import { markStagesStale } from "@/lib/stage-events";
 import { MANUAL_HINTS, PLAN_B, STEP_ACTIONS, approveAllFrames } from "./step-actions";
 import { runStep, useStepRun, AUTOPILOT_DONE } from "./step-runner";
+import { VisionModelPicker } from "@/components/settings/vision-model-picker";
 
 /** Where on its page each check is done. */
 export const STEP_ANCHOR: Record<string, string> = {
@@ -38,6 +39,8 @@ export const STEP_ANCHOR: Record<string, string> = {
  * "Show me" that scrolls to where it's done. Every click shows feedback —
  * a spinner and live progress while the AI works, then the result.
  */
+const VISION_STEPS = new Set(["insights.analyze"]);
+
 export function StepItem({ projectId, criterion, compact = false }: { projectId: string; criterion: StageCriterion; compact?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -134,6 +137,8 @@ export function StepItem({ projectId, criterion, compact = false }: { projectId:
             </p>
           )}
           {note && <p className="rounded bg-muted px-2 py-1 text-foreground">{note}</p>}
+          {/* Choose the model that reads the ad frames before the analysis runs. */}
+          {VISION_STEPS.has(id) && !compact && !running && <VisionModelPicker compact />}
 
           <div className="flex flex-wrap items-center gap-1.5">
             {action && (

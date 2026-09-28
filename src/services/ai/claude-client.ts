@@ -4,7 +4,7 @@ import { ZodSchema } from "zod";
 import { isStrictFree, paidFallbackAllowed } from "@/lib/cost-mode";
 import { ZHIPU_BASE_URL, ZHIPU_FREE, zhipuKey } from "./zhipu";
 import { cachedAiSettings, cachedProvider, loadAiSettings } from "@/services/settings/ai-settings";
-import { CUSTOM_PREFIX, routeOrder } from "@/services/settings/ai-settings-core";
+import { CUSTOM_PREFIX, routeOrder, visionModelChoice } from "@/services/settings/ai-settings-core";
 import { logAiUsage } from "./usage";
 import { costForTokens } from "./usage-core";
 
@@ -333,6 +333,9 @@ export function getVisionModel(): string {
 }
 
 function visionModelFor(provider: Route): string {
+  // The model picked before an analysis wins on its own engine (never a paid one in strict free mode).
+  const picked = visionModelChoice(cachedAiSettings().settings.visionModel);
+  if (picked && picked.engine === provider && !(picked.paid && isStrictFree())) return picked.model;
   if (provider === "gemini") {
     return process.env.AI_GEMINI_VISION_MODEL || process.env.AI_GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
   }

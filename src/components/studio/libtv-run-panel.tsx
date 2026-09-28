@@ -16,7 +16,7 @@ import {
   ShieldCheck,
   Ban,
 } from "lucide-react";
-import { engineLabel, estimateBoard, isServerEngine } from "@/services/video-gen/libtv-pricing";
+import { engineLabel, estimateBoard, GLM_VIDEO_MODEL as FREE_DRAFT_VIDEO_MODEL, isServerEngine } from "@/services/video-gen/libtv-pricing";
 import type {
   BrandKitReadiness,
   BudgetMode,
@@ -129,6 +129,16 @@ export function LibtvRunPanel({
     () => models.image.find((m) => m.name === imageModel) ?? models.image[0],
     [models.image, imageModel]
   );
+
+  function pickVideoModel(name: string) {
+    setVideoModel(name);
+    // GLM / ComfyUI keyframes only render on their own engine: keep the pair aligned.
+    const engine = models.video.find((m) => m.name === name)?.engine ?? "libtv";
+    if ((imageOption?.engine ?? "libtv") !== engine) {
+      const match = models.image.find((m) => (m.engine ?? "libtv") === engine);
+      if (match) setImageModel(match.name);
+    }
+  }
 
   const durations = videoOption?.durations?.length ? videoOption.durations : [6];
   const effectiveDuration = durations.includes(clipDurationSec) ? clipDurationSec : durations[0];
@@ -367,6 +377,23 @@ export function LibtvRunPanel({
       )}
 
       {/* Model pickers */}
+      {models.video.some((m) => m.name === FREE_DRAFT_VIDEO_MODEL) && (
+        <p className="text-[11px] text-muted-foreground" data-testid="render-recommendation">
+          <span className="font-semibold text-foreground">Suggested:</span> draft with {FREE_DRAFT_VIDEO_MODEL} (free; faces are
+          held still so they don&apos;t warp; voiceover and subtitles are added) to check the story and timing, then switch the
+          clip model to a LibTV model for the final cut — credits are spent only after you approve the estimate.{" "}
+          {videoModel !== FREE_DRAFT_VIDEO_MODEL && (
+            <button
+              type="button"
+              onClick={() => pickVideoModel(FREE_DRAFT_VIDEO_MODEL)}
+              className="font-medium text-foreground underline underline-offset-2"
+            >
+              Use the free draft
+            </button>
+          )}
+        </p>
+      )}
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <label className="block">
           <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -392,15 +419,7 @@ export function LibtvRunPanel({
           </span>
           <select
             value={videoModel}
-            onChange={(e) => {
-              setVideoModel(e.target.value);
-              // GLM / ComfyUI keyframes only render on their own engine: keep the pair aligned.
-              const engine = models.video.find((m) => m.name === e.target.value)?.engine ?? "libtv";
-              if ((imageOption?.engine ?? "libtv") !== engine) {
-                const match = models.image.find((m) => (m.engine ?? "libtv") === engine);
-                if (match) setImageModel(match.name);
-              }
-            }}
+            onChange={(e) => pickVideoModel(e.target.value)}
             className="h-9 w-full rounded-md border border-border bg-background px-2 text-xs"
           >
             {models.video.map((m) => (

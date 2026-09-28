@@ -91,6 +91,8 @@ export interface AiEngineSettings {
    * back to a cheap stable paid model instead of failing the step.
    */
   paidFallback: boolean;
+  /** The vision model picked before an analysis (see VISION_MODELS); null = the engine's default. */
+  visionModel: string | null;
 }
 
 export const DEFAULT_AI_SETTINGS: AiEngineSettings = {
@@ -100,6 +102,7 @@ export const DEFAULT_AI_SETTINGS: AiEngineSettings = {
   video: "auto",
   strictFree: null,
   paidFallback: true,
+  visionModel: null,
 };
 
 export const CUSTOM_PREFIX = "custom:";
@@ -120,6 +123,7 @@ export function normalizeSettings(raw: unknown): AiEngineSettings {
   }
   if (typeof src.strictFree === "boolean") out.strictFree = src.strictFree;
   if (typeof src.paidFallback === "boolean") out.paidFallback = src.paidFallback;
+  if (typeof src.visionModel === "string" && visionModelChoice(src.visionModel)) out.visionModel = src.visionModel;
   return out;
 }
 
@@ -132,6 +136,10 @@ export const settingsPatchSchema = z
     video: z.string().refine((v) => isValidChoice("video", v), "Unknown video engine"),
     strictFree: z.boolean().nullable(),
     paidFallback: z.boolean(),
+    visionModel: z
+      .string()
+      .refine((v) => !!visionModelChoice(v), "Unknown vision model")
+      .nullable(),
   })
   .partial()
   .strict();
@@ -165,6 +173,99 @@ export function routeOrder(
   const today = opts.forced ? [opts.forced] : base;
   if (!choice || choice === "auto") return today;
   return [choice, ...today.filter((id) => id !== choice)];
+}
+
+// ─── Vision model picker ────────────────────────────────────────────────────
+
+export interface VisionModelChoice {
+  model: string;
+  engine: "glm" | "openai" | "gemini";
+  label: string;
+  paid: boolean;
+  /** Seconds and US$ for one ad teardown (4–6 keyframes → JSON), measured 2026-09-28 (diagnostics ?vbench=1). */
+  secsPerAd: number;
+  usdPerAd: number;
+  note: string;
+}
+
+/** The models the picker offers before an analysis, cheapest-per-result first after the free one. */
+export const VISION_MODELS: VisionModelChoice[] = [
+  {
+    model: "glm-4.6v-flash",
+    engine: "glm",
+    label: "GLM-4.6V-Flash",
+    paid: false,
+    secsPerAd: 17,
+    usdPerAd: 0,
+    note: "Free. Slowest: Zhipu allows 2 calls at a time and rate-limits, so a big analysis takes several rounds.",
+  },
+  {
+    model: "gemini-3.8-flash",
+    engine: "gemini",
+    label: "Gemini 3.8 Flash",
+    paid: true,
+    secsPerAd: 8,
+    usdPerAd: 0.003,
+    note: "Fast, the cheapest paid option (estimated at Gemini Flash list price), most detailed scene descriptions.",
+  },
+  {
+    model: "gpt-4o",
+    engine: "openai",
+    label: "GPT-4o",
+    paid: true,
+    secsPerAd: 10,
+    usdPerAd: 0.012,
+    note: "Proven on this app's teardowns; reliable at quoting on-screen text.",
+  },
+  {
+    model: "gpt-4o-mini",
+    engine: "openai",
+    label: "GPT-4o mini",
+    paid: true,
+    secsPerAd: 5,
+    usdPerAd: 0.013,
+    note: "Fastest, but it bills each image as ~30× the tokens, so it's no cheaper than GPT-4o here.",
+  },
+  {
+    model: "glm-4.6v-flashx",
+    engine: "glm",
+    label: "GLM-4.6V-FlashX",
+    paid: true,
+    secsPerAd: 46,
+    usdPerAd: 0.001,
+    note: "Zhipu's paid tier: almost free, but slower than the free model in our test.",
+  },
+];
+
+export function visionModelChoice(model: string | null | undefined): VisionModelChoice | undefined {
+  return model ? VISION_MODELS.find((m) => m.model === model) : undefined;
+}
+
+export interface VisionModelOption extends VisionModelChoice {
+  recommended: boolean;
+  disabledReason?: string;
+}
+
+/**
+ * What the picker recommends: free GLM when only free calls are allowed, else
+ * the fastest-per-dollar connected model (Gemini Flash), else GPT-4o.
+ */
+export function recommendedVisionModel(ctx: { env: EnvAvailability; strictFree: boolean }): string {
+  if (ctx.strictFree) return "glm-4.6v-flash";
+  if (ctx.env.gemini?.connected) return "gemini-3.8-flash";
+  if (ctx.env.openai?.connected) return "gpt-4o";
+  return "glm-4.6v-flash";
+}
+
+export function visionModelOptions(ctx: { env: EnvAvailability; strictFree: boolean }): VisionModelOption[] {
+  const recommended = recommendedVisionModel(ctx);
+  return VISION_MODELS.map((m) => {
+    const avail = ctx.env[m.engine] ?? { connected: false, envVars: [] };
+    let disabledReason: string | undefined;
+    if (!avail.connected) disabledReason = `Not connected — set ${avail.envVars.join(" or ")}`;
+    else if (m.paid && ctx.strictFree) disabledReason = "Strict free mode is on";
+    return { ...m, recommended: m.model === recommended, disabledReason };
+  });
 }
 
 // ─── Custom providers ───────────────────────────────────────────────────────
