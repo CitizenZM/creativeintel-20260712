@@ -5,10 +5,17 @@ import { describeMetaError, searchMetaAdLibrary } from "@/services/research/meta
 import { generateImage, getVideoTask, isZhipuConfigured, submitVideo, zhipuKey, ZHIPU_BASE_URL, ZHIPU_FREE } from "@/services/ai/zhipu";
 import { persistDataUrl } from "@/services/ai/image-engine";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // Live connectivity checks for the operator's tooling (worker token, not
 // Access). Reports status only — never a key or token value.
+const VBENCH_FRAMES = [
+  "https://i.ytimg.com/vi/sjOKOun4aQo/maxresdefault.jpg",
+  "https://i.ytimg.com/vi/sjOKOun4aQo/1.jpg",
+  "https://i.ytimg.com/vi/sjOKOun4aQo/2.jpg",
+  "https://i.ytimg.com/vi/sjOKOun4aQo/3.jpg",
+];
+
 function isAuthorized(request: Request): boolean {
   const expected = process.env.WORKER_TOKEN;
   const provided = request.headers.get("x-worker-token");
@@ -135,6 +142,79 @@ export async function GET(request: Request) {
         }
       })
     );
+  }
+
+  // ?vbench=1 times one ad teardown (keyframes → JSON) on each vision model the
+  // picker offers. ?vimgs=url1,url2 sets the frames (default: a TCL ad's).
+  if (params.get("vbench") === "1") {
+    const urls = (params.get("vimgs") || VBENCH_FRAMES.join(","))
+      .split(",")
+      .filter((u) => /^https:\/\//.test(u))
+      .slice(0, 6);
+    const images = (
+      await Promise.all(
+        urls.map(async (u) => {
+          const res = await fetch(u, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
+          if (!res?.ok) return null;
+          const type = res.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+          return `data:${type};base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}`;
+        })
+      )
+    ).filter((x): x is string => !!x);
+    const prompt =
+      "You are an ad strategist. These are keyframes of one video ad, in order. Return JSON {hook, beats:[{t, visual, onScreenText}], offer, cta, whyItWorks}. Describe only what you can see; quote on-screen text exactly.";
+    const gemKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    const models: [string, string, string | undefined][] = [
+      ["glm-4.6v-flash", ZHIPU_BASE_URL, zhipuKey() ?? undefined],
+      ["glm-4.6v-flashx", ZHIPU_BASE_URL, zhipuKey() ?? undefined],
+      ["gpt-4o-mini", "https://api.openai.com/v1/", process.env.OPENAI_API_KEY],
+      ["gpt-4o", "https://api.openai.com/v1/", process.env.OPENAI_API_KEY],
+      ["gemini-3.8-flash", "https://generativelanguage.googleapis.com/v1beta/openai/", gemKey],
+    ];
+    extra.vbench = {
+      frames: images.length,
+      results: await Promise.all(
+        models.map(async ([model, base, key]) => {
+          if (!key) return { model, skipped: "no key" };
+          const t0 = Date.now();
+          try {
+            const res = await fetch(`${base}chat/completions`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model,
+                max_tokens: 1500,
+                messages: [
+                  {
+                    role: "user",
+                    content: [{ type: "text", text: prompt }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))],
+                  },
+                ],
+              }),
+              signal: AbortSignal.timeout(170_000),
+            });
+            const body = (await res.json().catch(() => ({}))) as {
+              usage?: { prompt_tokens?: number; completion_tokens?: number };
+              choices?: { message?: { content?: string } }[];
+              error?: { message?: string };
+            };
+            const text = body.choices?.[0]?.message?.content ?? "";
+            return {
+              model,
+              status: res.status,
+              secs: (Date.now() - t0) / 1000,
+              inTokens: body.usage?.prompt_tokens,
+              outTokens: body.usage?.completion_tokens,
+              quotes: (text.match(/onScreenText"\s*:\s*"[^"]{2,}/g) || []).length,
+              sample: text.replace(/\s+/g, " ").slice(0, 400),
+              error: body.error?.message?.slice(0, 120),
+            };
+          } catch (err) {
+            return { model, secs: (Date.now() - t0) / 1000, error: err instanceof Error ? err.message.slice(0, 80) : String(err) };
+          }
+        })
+      ),
+    };
   }
 
   return NextResponse.json({ db, meta, zhipu, ...extra, costMode: process.env.AI_COST_MODE ?? "default" });
