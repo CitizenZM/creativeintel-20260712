@@ -15,7 +15,7 @@ interface PickerData {
 
 function price(usd: number): string {
   if (usd === 0) return "free";
-  return usd < 0.01 ? `~$${usd.toFixed(3)}` : `~$${usd.toFixed(2)}`;
+  return usd < 0.1 ? `~$${usd.toFixed(3)}` : `~$${usd.toFixed(2)}`;
 }
 
 /**
@@ -124,7 +124,7 @@ export function VisionModelPicker({
           {n > 0 && (
             <>
               {" "}
-              For up to {n} ad{n === 1 ? "" : "s"}: <span className="font-medium text-foreground">{price(selected.usdPerAd * n)}</span>, about{" "}
+              For the {n} ad{n === 1 ? "" : "s"} still to tear down: <span className="font-medium text-foreground">{price(selected.usdPerAd * n)}</span>, about{" "}
               {formatDuration(Math.round((selected.secsPerAd * n) / (selected.engine === "glm" ? 2 : 3)))}.
             </>
           )}
