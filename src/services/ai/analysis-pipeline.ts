@@ -24,7 +24,8 @@ import { NarrativeType } from "@/generated/prisma/enums";
 import { cached } from "@/services/cache";
 import { pMap } from "@/lib/parallel";
 
-const TOP_N_DEEP = Number(process.env.TOP_N_DEEP) || 5;
+/** Ads torn down per owner (plus any pinned ones). */
+export const TOP_N_DEEP = Number(process.env.TOP_N_DEEP) || 5;
 const SCORING_BATCH_SIZE = Number(process.env.CONTENT_SCORING_BATCH) || 10;
 const STAGE_BUDGET_MS = Number(process.env.ANALYSIS_BUDGET_MS) || 45_000;
 const TEARDOWN_CACHE_TTL_SEC = 30 * 24 * 60 * 60;

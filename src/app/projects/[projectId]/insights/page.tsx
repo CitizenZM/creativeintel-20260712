@@ -22,6 +22,7 @@ import { STYLE_CATEGORIES, isGoalType, isRecommendedFor, sanitizeStyleCategories
 import { getConfiguredModelLabel } from "@/services/ai/claude-client";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { VisionModelPicker } from "@/components/settings/vision-model-picker";
+import { TOP_N_DEEP } from "@/services/ai/analysis-pipeline";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -261,9 +262,10 @@ export default async function InsightsListPage({ params }: { params: Promise<{ p
         />
         <VisionModelPicker
           className="basis-full"
-          adCount={Math.max(
-            0,
-            competitorSummaries.reduce((n, c) => n + c.adCount - c.teardownCount, 0)
+          // Only each competitor's top ads are torn down.
+          adCount={competitorSummaries.reduce(
+            (n, c) => n + Math.max(0, Math.min(c.adCount, TOP_N_DEEP) - c.teardownCount),
+            0
           )}
         />
       </div>
