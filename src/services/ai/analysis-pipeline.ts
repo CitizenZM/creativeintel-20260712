@@ -29,6 +29,7 @@ const SCORING_BATCH_SIZE = Number(process.env.CONTENT_SCORING_BATCH) || 10;
 const STAGE_BUDGET_MS = Number(process.env.ANALYSIS_BUDGET_MS) || 45_000;
 const TEARDOWN_CACHE_TTL_SEC = 30 * 24 * 60 * 60;
 const ROLLUP_CONCURRENCY = 2;
+const TEARDOWN_CONCURRENCY = 3;
 
 /**
  * Normalised text of the rows the user sent to script context, read before a
@@ -834,8 +835,10 @@ export async function runAdTeardownStage(
   const pending = candidates.filter((a) => !current.has(a.id));
 
   let count = 0;
-  for (const asset of pending) {
-    if (deadline && Date.now() > deadline) break;
+  // A few ads at a time: one teardown is a 5–20 s vision call, and a big
+  // project has 100+ of them (free GLM calls still queue two at a time).
+  await pMap(pending, async (asset) => {
+    if (deadline && Date.now() > deadline) return;
     try {
       const evidence = await resolveEvidence(asset);
       const ownerName = asset.competitorId
@@ -912,7 +915,7 @@ export async function runAdTeardownStage(
     } catch (err) {
       console.error(`Ad teardown failed for ${asset.url}:`, err);
     }
-  }
+  }, { concurrency: TEARDOWN_CONCURRENCY });
 
   const doneIds = await prisma.adTeardown.findMany({
     where: {

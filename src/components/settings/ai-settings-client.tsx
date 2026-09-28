@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { AiSettingsView } from "@/services/settings/ai-settings-view";
 import type { Capability, ProviderType } from "@/services/settings/ai-settings-core";
+import { VisionModelPicker } from "./vision-model-picker";
 
 const CAPABILITY_COPY: Record<Capability, { title: string; hint: string }> = {
   text: { title: "Text", hint: "Research analysis, scripts, storyboards — every JSON completion." },
@@ -199,6 +200,7 @@ export function AiSettingsClient({ initial }: { initial: AiSettingsView }) {
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{CAPABILITY_COPY[cap].title}</p>
                   <p className="text-[11px] text-muted-foreground">{CAPABILITY_COPY[cap].hint}</p>
+                  {cap === "vision" && <VisionModelPicker className="mt-2" onSaved={refresh} />}
                   {current?.disabledReason && current.value !== "auto" && (
                     <p className="mt-0.5 text-[11px] text-[var(--status-attention-fg)]">
                       Saved choice is unavailable ({current.disabledReason}) — calls fall back automatically.
