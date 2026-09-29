@@ -21,7 +21,15 @@ describe("freeRunRefusal", () => {
   it("only lets free server renders through", () => {
     expect(freeRunRefusal({ executor: "glm", creditsEstimated: 0, status: "awaiting_approval" }, true)).toBeNull();
     expect(freeRunRefusal({ executor: "glm", creditsEstimated: 12, status: "awaiting_approval" }, true)).toMatch(/credits/);
-    expect(freeRunRefusal({ executor: "libtv", creditsEstimated: 0, status: "awaiting_approval" }, false)).toMatch(/Only free/);
+    expect(freeRunRefusal({ executor: "libtv", creditsEstimated: 0, status: "awaiting_approval" }, false)).toMatch(/Only server/);
+  });
+
+  it("lets a paid server render through only with allowPaid and a covering cap", () => {
+    const run = { executor: "matrix", creditsEstimated: 190, status: "awaiting_approval" };
+    expect(freeRunRefusal(run, true, { allowPaid: true })).toMatch(/creditCap/);
+    expect(freeRunRefusal(run, true, { allowPaid: true, creditCap: 150 })).toMatch(/creditCap/);
+    expect(freeRunRefusal(run, true, { allowPaid: true, creditCap: 200 })).toBeNull();
+    expect(freeRunRefusal(run, true, { creditCap: 200 })).toMatch(/allowPaid/);
   });
 });
 

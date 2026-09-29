@@ -1,8 +1,9 @@
 /**
  * Operator actions for /api/worker/operator: the same steps a user takes in
  * the Studio (approve a storyboard's frames, compile a render, approve it),
- * callable with the worker token when no browser is available. They can only
- * start free renders — a run that would spend credits is refused.
+ * callable with the worker token when no browser is available. A run that
+ * spends money is refused unless the call carries allowPaid and a creditCap
+ * covering its estimate (only on the user's explicit go-ahead).
  */
 import { z } from "zod";
 import { appendFrameHistory } from "@/services/creative-library";
@@ -18,8 +19,20 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     videoModel: z.string().min(1),
     clipDurationSec: z.number().int().positive().max(20).optional(),
     aspectRatio: z.enum(["9:16", "16:9", "1:1", "4:5", "4:3", "3:4"]).optional(),
+    budgetMode: z.enum(["economy", "full"]).optional(),
+    allowOverBudget: z.boolean().optional(),
   }),
-  z.object({ action: z.literal("approve-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
+  z.object({
+    action: z.literal("approve-run"),
+    projectId: z.string().min(1),
+    runId: z.string().min(1),
+    /**
+     * Spend on a paid server render (Matrix, paid Zhipu). Only with the user's
+     * explicit go-ahead for this run, and never above `creditCap`.
+     */
+    allowPaid: z.boolean().optional(),
+    creditCap: z.number().int().positive().optional(),
+  }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;
@@ -41,8 +54,17 @@ export function approveAllFrames(
 }
 
 /** Why the operator may not approve this run, or null when it's a free server render. */
-export function freeRunRefusal(run: { executor: string | null; creditsEstimated: number; status: string }, isServerEngine: boolean): string | null {
-  if (!isServerEngine) return `Only free server renders can be approved here (executor ${run.executor ?? "none"}) — approve LibTV runs in the Studio.`;
-  if (run.creditsEstimated > 0) return `This run is estimated at ${run.creditsEstimated} credits — approve it in the Studio.`;
+export function freeRunRefusal(
+  run: { executor: string | null; creditsEstimated: number; status: string },
+  isServerEngine: boolean,
+  paid: { allowPaid?: boolean; creditCap?: number } = {}
+): string | null {
+  if (!isServerEngine) return `Only server renders can be approved here (executor ${run.executor ?? "none"}) — approve LibTV runs in the Studio.`;
+  if (run.creditsEstimated > 0) {
+    if (!paid.allowPaid) return `This run is estimated at ${run.creditsEstimated} credits — approve it in the Studio, or pass allowPaid with a creditCap.`;
+    if (!paid.creditCap || paid.creditCap < run.creditsEstimated) {
+      return `This run is estimated at ${run.creditsEstimated} credits — a creditCap of at least that is required.`;
+    }
+  }
   return null;
 }

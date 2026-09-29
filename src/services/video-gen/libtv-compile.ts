@@ -41,6 +41,7 @@ import {
 import { isStrictFree } from "@/lib/cost-mode";
 import { isComfyConfigured } from "@/services/ai/comfyui";
 import { isZhipuConfigured } from "@/services/ai/zhipu";
+import { isMatrixConfigured } from "@/services/ai/matrix";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { videoDefaults } from "@/services/settings/ai-settings-core";
 
@@ -264,7 +265,7 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
   // bring-your-own paid video models); strict free mode defaults to — and only
   // renders with — the free GLM models.
   const snap = await loadAiSettings();
-  const defaults = videoDefaults(snap.settings.video, isStrictFree(), snap.providers, { comfyAvailable: isComfyConfigured(), glmAvailable: isZhipuConfigured() });
+  const defaults = videoDefaults(snap.settings.video, isStrictFree(), snap.providers, { comfyAvailable: isComfyConfigured(), glmAvailable: isZhipuConfigured(), matrixAvailable: isMatrixConfigured() });
   const {
     projectId,
     storyboardId,
@@ -284,6 +285,9 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
   }
   if (executor === "glm" && !isZhipuConfigured()) {
     throw new LibtvCompileError("The free GLM engine needs a Zhipu key — set ZHIPU_API_KEY (bigmodel.cn) and redeploy.", 409);
+  }
+  if (executor === "matrix" && !isMatrixConfigured()) {
+    throw new LibtvCompileError("The Matrix engine needs a key — set MATRIX_API_KEY (mzsjai.com) and redeploy.", 409);
   }
   if (executor === "comfyui" && !isComfyConfigured()) {
     throw new LibtvCompileError("ComfyUI is not configured — set COMFYUI_URL to your GPU node (see docs/comfyui-node.md).", 409);

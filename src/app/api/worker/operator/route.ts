@@ -3,12 +3,12 @@
  * for the operator's tooling when no browser session is available.
  *
  * Auth: header `x-worker-token` vs env WORKER_TOKEN (exempt from Access like
- * the other /api/worker routes). Only free server renders can be approved
- * here; anything that spends credits is refused and stays a Studio action.
+ * the other /api/worker routes). A paid server render needs allowPaid and a
+ * creditCap covering its estimate; LibTV runs stay a Studio action.
  *
  * POST { action: "approve-frames", projectId, storyboardId }
  * POST { action: "compile-run", projectId, storyboardId, scriptId?, imageModel, videoModel, clipDurationSec?, aspectRatio? }
- * POST { action: "approve-run", projectId, runId }
+ * POST { action: "approve-run", projectId, runId, allowPaid?, creditCap? }
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -82,6 +82,8 @@ export async function POST(request: Request) {
         videoModel: input.videoModel,
         clipDurationSec: input.clipDurationSec,
         aspectRatio: input.aspectRatio,
+        budgetMode: input.budgetMode,
+        allowOverBudget: input.allowOverBudget === true,
       });
       return NextResponse.json(
         { runId: result.runId, creditsEstimated: result.creditsEstimated, jobCount: result.jobCount },
@@ -101,9 +103,9 @@ export async function POST(request: Request) {
   if (!existing || existing.projectId !== input.projectId) {
     return NextResponse.json({ error: "Run not found" }, { status: 404 });
   }
-  const refusal = freeRunRefusal(existing, isServerEngine(existing.executor));
+  const refusal = freeRunRefusal(existing, isServerEngine(existing.executor), input);
   if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
-  const run = await approveRun(input.runId, null);
+  const run = await approveRun(input.runId, existing.creditsEstimated > 0 ? (input.creditCap ?? null) : null);
   if (!run) {
     return NextResponse.json({ error: `Run cannot be approved from status "${existing.status}"` }, { status: 409 });
   }

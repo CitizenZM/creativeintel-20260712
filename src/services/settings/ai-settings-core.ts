@@ -13,6 +13,8 @@ import {
   DEFAULT_VIDEO_MODEL,
   GLM_IMAGE_MODEL,
   GLM_VIDEO_MODEL,
+  MATRIX_IMAGE_MODEL,
+  MATRIX_VIDEO_MODEL,
 } from "@/services/video-gen/libtv-pricing";
 
 export const CAPABILITIES = ["text", "vision", "image", "video"] as const;
@@ -33,7 +35,7 @@ export const BUILTIN_ENGINES: Record<Capability, string[]> = {
   text: ["glm", "openai", "gemini", "anthropic", "openrouter"],
   vision: ["glm", "openai", "gemini", "anthropic", "openrouter"],
   image: ["glm", "openai", "fal", "pollinations"],
-  video: ["glm", "comfyui", "animatic", "libtv"],
+  video: ["glm", "comfyui", "animatic", "matrix", "libtv"],
 };
 
 /** Engines that never cost money (ComfyUI is the operator's own GPU: 0 credits). */
@@ -64,6 +66,7 @@ const ENGINE_LABELS: Record<Capability, Record<string, string>> = {
     glm: "Zhipu CogVideoX-Flash (free, server-side)",
     comfyui: "ComfyUI (your own GPU node)",
     animatic: "Free animatic (Pollinations stills + zoom/pan, no key)",
+    matrix: "Matrix — Seedance 2.x + Qwen-Image (paid, server-side)",
     libtv: "LibTV (credits, local worker)",
   },
 };
@@ -77,6 +80,7 @@ const ENGINE_ENV: Record<string, string[]> = {
   openrouter: ["OPENROUTER_API_KEY"],
   fal: ["FAL_KEY"],
   comfyui: ["COMFYUI_URL"],
+  matrix: ["MATRIX_API_KEY"],
 };
 
 export interface AiEngineSettings {
@@ -307,13 +311,14 @@ export function videoDefaults(
   choice: string,
   strictFree: boolean,
   providers: CustomProviderInfo[],
-  opts: { comfyAvailable?: boolean; glmAvailable?: boolean } = {}
+  opts: { comfyAvailable?: boolean; glmAvailable?: boolean; matrixAvailable?: boolean } = {}
 ): { imageModel: string; videoModel: string } {
   const glmAvailable = opts.glmAvailable ?? true;
   const glm = { imageModel: GLM_IMAGE_MODEL, videoModel: GLM_VIDEO_MODEL };
   const animatic = { imageModel: ANIMATIC_IMAGE_MODEL, videoModel: ANIMATIC_VIDEO_MODEL };
   if (choice === "comfyui" && opts.comfyAvailable) return { imageModel: COMFY_IMAGE_MODEL, videoModel: COMFY_VIDEO_MODEL };
   if (choice === "animatic") return animatic;
+  if (choice === "matrix" && opts.matrixAvailable && !strictFree) return { imageModel: MATRIX_IMAGE_MODEL, videoModel: MATRIX_VIDEO_MODEL };
   // GLM without its key can't render — the keyless animatic is the free fallback.
   if (strictFree || choice === "glm") return glmAvailable ? glm : animatic;
   if (choice.startsWith(CUSTOM_PREFIX)) {
