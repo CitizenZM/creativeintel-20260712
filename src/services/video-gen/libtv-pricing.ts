@@ -21,10 +21,10 @@ export interface LibtvVideoPrice {
  * Which executor renders a model: LibTV (credits, Mac worker), Zhipu GLM (free
  * cloud, server-side) or ComfyUI (self-hosted GPU, server-side, free per clip).
  */
-export type RenderEngine = "libtv" | "glm" | "comfyui" | "animatic";
+export type RenderEngine = "libtv" | "glm" | "comfyui" | "animatic" | "matrix";
 
 /** Engines the Next.js server drives itself (server-executor.ts), never the Mac worker. */
-export const SERVER_ENGINES = ["glm", "comfyui", "animatic"] as const;
+export const SERVER_ENGINES = ["glm", "comfyui", "animatic", "matrix"] as const;
 export type ServerEngine = (typeof SERVER_ENGINES)[number];
 
 export function isServerEngine(engine: string | null | undefined): engine is ServerEngine {
@@ -35,6 +35,7 @@ export function engineLabel(engine: string | null | undefined): string {
   if (engine === "glm") return "GLM (free)";
   if (engine === "comfyui") return "ComfyUI (self-hosted)";
   if (engine === "animatic") return "Animatic (free, no key)";
+  if (engine === "matrix") return "Matrix (Seedance, paid)";
   return "LibTV";
 }
 
@@ -50,6 +51,8 @@ export interface LibtvImageModel {
   settingsKeys: string[];
   verified: boolean;
   note?: string;
+  /** Model id on the Matrix gateway (engine "matrix"). */
+  matrixModel?: string;
 }
 
 export interface LibtvVideoModel {
@@ -67,6 +70,8 @@ export interface LibtvVideoModel {
   zhipuModel?: string;
   /** The ModelProvider whose key renders it. */
   providerId?: string;
+  /** Model id on the Matrix gateway (engine "matrix"); credits are US cents. */
+  matrixModel?: string;
 }
 
 export type LibtvModel = LibtvImageModel | LibtvVideoModel;
@@ -133,6 +138,34 @@ export const IMAGE_MODELS: LibtvImageModel[] = [
     settingsKeys: ["modeType", "ratio"],
     verified: false,
     note: "Free keyframes from Pollinations (Flux) — no key, no credits. Pairs with the free animatic clips.",
+  },
+  {
+    name: "Qwen-Image (Matrix)",
+    engine: "matrix",
+    matrixModel: "qwen/qwen-image",
+    modality: "image",
+    modeType: "text2image",
+    creditsPerImage: 2,
+    quality: "928x1664",
+    qualityKey: "quality",
+    ratios: ["9:16", "16:9", "1:1", "3:4", "4:3"],
+    settingsKeys: ["modeType", "ratio"],
+    verified: false,
+    note: "Photoreal stills with natural faces and hands (~55 s each) on your Matrix key — about 2¢ an image (estimate, US cents). Runs on Matrix gift credit too.",
+  },
+  {
+    name: "Seedream 4.5 (Matrix)",
+    engine: "matrix",
+    matrixModel: "doubao/seedream-4.5",
+    modality: "image",
+    modeType: "text2image",
+    creditsPerImage: 4,
+    quality: "928x1664",
+    qualityKey: "quality",
+    ratios: ["9:16", "16:9", "1:1", "3:4", "4:3"],
+    settingsKeys: ["modeType", "ratio"],
+    verified: false,
+    note: "ByteDance Seedream 4.5 on your Matrix key — about 4¢ an image (estimate). Needs Matrix paid quota.",
   },
   {
     name: "ComfyUI Image (self-hosted)",
@@ -251,6 +284,60 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     note: "Zhipu free image-to-video, rendered on the server — 0 credits, watermarked.",
   },
   {
+    name: "Seedance 2.0 Fast 720p (Matrix)",
+    engine: "matrix",
+    matrixModel: "doubao/seedance-2.0-fast-720p",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [
+      { durationSec: 5, resolution: "720P", credits: 25 },
+      { durationSec: 6, resolution: "720P", credits: 30 },
+      { durationSec: 8, resolution: "720P", credits: 40 },
+      { durationSec: 10, resolution: "720P", credits: 50 },
+    ],
+    defaultDurationSec: 5,
+    defaultResolution: "720P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: false,
+    note: "ByteDance Seedance 2.0 Fast image-to-video on your Matrix key: real motion, stable faces, no watermark. About 25¢ per 5 s clip (estimate, US cents). Needs Matrix paid quota.",
+  },
+  {
+    name: "Seedance 2.0 Pro 1080p (Matrix)",
+    engine: "matrix",
+    matrixModel: "doubao/seedance-2.0-pro-1080p",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [
+      { durationSec: 5, resolution: "1080P", credits: 70 },
+      { durationSec: 6, resolution: "1080P", credits: 84 },
+      { durationSec: 8, resolution: "1080P", credits: 112 },
+      { durationSec: 10, resolution: "1080P", credits: 140 },
+    ],
+    defaultDurationSec: 5,
+    defaultResolution: "1080P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: false,
+    note: "Seedance 2.0 Pro at 1080p — the production tier. About 70¢ per 5 s clip (estimate, US cents). Needs Matrix paid quota.",
+  },
+  {
+    name: "Seedance 2.5 Pro 1080p (Matrix)",
+    engine: "matrix",
+    matrixModel: "doubao/seedance-2.5-pro-1080p",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [
+      { durationSec: 5, resolution: "1080P", credits: 90 },
+      { durationSec: 6, resolution: "1080P", credits: 108 },
+      { durationSec: 8, resolution: "1080P", credits: 144 },
+      { durationSec: 10, resolution: "1080P", credits: 180 },
+    ],
+    defaultDurationSec: 5,
+    defaultResolution: "1080P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: false,
+    note: "Seedance 2.5 Pro at 1080p — newest, best motion and prompt adherence. About 90¢ per 5 s clip (estimate, US cents). Needs Matrix paid quota.",
+  },
+  {
     name: "Free Animatic (zoom & pan)",
     engine: "animatic",
     modality: "video",
@@ -294,6 +381,9 @@ export const ANIMATIC_VIDEO_MODEL = "Free Animatic (zoom & pan)";
 
 export const COMFY_IMAGE_MODEL = "ComfyUI Image (self-hosted)";
 export const COMFY_VIDEO_MODEL = "ComfyUI Video (self-hosted)";
+
+export const MATRIX_IMAGE_MODEL = "Qwen-Image (Matrix)";
+export const MATRIX_VIDEO_MODEL = "Seedance 2.0 Fast 720p (Matrix)";
 
 /** The engine a run needs: the video model decides (GLM / ComfyUI models carry their engine). */
 export function engineFor(videoModel: string): RenderEngine {
@@ -403,6 +493,7 @@ export function imageSettings(
   settings[model.qualityKey] = model.quality;
   if (model.settingsKeys.includes("count")) settings.count = opts.count ?? 1;
   if (model.qualityKey === "resolution" && model.settingsKeys.includes("quality")) settings.quality = "high";
+  if (model.matrixModel) settings.matrixModel = model.matrixModel;
   return settings;
 }
 
@@ -416,6 +507,7 @@ export function videoSettings(
   if (model.settingsKeys.includes("resolution")) settings.resolution = price.resolution;
   if (model.zhipuModel) settings.zhipuModel = model.zhipuModel;
   if (model.providerId) settings.providerId = model.providerId;
+  if (model.matrixModel) settings.matrixModel = model.matrixModel;
   return settings;
 }
 
@@ -600,6 +692,7 @@ export function modelOptions(
     if (engine === "comfyui" && !comfyAvailable) return false;
     // Without a Zhipu key a GLM run compiles, then fails on its first job.
     if (engine === "glm" && !glmAvailable) return false;
+    if (engine === "matrix" && !process.env.MATRIX_API_KEY) return false;
     return freeOnly ? engine === "glm" || engine === "comfyui" || engine === "animatic" : true;
   };
   const images = IMAGE_MODELS.filter((m) => offered(m.engine));
@@ -609,7 +702,7 @@ export function modelOptions(
       name: m.name,
       modality: "image" as const,
       credits: m.creditsPerImage,
-      unit: `credits / ${m.quality} image`,
+      unit: m.matrixModel ? `US¢ / ${m.quality} image (Matrix bill, est.)` : `credits / ${m.quality} image`,
       verified: m.verified,
       note: m.note,
       engine: m.engine ?? ("libtv" as const),
@@ -623,6 +716,8 @@ export function modelOptions(
         credits: price.credits,
         unit: m.zhipuModel
           ? `US¢ / ${price.durationSec}s clip (Zhipu bill)`
+          : m.matrixModel
+          ? `US¢ / ${price.durationSec}s ${price.resolution} clip (Matrix bill, est.)`
           : `credits / ${price.durationSec}s ${price.resolution}`,
         verified: m.verified,
         note: m.note,

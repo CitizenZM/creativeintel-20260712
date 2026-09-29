@@ -65,6 +65,12 @@ const TERMINAL_JOB = new Set(["completed", "skipped", "failed"]);
 export const NO_TEXT_IMAGE = "No text, letters, words, numbers, logos, signage or watermarks anywhere in the image.";
 export const NO_TEXT_VIDEO = "No text, letters, logos or signage appear.";
 
+/**
+ * Engines whose image-to-video warps faces (the free CogVideoX, small local
+ * models). Seedance on Matrix keeps faces stable, so its clips always move.
+ */
+const FACE_SAFE_ENGINES = new Set<string>(["glm", "comfyui"]);
+
 /** People in the clip or its keyframe → hold it as a still (FACE_SAFE_MOTION=off disables). */
 export function faceSafe(clipPrompt: string, keyframePrompt?: string | null): boolean {
   if (process.env.FACE_SAFE_MOTION === "off") return false;
@@ -214,7 +220,7 @@ export async function tickRun(
     if (!(await claimJob(j.id))) continue;
     // Free video models warp faces the moment people move: hold people shots on
     // their (sharp) keyframe with a slow zoom, and give AI motion to the rest.
-    if (adapter.engine !== "animatic" && imageUrl && faceSafe(j.prompt, ref?.prompt)) {
+    if (FACE_SAFE_ENGINES.has(adapter.engine) && imageUrl && faceSafe(j.prompt, ref?.prompt)) {
       try {
         const { animateStill } = await import("./animatic-executor");
         await jobDone({ jobId: j.id, resultUrl: await animateStill(imageUrl, ctxFor(j)), creditsSpent: 0 });
