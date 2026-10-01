@@ -748,6 +748,9 @@ export function LibtvRunPanel({
                 {activeRun.isFinal ? "Final version" : "Mark as final"}
               </Button>
             )}
+            {activeRun.qcReport && (
+              <QcCard qc={activeRun.qcReport} />
+            )}
             {["completed", "failed", "cancelled"].includes(activeRun.status) && (
               <Button
                 onClick={() => setShowRerender((v) => !v)}
@@ -830,5 +833,33 @@ export function LibtvRunPanel({
         </div>
       )}
     </div>
+  );
+}
+
+/** The master's measured QC: pace, beat sync, stills, captions, end card, loudness. */
+function QcCard({ qc }: { qc: NonNullable<LibtvRunView["qcReport"]> }) {
+  const misses = qc.checks.filter((c) => !c.pass);
+  const ok = misses.length === 0;
+  return (
+    <details className="basis-full rounded-md border border-border px-3 py-2 text-xs" data-testid="qc-report">
+      <summary className="cursor-pointer select-none">
+        <span className={ok ? "font-medium text-[var(--status-healthy-fg)]" : "font-medium"}>
+          QC {qc.passed}/{qc.total} checks passed
+        </span>
+        {!ok && <span className="text-muted-foreground"> — {misses.map((m) => m.label).join(" · ")}</span>}
+      </summary>
+      <table className="mt-2 w-full text-left">
+        <tbody>
+          {qc.checks.map((c) => (
+            <tr key={c.key} className="border-t border-border/60">
+              <td className="py-1 pr-2">{c.pass ? "✓" : "✗"}</td>
+              <td className="py-1 pr-2">{c.label}</td>
+              <td className="py-1 pr-2 num">{c.value ?? "—"}</td>
+              <td className="py-1 text-muted-foreground">{c.target}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
   );
 }

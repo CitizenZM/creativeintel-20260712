@@ -1,5 +1,6 @@
 "use client";
 
+import { scoreScriptAttention } from "@/lib/attention-blueprint";
 import { useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -263,6 +264,10 @@ export function ScriptCard({
   const cta = script.cta ?? null;
   const structured = Boolean(hook?.text || beats.length || cta?.text);
 
+  const attention = structured
+    ? scoreScriptAttention({ totalDurationSec: script.totalDurationSec, hook, body: beats, cta })
+    : null;
+  const attentionMisses = attention?.checks.filter((c) => !c.pass) ?? [];
   const hookDur = Math.max(1, Math.round(hook?.durationSec ?? 3));
   const ctaDur = Math.max(1, Math.round(cta?.durationSec ?? 3));
   const ctaStart = Math.max(hookDur, total - ctaDur);
@@ -318,6 +323,14 @@ export function ScriptCard({
             )}
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            {attention && (
+              <div className="text-right" title="Attention score: how closely the pacing follows the hook / payoff / re-hook / CTA blueprint">
+                <span className={`text-lg font-semibold num ${attention.score >= 80 ? "text-[var(--status-healthy-fg)]" : attention.score >= 60 ? "" : "text-[var(--status-urgent-fg)]"}`}>
+                  {attention.score}
+                </span>
+                <p className="text-[10px] text-muted-foreground">attention</p>
+              </div>
+            )}
             <div className="text-right">
               <span className="text-lg font-semibold num">{script.predictedScore}</span>
               <p className="text-[10px] text-muted-foreground">predicted</p>
@@ -352,6 +365,20 @@ export function ScriptCard({
       {expanded && (
         <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
           <ScriptPicks projectId={projectId} script={script} castOptions={castOptions} />
+          {attention && attentionMisses.length > 0 && (
+            <div className="rounded-md border border-dashed border-border px-3 py-2 text-xs" data-testid="attention-fixes">
+              <p className="font-medium">
+                Attention {attention.score}/100 — fix before producing:
+              </p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
+                {attentionMisses.map((c) => (
+                  <li key={c.key}>
+                    <span className="text-foreground">{c.label}:</span> {c.fix}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {structured ? (
             <div className="space-y-3">
               {/* HOOK */}

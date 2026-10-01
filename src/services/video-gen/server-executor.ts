@@ -86,7 +86,8 @@ export function withNoText(prompt: string, kind: "image" | "video"): string {
  * starts with this much of the invocation's budget left, so a function limit can
  * never kill it half-way; a fresh invocation (the status poll) picks it up.
  */
-export const ASSEMBLY_RESERVE_MS = 150_000;
+// Edit engine v2 (shots, music, captions, QC, preview) takes ~2–3 min on Vercel.
+export const ASSEMBLY_RESERVE_MS = 220_000;
 /** An "assembling" run untouched this long was killed mid-assembly: assemble again. */
 export const STALE_ASSEMBLY_MS = 6 * 60_000;
 const ACTIVE_RUN = ["approved", "claimed", "running", "assembling"];
