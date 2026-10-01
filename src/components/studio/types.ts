@@ -48,6 +48,12 @@ export interface LibtvRunView {
   parentRunId?: string | null;
   previewMp4Url: string | null;
   contactSheetUrl: string | null;
+  /** Measured QC of the master (edit engine v2), when the server assembled it. */
+  qcReport?: {
+    passed: number;
+    total: number;
+    checks: { key: string; label: string; value: number | null; target: string; pass: boolean }[];
+  } | null;
   error: string | null;
   workerId: string | null;
   createdAt: string;
