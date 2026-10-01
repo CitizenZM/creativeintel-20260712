@@ -13,6 +13,7 @@
  * POST { action: "render-variant", projectId, runId, hookStyle: q|c|p, hookText? } — A/B hook variant
  * POST { action: "render-export", projectId, runId, format: 4:5|1:1|16:9|15s|10s } — delivery format
  * POST { action: "director-review", projectId, runId } — AI director sign-off of the master
+ * POST { action: "save-structure", projectId, teardownId } / { action: "choose-structure", projectId, structureId|null }
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -129,6 +130,27 @@ export async function POST(request: Request) {
       creditsSpent: run.creditsSpent,
     });
     return NextResponse.json({ ok: true, run: summarize((await getRunWithJobs(run.id))!), qc: master.qcReport ?? null });
+  }
+
+  if (input.action === "save-structure") {
+    try {
+      const { saveStructureFromTeardown } = await import("@/services/structures");
+      return NextResponse.json({ ok: true, structure: await saveStructureFromTeardown(input.projectId, input.teardownId) });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
+    }
+  }
+
+  if (input.action === "choose-structure") {
+    if (input.structureId && !(await prisma.adStructure.findUnique({ where: { id: input.structureId }, select: { id: true } }))) {
+      return NextResponse.json({ error: "Structure not found" }, { status: 404 });
+    }
+    await prisma.campaignSelection.upsert({
+      where: { projectId: input.projectId },
+      create: { projectId: input.projectId, structureId: input.structureId },
+      update: { structureId: input.structureId },
+    });
+    return NextResponse.json({ ok: true, structureId: input.structureId });
   }
 
   if (input.action === "director-review") {
