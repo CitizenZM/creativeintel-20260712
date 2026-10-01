@@ -59,6 +59,17 @@ export function shotFilter(shot: Shot, canvas: Canvas, beatSec = 0.5): string {
 function shotBaseFilter(shot: Shot, canvas: Canvas): string {
   const { w, h } = canvas;
   const dur = Math.max(0.1, shot.frames / FPS);
+  if (shot.kind === "clip" && w > h) {
+    // Vertical footage in a landscape export: fit the height over a blurred fill
+    // (cover-cropping 9:16 into 16:9 would leave a face fragment).
+    const z = Math.min(shot.zoom, 1.08);
+    return [
+      `[0:v]fps=${FPS},tpad=stop_mode=clone:stop_duration=5,split=2[bg][fg]`,
+      `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=40:2,eq=brightness=-0.08[bgb]`,
+      `[fg]scale=-2:${Math.round((h * z) / 2) * 2}[fgs]`,
+      `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v]`,
+    ].join(";");
+  }
   if (shot.kind === "clip") {
     const z = shot.zoom;
     return [

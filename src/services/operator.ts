@@ -24,6 +24,12 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({ action: z.literal("reassemble-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({
+    action: z.literal("render-export"),
+    projectId: z.string().min(1),
+    runId: z.string().min(1),
+    format: z.enum(["4:5", "1:1", "16:9", "15s", "10s"]),
+  }),
+  z.object({
     action: z.literal("render-variant"),
     projectId: z.string().min(1),
     runId: z.string().min(1),

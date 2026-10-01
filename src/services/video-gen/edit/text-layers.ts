@@ -17,6 +17,9 @@ export const HIGHLIGHT = "#FFD400";
 
 type Canvas = { w: number; h: number };
 
+/** Type scales with the frame's short side, so 4:5 / 1:1 / 16:9 exports read like the 9:16 master. */
+const unit = (c: Canvas) => Math.min(c.w, c.h);
+
 async function sharpLib() {
   return (await import("sharp")).default;
 }
@@ -60,7 +63,7 @@ async function shadowed(markup: string, plainMarkup: string, opts: { family: str
 
 /** One state of a kinetic caption: the group's words, word `active` highlighted. */
 export function kineticCaptionPng(words: string[], active: number, canvas: Canvas): Promise<Buffer> {
-  const size = Math.round(canvas.w * 0.074);
+  const size = Math.round(unit(canvas) * 0.074);
   const markup = words
     .map((w, i) => `<span foreground="${i === active ? HIGHLIGHT : "white"}">${pangoEscape(w.toUpperCase())}</span>`)
     .join(" ");
@@ -70,7 +73,7 @@ export function kineticCaptionPng(words: string[], active: number, canvas: Canva
 
 /** The hook headline: big Anton, last word highlighted. */
 export function hookHeadlinePng(text: string, canvas: Canvas): Promise<Buffer> {
-  const size = Math.round(canvas.w * 0.092);
+  const size = Math.round(unit(canvas) * 0.092);
   const w = text.trim().split(/\s+/);
   const last = w.pop() ?? "";
   const markup = `<span foreground="white">${pangoEscape(w.join(" ").toUpperCase())}</span>${w.length ? " " : ""}<span foreground="${HIGHLIGHT}">${pangoEscape(last.toUpperCase())}</span>`;
@@ -102,15 +105,15 @@ async function pill(text: string, canvas: Canvas, style: { size: number; fg: str
 
 /** A short claim ("2,100+ dimming zones"): white on a translucent dark pill. */
 export function claimChipPng(text: string, canvas: Canvas): Promise<Buffer> {
-  return pill(text, canvas, { size: Math.round(canvas.w * 0.05), fg: "white", bg: "rgba(0,0,0,0.62)", family: "Montserrat Bold", fontFile: SUBTITLE_FONT, widthPct: 0.8 });
+  return pill(text, canvas, { size: Math.round(unit(canvas) * 0.05), fg: "white", bg: "rgba(0,0,0,0.62)", family: "Montserrat Bold", fontFile: SUBTITLE_FONT, widthPct: 0.8 });
 }
 
 /** The offer on the end card: black Anton on the highlight colour. */
 export function offerCardPng(text: string, canvas: Canvas): Promise<Buffer> {
-  return pill(text.toUpperCase(), canvas, { size: Math.round(canvas.w * 0.075), fg: "#111111", bg: HIGHLIGHT, family: "Anton", fontFile: CAPTION_FONT, widthPct: 0.8 });
+  return pill(text.toUpperCase(), canvas, { size: Math.round(unit(canvas) * 0.075), fg: "#111111", bg: HIGHLIGHT, family: "Anton", fontFile: CAPTION_FONT, widthPct: 0.8 });
 }
 
 /** The CTA button that lands on a beat. */
 export function ctaButtonPng(text: string, canvas: Canvas): Promise<Buffer> {
-  return pill(`${text.toUpperCase()}  ›`, canvas, { size: Math.round(canvas.w * 0.058), fg: "white", bg: "#E4002B", family: "Montserrat Bold", fontFile: SUBTITLE_FONT, widthPct: 0.7 });
+  return pill(`${text.toUpperCase()}  ›`, canvas, { size: Math.round(unit(canvas) * 0.058), fg: "white", bg: "#E4002B", family: "Montserrat Bold", fontFile: SUBTITLE_FONT, widthPct: 0.7 });
 }

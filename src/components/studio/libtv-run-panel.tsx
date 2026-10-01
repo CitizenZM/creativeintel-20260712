@@ -182,7 +182,9 @@ export function LibtvRunPanel({
   );
 
   useEffect(() => {
-    const variantsRendering = Object.values(activeRun?.qcReport?.variantsPending ?? {}).some((t) => Date.now() - Date.parse(t) < 8 * 60_000);
+    const variantsRendering = Object.values({ ...(activeRun?.qcReport?.variantsPending ?? {}), ...(activeRun?.qcReport?.exportsPending ?? {}) }).some(
+      (t) => Date.now() - Date.parse(t) < 8 * 60_000
+    );
     const shouldPoll = !!activeRun && (isRunActive(activeRun.status) || variantsRendering);
     if (!shouldPoll) {
       if (pollTimer.current) {
@@ -769,6 +771,22 @@ export function LibtvRunPanel({
                       }
                     : undefined
                 }
+                onExport={
+                  isServerEngine(activeRun.executor) && activeRun.status === "completed"
+                    ? async (format: string) => {
+                        setBusy(`export-${format}`);
+                        setError(null);
+                        try {
+                          await post(`/api/projects/${projectId}/studio/libtv-runs/${activeRun.id}/exports`, { format });
+                          await refreshRun(activeRun.id);
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : "Could not start the export");
+                        } finally {
+                          setBusy(null);
+                        }
+                      }
+                    : undefined
+                }
               />
             )}
             {["completed", "failed", "cancelled"].includes(activeRun.status) && (
@@ -857,15 +875,22 @@ export function LibtvRunPanel({
 }
 
 /** The master's measured QC: pace, beat sync, stills, captions, end card, loudness. */
+const EXPORT_FORMATS = ["4:5", "1:1", "16:9", "15s", "10s"];
+
 function QcCard({
   qc,
   busy,
   onMakeVariants,
+  onExport,
 }: {
   qc: NonNullable<LibtvRunView["qcReport"]>;
   busy?: boolean;
   onMakeVariants?: () => void;
+  onExport?: (format: string) => void;
 }) {
+  const exportPending = Object.entries(qc.exportsPending ?? {})
+    .filter(([, t]) => Date.now() - Date.parse(t) < 8 * 60_000)
+    .map(([f]) => f);
   const misses = qc.checks.filter((c) => !c.pass);
   const ok = misses.length === 0;
   const done = new Set((qc.variants ?? []).map((v) => v.hookStyle));
@@ -909,6 +934,30 @@ function QcCard({
           <span className="text-muted-foreground">Rendering {pending.map((s) => HOOK_STYLE_LABEL[s] ?? s).join(", ")} — about 3 min each…</span>
         )}
       </div>
+      {onExport && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="export-formats">
+          <span className="font-medium">Formats:</span>
+          {EXPORT_FORMATS.map((f) => {
+            const done = qc.exports?.find((e) => e.format === f);
+            const rendering = exportPending.includes(f);
+            return done ? (
+              <a key={f} href={done.masterUrl} target="_blank" rel="noreferrer" className="rounded-md border border-border px-2 py-1 underline-offset-2 hover:underline" title={`${done.adName} · QC ${done.passed}/${done.total}`}>
+                {f} ✓
+              </a>
+            ) : (
+              <button
+                key={f}
+                type="button"
+                disabled={rendering}
+                onClick={() => onExport(f)}
+                className="rounded-md border border-dashed border-border px-2 py-1 hover:border-foreground/40 disabled:opacity-60"
+              >
+                {rendering ? `${f} rendering…` : `+ ${f}`}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {!!qc.variants?.length && (
         <div className="mt-2 space-y-1" data-testid="hook-variants">
           <p className="font-medium">Hook variants for A/B tests (same body, different first second)</p>
