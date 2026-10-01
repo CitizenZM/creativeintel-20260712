@@ -1,3 +1,4 @@
+import { timingEvidence, type TeardownTiming, type TimingEvidence } from "@/lib/attention-blueprint";
 import { prisma } from "@/lib/db";
 import { getBrandTruthForPrompts, type BrandCtaOption } from "@/services/brand-kit";
 import type {
@@ -77,6 +78,7 @@ export interface ScriptContext {
   claimsForbidden?: string[];
   deepAnalysis: DeepAnalysisBlocks;
   teardowns: TeardownHighlight[];
+  timingEvidence: TimingEvidence | null;
 }
 
 /**
@@ -143,7 +145,7 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
   const direction = creativeDirectionLine(project.goalType, campaignSel?.styleCategories);
   if (direction) nicheResearch = [direction, nicheResearch].filter(Boolean).join("\n\n").slice(0, 2800);
 
-  const teardowns = await loadTeardownHighlights(projectId);
+  const [teardowns, timing] = await Promise.all([loadTeardownHighlights(projectId), loadTimingEvidence(projectId)]);
 
   const ctaOptions = (
     Array.isArray(brandKit?.ctaOptions) ? brandKit.ctaOptions : []
@@ -211,7 +213,29 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
       environmentAnalysis: deepAnal?.environmentAnalysis ?? undefined,
     },
     teardowns,
+    timingEvidence: timing,
   };
+}
+
+/** Pace of this project's torn-down competitor ads (hook length, beat length, CTA timing, top hooks). */
+export async function loadTimingEvidence(projectId: string): Promise<TimingEvidence | null> {
+  try {
+    const rows = await prisma.adTeardown.findMany({
+      where: { projectId },
+      select: { hookType: true, beats: true, contentAsset: { select: { durationSec: true } } },
+      take: 60,
+    });
+    if (!rows.length) return null;
+    return timingEvidence(
+      rows.map((r) => ({
+        hookType: r.hookType,
+        beats: Array.isArray(r.beats) ? (r.beats as TeardownTiming["beats"]) : [],
+        durationSec: r.contentAsset?.durationSec ?? null,
+      }))
+    );
+  } catch {
+    return null;
+  }
 }
 
 /** Top competitor ad teardowns, newest/highest-ranked first. Empty when none exist. */
@@ -276,6 +300,7 @@ export function buildScriptInput(
     claimsForbidden: ctx.claimsForbidden,
     deepAnalysis: ctx.deepAnalysis,
     teardowns: ctx.teardowns,
+    timingEvidence: ctx.timingEvidence,
   };
 }
 

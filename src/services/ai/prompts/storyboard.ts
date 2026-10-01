@@ -1,3 +1,4 @@
+import { renderAttentionBlock } from "@/lib/attention-blueprint";
 import {
   computeWindows,
   sceneForWindow,
@@ -54,6 +55,8 @@ export function buildStoryboardPrompt(input: StoryboardInput) {
   const system = `You are a senior creative director and cinematographer building a shot-by-shot storyboard for a ${platform} video ad${
     input.templateName ? ` using the ${input.templateName} template` : ""
   }${input.videoType ? ` (${input.videoType})` : ""}.
+
+${renderAttentionBlock(dur)}
 
 FIXED ${FRAME_SECONDS}-SECOND GRID: output EXACTLY ${frameCount} frames, one per ${FRAME_SECONDS}-second window of the ${dur}s video. Do not merge, split, add or skip frames. Each frame's segment (HOOK / BODY / CTA) is already assigned — honour it, do not reassign it.
 

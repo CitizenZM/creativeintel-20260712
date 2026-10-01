@@ -85,7 +85,7 @@ const PLATFORM_OPTIONS = [
   { id: "amazon", label: "Amazon PDP Video", durationSec: 30, icon: "📦" },
 ];
 
-const DURATION_OPTIONS = [15, 30, 45, 60];
+const DURATION_OPTIONS = [15, 20, 30, 45, 60];
 
 function generateActorImageUrl(desc: string, role: string): string {
   const prompt = `${role} person — ${desc}. Portrait photo, lifestyle, natural expression, NOT looking at camera, modern home setting, soft natural light. Real person, authentic, UGC style. No text, no logo.`;

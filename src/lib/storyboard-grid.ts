@@ -37,8 +37,12 @@ export interface SegmentBounds {
  */
 export function segmentBounds(totalDurationSec: number, beats: BeatSplit = DEFAULT_BEATS): SegmentBounds {
   const total = Math.max(FRAME_SECONDS * 2, Math.round(totalDurationSec) || 30);
-  let hookEnd = snapToGrid((total * beats.hookPct) / 100);
-  let ctaStart = total - snapToGrid((total * beats.ctaPct) / 100);
+  // Attention caps (src/lib/attention-blueprint.ts): the hook decides whether
+  // anyone stays, so it is one frame (two for 30 s+); the end card is ≤ 4 s.
+  const hookMax = total >= 30 ? 2 * FRAME_SECONDS : FRAME_SECONDS;
+  const ctaMax = 2 * FRAME_SECONDS;
+  let hookEnd = Math.min(hookMax, snapToGrid((total * beats.hookPct) / 100));
+  let ctaStart = total - Math.min(ctaMax, snapToGrid((total * beats.ctaPct) / 100));
   if (hookEnd < FRAME_SECONDS) hookEnd = FRAME_SECONDS;
   if (total - ctaStart < FRAME_SECONDS) ctaStart = total - FRAME_SECONDS;
   ctaStart = snapToGrid(ctaStart);

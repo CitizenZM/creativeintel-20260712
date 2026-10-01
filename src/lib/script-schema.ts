@@ -6,6 +6,7 @@
 // requested total, and `renderScriptBody` flattens the structure back into the
 // legacy `Script.body` string so existing displays keep working.
 
+import { CTA_MAX_SEC, HOOK_MAX_SEC } from "./attention-blueprint";
 import { z } from "zod";
 import { isVideoType, type VideoType } from "@/services/ai/prompts/script-templates";
 
@@ -128,8 +129,9 @@ function clampInt(n: unknown, fallback: number): number {
 export function validateAndRepairDurations(script: ScriptV2, totalDurationSec: number): ScriptV2 {
   const total = Math.max(4, clampInt(totalDurationSec, 30));
 
-  let hookDur = Math.max(1, clampInt(script.hook?.durationSec, Math.round(total * 0.2)));
-  let ctaDur = Math.max(1, clampInt(script.cta?.durationSec, Math.round(total * 0.2)));
+  // Attention caps: hook ≤ 3 s, CTA ≤ 4 s, whatever the template's percentages say.
+  let hookDur = Math.min(HOOK_MAX_SEC, Math.max(1, clampInt(script.hook?.durationSec, Math.round(total * 0.2))));
+  let ctaDur = Math.min(CTA_MAX_SEC, Math.max(1, clampInt(script.cta?.durationSec, Math.round(total * 0.2))));
 
   if (hookDur + ctaDur > total - 1) {
     const budget = total - 1;
