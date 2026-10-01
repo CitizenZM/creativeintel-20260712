@@ -187,7 +187,8 @@ export function lockedEditPrompt(kind: "cast" | "product", shot: string): string
     .replace(/\s+/g, " ")
     .trim();
   const sentences = body.split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
-  const room = 420 - keep.length - 30;
+  const tail = "One single photograph of one continuous scene — no collage, split screen or panels; no text on screens or signs.";
+  const room = 430 - keep.length - tail.length - 14;
   const cut = sentences.length > room ? `${sentences.slice(0, room).replace(/\s+\S*$/, "")}.` : sentences;
-  return `${keep} New shot: ${cut} No text.`;
+  return `${keep} New shot: ${cut} ${tail}`;
 }
