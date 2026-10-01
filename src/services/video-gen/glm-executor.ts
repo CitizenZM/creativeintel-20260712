@@ -29,6 +29,11 @@ export const glmAdapter: EngineAdapter = {
   notConfiguredError: "ZHIPU_API_KEY is not configured",
 
   async generateImage(prompt, ctx) {
+    // Cast-locked Qwen keyframes (Matrix) for a free GLM run.
+    if (typeof ctx.settings?.matrixModel === "string") {
+      const { matrixKeyframe } = await import("./matrix-executor");
+      return matrixKeyframe(prompt, ctx);
+    }
     const url = await generateImagePersisted(prompt, {
       aspectRatio: ctx.aspectRatio,
       folder: `glm-runs/${ctx.runId}`,

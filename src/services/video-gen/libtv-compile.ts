@@ -23,6 +23,7 @@ import {
   DEFAULT_BUDGET_MODE,
   DEFAULT_MAX_RUN_CREDITS,
   estimateRun,
+  findImageModel,
   findVideoModel,
   framesPerClip,
   groupFrames,
@@ -42,6 +43,7 @@ import { isStrictFree } from "@/lib/cost-mode";
 import { isComfyConfigured } from "@/services/ai/comfyui";
 import { isZhipuConfigured } from "@/services/ai/zhipu";
 import { isMatrixConfigured } from "@/services/ai/matrix";
+import { hasPeople } from "./prompt-safety";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { videoDefaults } from "@/services/settings/ai-settings-core";
 
@@ -260,6 +262,34 @@ export interface CompileResult {
   maxRunCredits: number;
 }
 
+/**
+ * Cast lock: one CAST reference image of the on-camera talent, rendered first;
+ * every keyframe with a person is edited from it and every other keyframe from
+ * the real packshot, so the face and the product never change between shots.
+ */
+export function lockCast(drafts: CompiledJobDraft[], imageModel: string): void {
+  const keyframes = drafts.filter((d) => d.kind === "image" && /^K\d+$/.test(d.nodeName) && !(d.settings as { compositeLocally?: boolean }).compositeLocally);
+  const withPeople = keyframes.filter((d) => hasPeople(d.prompt ?? ""));
+  if (withPeople.length) {
+    const sample = withPeople[0];
+    drafts.unshift({
+      shotIndex: -1,
+      kind: "image",
+      nodeName: "CAST",
+      leftRefs: [],
+      prompt: `Casting reference photo of the ad's on-camera talent, exactly as described here: ${clean(sample.prompt ?? "").slice(0, 700)}. Full body, facing the camera, relaxed neutral expression, plain light-grey studio background, soft even light, photoreal.`,
+      modelName: imageModel,
+      settings: { ...(sample.settings as Record<string, unknown>), castSheet: 1, coversFrames: [], frameNumber: null },
+      sourceUrl: null,
+      creditsEstimated: imageCredits(imageModel),
+    });
+  }
+  for (const d of keyframes) {
+    d.leftRefs = withPeople.includes(d) ? ["CAST"] : ["PROD-1"];
+    d.settings = { ...(d.settings as Record<string, unknown>), editFrom: withPeople.includes(d) ? "cast" : "product" };
+  }
+}
+
 export async function compileRunFromStoryboard(input: CompileRunInput): Promise<CompileResult> {
   // Settings → AI engines picks the default render engine (and registers any
   // bring-your-own paid video models); strict free mode defaults to — and only
@@ -456,6 +486,8 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
       creditsEstimated: videoCredits(videoModel, clipDurationSec, clipResolution),
     });
   });
+
+  if (findImageModel(imageModel)?.lockCharacter) lockCast(drafts, imageModel);
 
   const estimate = estimateRun(drafts);
   const creditCeiling = maxRunCredits();
