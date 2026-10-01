@@ -23,6 +23,7 @@ import { pMap } from "@/lib/parallel";
 import { FPS } from "./beat-grid";
 import { planEdit, type EditPlan, type HookStyle, type PlanInputSegment, type Shot } from "./edit-plan";
 import { synthesizeMusic, toWav } from "./music-synth";
+import { bestWindow, motionScores } from "./motion";
 import { measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
 import { claimChipPng, ctaButtonPng, hookHeadlinePng, kineticCaptionPng, offerCardPng } from "./text-layers";
@@ -165,6 +166,30 @@ export async function renderEditV2(input: {
     hookText: input.hookText,
   });
   const total = plan.durationSec;
+
+  // 1b. Smart segments: each hook shot from a clip takes that clip's most dynamic window.
+  const motionCache = new Map<string, Awaited<ReturnType<typeof motionScores>>>();
+  let prevHook: { url: string; from: number; to: number } | null = null;
+  for (const shot of plan.shots) {
+    if (shot.segment !== "HOOK" || shot.kind !== "clip") {
+      prevHook = null;
+      continue;
+    }
+    const src = input.sources.get(shot.url);
+    if (!src) continue;
+    if (!motionCache.has(src)) motionCache.set(src, await motionScores(src).catch(() => ({ fps: 15, scores: [] })));
+    const m = motionCache.get(src)!;
+    const clipSec = m.scores.length / m.fps;
+    const len = shot.frames / FPS;
+    if (clipSec < len + 0.2) continue;
+    if (prevHook && prevHook.url === shot.url) {
+      // The punch-in continues the action instead of replaying it.
+      shot.srcFrom = prevHook.to + len <= clipSec ? prevHook.to : Math.max(0, prevHook.from - len);
+    } else {
+      shot.srcFrom = bestWindow(m.scores, m.fps, len, clipSec, shot.srcFrom);
+    }
+    prevHook = { url: shot.url, from: shot.srcFrom, to: shot.srcFrom + len };
+  }
 
   // 2. Shots, a few at a time.
   const shotFiles = await pMap(

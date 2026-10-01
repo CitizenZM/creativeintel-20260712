@@ -18,6 +18,7 @@ import { jobDone, jobFailed, runDone, runFailed } from "./libtv-queue";
 import { assembleGlmMaster, type AssembleFrame } from "./glm-assemble";
 import type { ServerEngine } from "./libtv-pricing";
 import { cleanFramePrompt, hasPeople, motionSafePrompt } from "./prompt-safety";
+import { keyframeQcEnabled, reviewKeyframe, shouldReroll } from "./keyframe-qc";
 
 export type TickResult = "idle" | "running" | "done" | "failed";
 
@@ -92,6 +93,9 @@ export function withNoText(prompt: string, kind: "image" | "video"): string {
 export const ASSEMBLY_RESERVE_MS = 220_000;
 /** An "assembling" run untouched this long was killed mid-assembly: assemble again. */
 export const STALE_ASSEMBLY_MS = 6 * 60_000;
+/** A synchronous keyframe "running" this long lost its invocation. */
+export const IMAGE_STALE_MS = 6 * 60_000;
+const MAX_IMAGE_ATTEMPTS = 3;
 const ACTIVE_RUN = ["approved", "claimed", "running", "assembling"];
 
 async function claimJob(jobId: string): Promise<boolean> {
@@ -171,6 +175,14 @@ export async function tickRun(
     if (await claimJob(j.id)) await jobDone({ jobId: j.id, resultUrl: j.sourceUrl, creditsSpent: 0 });
   }
 
+  // A synchronous keyframe whose invocation was cut off stays "running" forever:
+  // re-queue it after IMAGE_STALE_MS (fail it after MAX_IMAGE_ATTEMPTS).
+  for (const j of run.jobs.filter((x) => x.kind === "image" && x.status === "running" && !x.nodeId)) {
+    if (!j.startedAt || Date.now() - new Date(j.startedAt).getTime() < IMAGE_STALE_MS) continue;
+    if ((j.attempts ?? 0) >= MAX_IMAGE_ATTEMPTS) await jobFailed(j.id, "Keyframe generation timed out repeatedly");
+    else await prisma.libtvJob.updateMany({ where: { id: j.id, status: "running" }, data: { status: "queued" } });
+  }
+
   // Keyframes that finish asynchronously (engines with pollImage).
   if (adapter.pollImage) {
     for (const j of run.jobs.filter((x) => x.kind === "image" && x.status === "running" && x.nodeId)) {
@@ -203,8 +215,25 @@ export async function tickRun(
           return;
         }
         const out = await adapter.generateImage(withNoText(cleanFramePrompt(j.prompt), "image"), ctxFor(j));
-        if ("url" in out) await jobDone({ jobId: j.id, resultUrl: out.url, creditsSpent: 0 });
-        else await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: out.taskId } });
+        if ("url" in out) {
+          // AI keyframe QC: send a visibly broken keyframe back once before a clip is made from it.
+          const s = (j.settings ?? {}) as { qcAttempts?: number; castSheet?: unknown };
+          if (keyframeQcEnabled() && adapter.engine !== "animatic") {
+            const verdict = await reviewKeyframe(out.url, j.prompt);
+            const attempts = s.qcAttempts ?? 0;
+            if (shouldReroll(verdict, attempts)) {
+              await prisma.libtvJob.update({
+                where: { id: j.id },
+                data: { status: "queued", settings: { ...s, qcAttempts: attempts + 1, qcIssues: verdict!.issues.slice(0, 5), qcRejectedUrl: out.url } as never },
+              });
+              return;
+            }
+            if (verdict) {
+              await prisma.libtvJob.update({ where: { id: j.id }, data: { settings: { ...s, qcOk: verdict.ok, qcIssues: verdict.issues.slice(0, 5) } as never } });
+            }
+          }
+          await jobDone({ jobId: j.id, resultUrl: out.url, creditsSpent: 0 });
+        } else await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: out.taskId } });
       } catch (err) {
         await jobFailed(j.id, errorText(err));
       }
