@@ -57,6 +57,9 @@ export interface LibtvRunView {
     variants?: { hookStyle: string; hookText: string | null; masterUrl: string; previewUrl: string | null; passed: number; total: number; adName?: string }[];
     /** Hook styles rendering right now (style → ISO start time). */
     variantsPending?: Record<string, string>;
+    /** Delivery formats (4:5 / 1:1 / 16:9 / 15 s / 10 s) from the same clips. */
+    exports?: { format: string; label: string; masterUrl: string; previewUrl: string | null; durationSec: number; passed: number; total: number; adName: string }[];
+    exportsPending?: Record<string, string>;
   } | null;
   error: string | null;
   workerId: string | null;

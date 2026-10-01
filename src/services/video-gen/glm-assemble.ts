@@ -187,6 +187,7 @@ type Settings = {
 export function canvasFor(aspectRatio: string): { w: number; h: number } {
   if (aspectRatio === "16:9") return { w: 1920, h: 1080 };
   if (aspectRatio === "1:1") return { w: 1080, h: 1080 };
+  if (aspectRatio === "4:5") return { w: 1080, h: 1350 };
   return { w: 1080, h: 1920 };
 }
 
@@ -343,20 +344,31 @@ export async function assembleGlmMaster(input: {
   }
 }
 
-/** One A/B hook variant of a finished run: same clips and body, a different opening. */
-export async function renderHookVariant(input: {
+/**
+ * A new version of a finished run from the same clips (edit engine v2): an A/B
+ * hook variant, another aspect ratio (4:5 / 1:1 / 16:9, laid out natively) or
+ * a cutdown (15 s / 10 s). Nothing is generated; only the edit changes.
+ */
+export async function renderFromRun(input: {
   runId: string;
   aspectRatio: string;
   frames: AssembleFrame[];
   jobs: LibtvJob[];
-  hookStyle: "q" | "c" | "p";
+  hookStyle?: "q" | "c" | "p";
   hookText?: string | null;
+  /** Output aspect ratio (default: the run's). */
+  outputAspect?: string;
+  /** Cut the edit down to this many seconds. */
+  cutdownSec?: number;
   voice?: string;
-}): Promise<{ hookStyle: string; hookText: string | null; masterUrl: string; previewUrl: string | null; qc: QcReport }> {
-  const segments = planSegments(input.frames, input.jobs);
+  tag: string;
+}): Promise<{ hookText: string | null; masterUrl: string; previewUrl: string | null; durationSec: number; qc: QcReport }> {
+  const { cutdownFrames } = await import("./edit/cutdown");
+  const frames = input.cutdownSec ? cutdownFrames(input.frames, input.cutdownSec) : input.frames;
+  const segments = planSegments(frames, input.jobs);
   if (!segments.length) throw new Error("Nothing to assemble — no finished clips");
-  const { w, h } = canvasFor(input.aspectRatio);
-  const dir = await mkdtemp(path.join(tmpdir(), `variant-${input.runId}-`));
+  const { w, h } = canvasFor(input.outputAspect ?? input.aspectRatio);
+  const dir = await mkdtemp(path.join(tmpdir(), `version-${input.runId}-`));
   try {
     const sources = new Map<string, string>();
     let n = 0;
@@ -367,18 +379,18 @@ export async function renderHookVariant(input: {
       sources.set(seg.url, file);
     }
     const { renderEditV2 } = await import("./edit/render-v2");
-    const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText });
-    const tag = `${input.hookStyle}-${Date.now().toString(36)}`;
+    const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText });
+    const tag = `${input.tag}-${Date.now().toString(36)}`;
     const [m, p] = await Promise.all([
-      uploadBuffer({ buffer: await readFile(v.masterFile), filename: `variant-${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
-      uploadBuffer({ buffer: await readFile(v.previewFile), filename: `variant-preview-${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
+      uploadBuffer({ buffer: await readFile(v.masterFile), filename: `${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
+      uploadBuffer({ buffer: await readFile(v.previewFile), filename: `${tag}-preview-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
     ]);
-    if (m.provider === "inline") throw new Error("No asset storage configured for the variant");
+    if (m.provider === "inline") throw new Error("No asset storage configured for this version");
     return {
-      hookStyle: input.hookStyle,
       hookText: v.plan.cards.find((c) => c.role === "hook")?.text ?? null,
       masterUrl: m.url,
       previewUrl: p.provider === "inline" ? null : p.url,
+      durationSec: v.plan.durationSec,
       qc: v.qc,
     };
   } finally {
@@ -386,10 +398,20 @@ export async function renderHookVariant(input: {
   }
 }
 
-/**
- * Speak the storyboard's voiceover, mix it under the silent master and burn in
- * subtitles timed to the spoken words. Returns null when there is nothing to say.
- */
+/** One A/B hook variant of a finished run: same clips and body, a different opening. */
+export async function renderHookVariant(input: {
+  runId: string;
+  aspectRatio: string;
+  frames: AssembleFrame[];
+  jobs: LibtvJob[];
+  hookStyle: "q" | "c" | "p";
+  hookText?: string | null;
+  voice?: string;
+}): Promise<{ hookStyle: string; hookText: string | null; masterUrl: string; previewUrl: string | null; qc: QcReport }> {
+  const v = await renderFromRun({ ...input, tag: `variant-${input.hookStyle}` });
+  return { hookStyle: input.hookStyle, hookText: v.hookText, masterUrl: v.masterUrl, previewUrl: v.previewUrl, qc: v.qc };
+}
+
 export interface SpokenVoiceover {
   /** The whole voiceover as one track the length of the master. */
   voiceoverFile: string;
