@@ -304,6 +304,8 @@ export async function cloneRunForRerender(runId: string, shotIndexes: number[]):
       storyboardId: run.storyboardId,
       parentRunId: run.id,
       status: "awaiting_approval",
+      // A server-rendered run (GLM, Matrix, ComfyUI) re-renders on the same engine.
+      executor: run.executor,
       canvasUuid: run.canvasUuid,
       canvasUrl: run.canvasUrl,
       canvasName: run.canvasName,

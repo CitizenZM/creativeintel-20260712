@@ -280,7 +280,7 @@ export default async function CompetitorDetailPage({
         ) : (
           <div className="space-y-3">
             {cards.map((card) => (
-              <AdTeardownCard key={card.id} asset={card} />
+              <AdTeardownCard key={card.id} asset={card} projectId={projectId} />
             ))}
           </div>
         )}

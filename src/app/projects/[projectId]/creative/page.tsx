@@ -37,6 +37,7 @@ import { defaultTemplateBatch, getScriptTemplate } from "@/services/ai/prompts/s
 import { useJob } from "@/components/jobs/use-job";
 import { JobProgress } from "@/components/jobs/job-progress";
 import type { JobView } from "@/services/jobs";
+import { StructurePicker } from "@/components/creative/structure-picker";
 
 // A saved angle row (see prisma model Angle). Every generation is kept and
 // grouped by batchId; status "selected" marks the ones scripts are written from.
@@ -915,6 +916,8 @@ export default function CreativePage() {
             detail="Pick templates below, or just press Write scripts and a balanced batch is chosen for you. Add your own idea first if you have one."
           />
         )}
+
+        <StructurePicker projectId={projectId} />
 
         <p className="text-[11px] text-muted-foreground">
           Each script is one model call, plus a second one if it trips the compliance
