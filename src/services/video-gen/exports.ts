@@ -59,6 +59,7 @@ export async function renderExportForRun(runId: string, format: ExportFormat): P
     ]);
     const v = await renderFromRun({
       runId,
+      projectId: run.projectId,
       aspectRatio: run.aspectRatio,
       frames,
       jobs,

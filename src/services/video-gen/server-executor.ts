@@ -296,7 +296,7 @@ export async function tickRun(
   if (count !== 1) return "running"; // another tick is assembling
   try {
     const frames = await storyboardFrames(run.storyboardId);
-    const master = await assembleGlmMaster({ runId, aspectRatio: run.aspectRatio, frames, jobs: now as LibtvJob[] });
+    const master = await assembleGlmMaster({ runId, projectId: run.projectId, aspectRatio: run.aspectRatio, frames, jobs: now as LibtvJob[] });
     // Free runs spend 0; bring-your-own paid clips record their cost.
     const spent = now.reduce((sum, x) => sum + (x.creditsSpent ?? 0), 0);
     await runDone({

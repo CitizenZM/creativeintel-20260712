@@ -116,7 +116,7 @@ export async function POST(request: Request) {
     }
     const jobs = await prisma.libtvJob.findMany({ where: { runId: run.id } });
     const frames = await storyboardFrames(run.storyboardId);
-    const master = await assembleGlmMaster({ runId: run.id, aspectRatio: run.aspectRatio, frames, jobs });
+    const master = await assembleGlmMaster({ runId: run.id, projectId: run.projectId, aspectRatio: run.aspectRatio, frames, jobs });
     await runDone({
       runId: run.id,
       masterMp4Url: master.masterUrl,

@@ -26,7 +26,8 @@ import { synthesizeMusic, toWav } from "./music-synth";
 import { bestWindow, motionScores } from "./motion";
 import { measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
-import { claimChipPng, ctaButtonPng, hookHeadlinePng, kineticCaptionPng, offerCardPng } from "./text-layers";
+import { claimChipPng, ctaButtonPng, domainPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
+import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
 import { kineticGroups, timedWords, toSrt, subtitleCues, type TimedWord } from "../voiceover";
 import { speakVoiceover, type AssembleFrame, type Segment } from "../glm-assemble";
 
@@ -157,7 +158,10 @@ export async function renderEditV2(input: {
   /** A/B hook variant (only the opening shot and headline change). */
   hookStyle?: HookStyle;
   hookText?: string | null;
+  /** Brand Kit packaging (colours, fonts, logo, CTA, domain). */
+  brand?: BrandStyle;
 }): Promise<EditV2Result> {
+  const look = input.brand ?? DEFAULT_STYLE;
   if (!ffmpegPath) throw new Error("ffmpeg is not available on this server");
   const ff = ffmpegPath;
   const { dir, canvas } = input;
@@ -239,19 +243,33 @@ export async function renderEditV2(input: {
   const overlays: Overlay[] = [];
   for (const [i, win] of windows.entries()) {
     const file = path.join(dir, `v2cap${String(i).padStart(3, "0")}.png`);
-    await writeFile(file, await kineticCaptionPng(groups[win.group].map((x) => x.text), win.word, canvas));
+    await writeFile(file, await kineticCaptionPng(groups[win.group].map((x) => x.text), win.word, canvas, look));
     overlays.push({ file, startSec: win.startSec, endSec: win.endSec, y: 0.7 });
   }
   for (const [i, card] of plan.cards.entries()) {
     const file = path.join(dir, `v2card${i}.png`);
-    const png = card.role === "hook" ? await hookHeadlinePng(card.text, canvas) : card.role === "offer" ? await offerCardPng(card.text, canvas) : await claimChipPng(card.text, canvas);
+    const png = card.role === "hook" ? await hookHeadlinePng(card.text, canvas, look) : card.role === "offer" ? await offerCardPng(card.text, canvas, look) : await claimChipPng(card.text, canvas, look);
     await writeFile(file, png);
     overlays.push({ file, startSec: card.startSec, endSec: card.endSec, y: card.role === "claim" ? 0.3 : 0.22 });
   }
   if (plan.ctaButton) {
     const file = path.join(dir, "v2cta.png");
-    await writeFile(file, await ctaButtonPng(plan.ctaButton.text, canvas));
+    await writeFile(file, await ctaButtonPng(input.brand ? look.ctaText : plan.ctaButton.text, canvas, look));
     overlays.push({ file, startSec: plan.ctaButton.startSec, endSec: total, y: 0.74 });
+  }
+  // End card branding: the logo lands with the CTA, the domain under the button.
+  if (plan.ctaSec !== null) {
+    const logo = look.logoUrl ? await logoPng(look.logoUrl, canvas) : null;
+    if (logo) {
+      const file = path.join(dir, "v2logo.png");
+      await writeFile(file, logo);
+      overlays.push({ file, startSec: plan.ctaSec, endSec: total, y: 0.1 });
+    }
+    if (look.domain) {
+      const file = path.join(dir, "v2domain.png");
+      await writeFile(file, await domainPng(look.domain, canvas, look));
+      overlays.push({ file, startSec: plan.ctaButton?.startSec ?? plan.ctaSec, endSec: total, y: 0.8 });
+    }
   }
 
   const music = synthesizeMusic({ durationSec: total, bpm: plan.grid.bpm, dropSec: plan.dropSec, breakdownSec: plan.breakdownSec, ctaSec: plan.ctaSec, energy: 0.8, seed: input.runId.length });
