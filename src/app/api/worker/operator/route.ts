@@ -21,7 +21,8 @@ import { approveAllFrames, freeRunRefusal, operatorActionSchema } from "@/servic
 import { compileRunFromStoryboard, LibtvCompileError } from "@/services/video-gen/libtv-compile";
 import { isServerEngine } from "@/services/video-gen/libtv-pricing";
 import { approveRun, getRunWithJobs, runDone } from "@/services/video-gen/libtv-queue";
-import { assembleGlmMaster, renderHookVariant } from "@/services/video-gen/glm-assemble";
+import { assembleGlmMaster } from "@/services/video-gen/glm-assemble";
+import { renderVariantForRun } from "@/services/video-gen/variants";
 import { storyboardFrames } from "@/services/video-gen/server-executor";
 import { driveServerRun } from "@/services/video-gen/server-engines";
 import { loadAiSettings } from "@/services/settings/ai-settings";
@@ -129,27 +130,14 @@ export async function POST(request: Request) {
 
   if (input.action === "render-variant") {
     // An A/B hook variant from the same clips; kept on the run next to its QC.
-    const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId } });
+    const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId }, select: { id: true } });
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
-    if (!isServerEngine(run.executor) || run.status !== "completed") {
-      return NextResponse.json({ error: `Only completed server runs can get variants (status ${run.status})` }, { status: 409 });
+    try {
+      const variant = await renderVariantForRun(run.id, input.hookStyle, input.hookText);
+      return NextResponse.json({ ok: true, variant });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
     }
-    const jobs = await prisma.libtvJob.findMany({ where: { runId: run.id } });
-    const frames = await storyboardFrames(run.storyboardId);
-    const variant = await renderHookVariant({ runId: run.id, aspectRatio: run.aspectRatio, frames, jobs, hookStyle: input.hookStyle, hookText: input.hookText });
-    const qc = (run.qcReport && typeof run.qcReport === "object" ? run.qcReport : {}) as Record<string, unknown>;
-    const variants = Array.isArray(qc.variants) ? (qc.variants as unknown[]) : [];
-    const entry = {
-      hookStyle: variant.hookStyle,
-      hookText: variant.hookText,
-      masterUrl: variant.masterUrl,
-      previewUrl: variant.previewUrl,
-      passed: variant.qc.passed,
-      total: variant.qc.total,
-      createdAt: new Date().toISOString(),
-    };
-    await prisma.libtvRun.update({ where: { id: run.id }, data: { qcReport: { ...qc, variants: [...variants, entry] } as never } });
-    return NextResponse.json({ ok: true, variant: entry });
   }
 
   // approve-run: free server renders only.

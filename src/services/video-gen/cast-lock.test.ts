@@ -47,7 +47,14 @@ describe("lockCast", () => {
 
 describe("lockedEditPrompt", () => {
   it("tells the edit model to keep the identity and only change the shot", () => {
-    expect(lockedEditPrompt("cast", "He laughs on the sofa")).toMatch(/^Keep this exact person unchanged.*New shot: He laughs on the sofa$/);
+    expect(lockedEditPrompt("cast", "He laughs on the sofa")).toMatch(/^Keep this exact person unchanged.*New shot: He laughs on the sofa No text\.$/);
     expect(lockedEditPrompt("product", "On a walnut console")).toMatch(/^Keep this exact product unchanged/);
+  });
+  it("keeps edit prompts short: drops the no-text preamble and all but two sentences", () => {
+    const long = "No text, letters, words, numbers, logos, signage or watermarks anywhere in the image. The same man sits on the sofa. He lifts the remote. " + "Warm 3200K practicals, walnut console, linen curtains, shallow depth of field. ".repeat(20);
+    const p = lockedEditPrompt("cast", long);
+    expect(p.length).toBeLessThanOrEqual(430);
+    expect(p).toContain("New shot: The same man sits on the sofa. He lifts the remote.");
+    expect(p).not.toMatch(/No text, letters/);
   });
 });
