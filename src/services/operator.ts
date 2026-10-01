@@ -23,6 +23,7 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     allowOverBudget: z.boolean().optional(),
   }),
   z.object({ action: z.literal("reassemble-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
+  z.object({ action: z.literal("director-review"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({
     action: z.literal("render-export"),
     projectId: z.string().min(1),
