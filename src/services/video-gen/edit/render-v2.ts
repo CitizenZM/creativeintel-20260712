@@ -21,7 +21,7 @@ import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
 import { pMap } from "@/lib/parallel";
 import { FPS } from "./beat-grid";
-import { planEdit, type EditPlan, type PlanInputSegment, type Shot } from "./edit-plan";
+import { planEdit, type EditPlan, type HookStyle, type PlanInputSegment, type Shot } from "./edit-plan";
 import { synthesizeMusic, toWav } from "./music-synth";
 import { measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
@@ -46,7 +46,16 @@ export interface EditV2Result {
 const f3 = (n: number) => n.toFixed(3);
 
 /** Per-shot video filter: reframe a clip, or fit a still and give it a camera move. */
-export function shotFilter(shot: Shot, canvas: Canvas): string {
+export function shotFilter(shot: Shot, canvas: Canvas, beatSec = 0.5): string {
+  const base = shotBaseFilter(shot, canvas);
+  if (!shot.contrast) return base;
+  // Contrast hook: the picture sits small in a dimmed, blurred frame for the
+  // first beat, then fills the screen — the size jump is the claim.
+  const pre = base.replace(/\[v\]$/, "[pre]");
+  return `${pre};[pre]split=2[c1][c2];[c1]boxblur=30:2,eq=brightness=-0.18[cb];[c2]scale=w='2*trunc(iw*if(lt(t,${f3(beatSec)}),0.56,1)/2)':h='2*trunc(ih*if(lt(t,${f3(beatSec)}),0.56,1)/2)':eval=frame[cf];[cb][cf]overlay=(W-w)/2:(H-h)/2:eval=frame,format=yuv420p[v]`;
+}
+
+function shotBaseFilter(shot: Shot, canvas: Canvas): string {
   const { w, h } = canvas;
   const dur = Math.max(0.1, shot.frames / FPS);
   if (shot.kind === "clip") {
@@ -133,6 +142,9 @@ export async function renderEditV2(input: {
   /** Local files already downloaded for each segment URL. */
   sources: Map<string, string>;
   voice?: string;
+  /** A/B hook variant (only the opening shot and headline change). */
+  hookStyle?: HookStyle;
+  hookText?: string | null;
 }): Promise<EditV2Result> {
   if (!ffmpegPath) throw new Error("ffmpeg is not available on this server");
   const ff = ffmpegPath;
@@ -147,7 +159,11 @@ export async function renderEditV2(input: {
     segment: bySeg.get(s.frameNumber)?.segment ?? null,
     text: s.text ?? null,
   }));
-  const plan = planEdit(planInput, { voiceovers: new Map(input.frames.map((f) => [f.frameNumber, f.voiceover ?? null])) });
+  const plan = planEdit(planInput, {
+    voiceovers: new Map(input.frames.map((f) => [f.frameNumber, f.voiceover ?? null])),
+    hookStyle: input.hookStyle,
+    hookText: input.hookText,
+  });
   const total = plan.durationSec;
 
   // 2. Shots, a few at a time.
@@ -160,7 +176,7 @@ export async function renderEditV2(input: {
       const inArgs = shot.kind === "clip" ? ["-ss", f3(shot.srcFrom), "-i", src] : ["-loop", "1", "-t", f3(shot.frames / FPS + 0.5), "-i", src];
       await run(
         ff,
-        ["-y", "-v", "error", ...inArgs, "-filter_complex", shotFilter(shot, canvas), "-map", "[v]", "-frames:v", String(shot.frames), "-an", "-r", String(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", out],
+        ["-y", "-v", "error", ...inArgs, "-filter_complex", shotFilter(shot, canvas, plan.grid.period), "-map", "[v]", "-frames:v", String(shot.frames), "-an", "-r", String(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", out],
         { timeout: 90_000 }
       );
       return out;

@@ -24,6 +24,13 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({ action: z.literal("reassemble-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({
+    action: z.literal("render-variant"),
+    projectId: z.string().min(1),
+    runId: z.string().min(1),
+    hookStyle: z.enum(["q", "c", "p"]),
+    hookText: z.string().max(80).optional(),
+  }),
+  z.object({
     action: z.literal("approve-run"),
     projectId: z.string().min(1),
     runId: z.string().min(1),

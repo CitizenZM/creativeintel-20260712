@@ -53,6 +53,8 @@ export interface LibtvRunView {
     passed: number;
     total: number;
     checks: { key: string; label: string; value: number | null; target: string; pass: boolean }[];
+    /** A/B hook variants rendered from the same clips. */
+    variants?: { hookStyle: string; hookText: string | null; masterUrl: string; previewUrl: string | null; passed: number; total: number }[];
   } | null;
   error: string | null;
   workerId: string | null;
