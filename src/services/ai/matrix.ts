@@ -171,11 +171,23 @@ export async function editMatrixImage(
   return { buffer, contentType: buffer[0] === 0x89 ? "image/png" : "image/jpeg" };
 }
 
-/** Keep the reference's identity; describe only the new shot. */
+/**
+ * Keep the reference's identity; describe only the new shot. Matrix's edit
+ * endpoint rewrites the prompt and fails on long ones (measured: 240 chars ok,
+ * 1,800 → 502 prompt_rewrite_failed), so the shot is cut to its first two
+ * sentences after dropping the no-text preamble.
+ */
 export function lockedEditPrompt(kind: "cast" | "product", shot: string): string {
   const keep =
     kind === "cast"
       ? "Keep this exact person unchanged — same face, hair, skin tone, build and wardrobe."
       : "Keep this exact product unchanged — same shape, colour, proportions, screen and logo placement.";
-  return `${keep} New shot: ${shot}`.slice(0, 1800);
+  const body = shot
+    .replace(/^No text, letters[^.]*\.\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const sentences = body.split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
+  const room = 420 - keep.length - 30;
+  const cut = sentences.length > room ? `${sentences.slice(0, room).replace(/\s+\S*$/, "")}.` : sentences;
+  return `${keep} New shot: ${cut} No text.`;
 }

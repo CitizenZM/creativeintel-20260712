@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/poll-video-jobs",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/hook-variants",
+      "schedule": "2-59/5 * * * *"
     }
   ]
 }

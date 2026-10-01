@@ -182,7 +182,8 @@ export function LibtvRunPanel({
   );
 
   useEffect(() => {
-    const shouldPoll = !!activeRun && isRunActive(activeRun.status);
+    const variantsRendering = Object.values(activeRun?.qcReport?.variantsPending ?? {}).some((t) => Date.now() - Date.parse(t) < 8 * 60_000);
+    const shouldPoll = !!activeRun && (isRunActive(activeRun.status) || variantsRendering);
     if (!shouldPoll) {
       if (pollTimer.current) {
         clearInterval(pollTimer.current);
@@ -749,7 +750,26 @@ export function LibtvRunPanel({
               </Button>
             )}
             {activeRun.qcReport && (
-              <QcCard qc={activeRun.qcReport} />
+              <QcCard
+                qc={activeRun.qcReport}
+                busy={busy === "variants"}
+                onMakeVariants={
+                  isServerEngine(activeRun.executor) && activeRun.status === "completed"
+                    ? async () => {
+                        setBusy("variants");
+                        setError(null);
+                        try {
+                          await post(`/api/projects/${projectId}/studio/libtv-runs/${activeRun.id}/variants`);
+                          await refreshRun(activeRun.id);
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : "Could not start the hook variants");
+                        } finally {
+                          setBusy(null);
+                        }
+                      }
+                    : undefined
+                }
+              />
             )}
             {["completed", "failed", "cancelled"].includes(activeRun.status) && (
               <Button
@@ -837,9 +857,22 @@ export function LibtvRunPanel({
 }
 
 /** The master's measured QC: pace, beat sync, stills, captions, end card, loudness. */
-function QcCard({ qc }: { qc: NonNullable<LibtvRunView["qcReport"]> }) {
+function QcCard({
+  qc,
+  busy,
+  onMakeVariants,
+}: {
+  qc: NonNullable<LibtvRunView["qcReport"]>;
+  busy?: boolean;
+  onMakeVariants?: () => void;
+}) {
   const misses = qc.checks.filter((c) => !c.pass);
   const ok = misses.length === 0;
+  const done = new Set((qc.variants ?? []).map((v) => v.hookStyle));
+  const pending = Object.entries(qc.variantsPending ?? {})
+    .filter(([, t]) => Date.now() - Date.parse(t) < 8 * 60_000)
+    .map(([s]) => s);
+  const missing = ["c", "p"].filter((s) => !done.has(s) && !pending.includes(s));
   return (
     <details className="basis-full rounded-md border border-border px-3 py-2 text-xs" data-testid="qc-report">
       <summary className="cursor-pointer select-none">
@@ -860,6 +893,22 @@ function QcCard({ qc }: { qc: NonNullable<LibtvRunView["qcReport"]> }) {
           ))}
         </tbody>
       </table>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {onMakeVariants && missing.length > 0 && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onMakeVariants}
+            className="rounded-md border border-border px-2 py-1 font-medium hover:border-foreground/40 disabled:opacity-60"
+            data-testid="make-hook-variants"
+          >
+            {busy ? "Starting…" : `Make hook variants for A/B (${missing.map((s) => HOOK_STYLE_LABEL[s]).join(", ")})`}
+          </button>
+        )}
+        {pending.length > 0 && (
+          <span className="text-muted-foreground">Rendering {pending.map((s) => HOOK_STYLE_LABEL[s] ?? s).join(", ")} — about 3 min each…</span>
+        )}
+      </div>
       {!!qc.variants?.length && (
         <div className="mt-2 space-y-1" data-testid="hook-variants">
           <p className="font-medium">Hook variants for A/B tests (same body, different first second)</p>
@@ -872,6 +921,7 @@ function QcCard({ qc }: { qc: NonNullable<LibtvRunView["qcReport"]> }) {
                 <a href={v.previewUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">720p</a>
               )}
               <span className="text-muted-foreground">QC {v.passed}/{v.total}</span>
+              {v.adName && <code className="rounded bg-muted px-1 py-0.5 text-[10px]">{v.adName}</code>}
             </p>
           ))}
         </div>
