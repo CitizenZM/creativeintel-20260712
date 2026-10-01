@@ -51,10 +51,31 @@ export function mergeCuts(times: number[], window = 0.2): number[] {
   return out;
 }
 
+/**
+ * Cut times from ffmpeg's metadata log. A transition produces several detections
+ * a few frames apart; within 0.2 s the strongest scene change is the cut.
+ */
 export function parseCuts(metadataLog: string): number[] {
-  const times: number[] = [];
-  for (const m of metadataLog.matchAll(/pts_time:([\d.]+)/g)) times.push(Number(m[1]));
-  return mergeCuts(times.filter((t) => t > 0.05));
+  const hits: { t: number; score: number }[] = [];
+  let cur: { t: number; score: number } | null = null;
+  for (const line of metadataLog.split("\n")) {
+    const pts = /pts_time:([\d.]+)/.exec(line);
+    if (pts) {
+      cur = { t: Number(pts[1]), score: 0 };
+      hits.push(cur);
+      continue;
+    }
+    const sc = /lavfi\.scene_score=([\d.]+)/.exec(line);
+    if (sc && cur) cur.score = Number(sc[1]);
+  }
+  const clusters: { t: number; score: number }[] = [];
+  for (const h of hits.filter((x) => x.t > 0.05).sort((a, b) => a.t - b.t)) {
+    const last = clusters[clusters.length - 1];
+    if (last && h.t - last.t <= 0.2) {
+      if (h.score > last.score) Object.assign(last, h);
+    } else clusters.push({ ...h });
+  }
+  return clusters.map((c) => c.t);
 }
 
 export function parseFreezes(stderr: string): { start: number; duration: number }[] {
@@ -137,4 +158,15 @@ export async function measureMaster(file: string, dir: string): Promise<Pick<QcI
   const log = await readFile(cutsLog, "utf8").catch(() => "");
   const loud = parseLoudness(String(audio.stderr));
   return { cutsSec: parseCuts(log), freezes: parseFreezes(String(video.stderr)), loudnessLufs: loud.lufs, truePeakDb: loud.peak };
+}
+
+/** Scene-change cut times of a file (low-resolution decode). */
+export async function measureCuts(file: string, dir: string): Promise<number[]> {
+  if (!ffmpegPath) throw new Error("ffmpeg is not available");
+  const log = path.join(dir, `qc-cuts-${path.basename(file)}.txt`);
+  await run(ffmpegPath, ["-hide_banner", "-nostats", "-i", file, "-vf", `scale=270:-2,select='gt(scene,0.3)',metadata=print:file=${log}`, "-an", "-f", "null", "-"], {
+    timeout: 90_000,
+    maxBuffer: 16 * 1024 * 1024,
+  }).catch(() => null);
+  return parseCuts(await readFile(log, "utf8").catch(() => ""));
 }

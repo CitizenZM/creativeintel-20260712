@@ -17,7 +17,7 @@
  *   into the CTA  whip + whoosh, and the CTA button lands with a click
  * Transitions add light, blur or scale only — the content switch is the cut.
  */
-import { beatGrid, FPS, snapToFrame, round3, type BeatGrid } from "./beat-grid";
+import { beatGrid, beatGridFromTimes, FPS, snapToFrame, round3, type BeatGrid } from "./beat-grid";
 import type { SfxEvent } from "./sfx";
 
 export type Transition = "cut" | "flash" | "whip" | "zoom";
@@ -135,7 +135,14 @@ export function isCtaLine(text: string): boolean {
 
 export function planEdit(
   input: PlanInputSegment[],
-  opts: { bpm?: number; voiceovers?: Map<number, string | null>; hookStyle?: HookStyle; hookText?: string | null } = {}
+  opts: {
+    bpm?: number;
+    /** Beat times of a real track (seconds, already in the edit's timeline). */
+    beats?: number[];
+    voiceovers?: Map<number, string | null>;
+    hookStyle?: HookStyle;
+    hookText?: string | null;
+  } = {}
 ): EditPlan {
   if (!input.length) throw new Error("Nothing to edit");
   // Lay the storyboard segments end to end on frame-exact times.
@@ -146,7 +153,7 @@ export function planEdit(
     return { ...s, startSec: start, endSec: snapToFrame(t), segment: seg(s) };
   });
   const durationSec = laid[laid.length - 1].endSec;
-  const grid = beatGrid(durationSec, opts.bpm ?? 120);
+  const grid = opts.beats?.length ? beatGridFromTimes(opts.beats, durationSec) : beatGrid(durationSec, opts.bpm ?? 120);
   const onBeat = (x: number) => snapToFrame(grid.beats.reduce((b, c) => (Math.abs(c - x) < Math.abs(b - x) ? c : b), grid.beats[0]));
 
   const firstBody = laid.find((s) => s.segment !== "HOOK");
@@ -160,7 +167,8 @@ export function planEdit(
   const shots: Shot[] = [];
   const push = (s: (typeof laid)[number], start: number, end: number, extra: Partial<Shot>) => {
     const a = onBeat(start);
-    const b = Math.min(durationSec, onBeat(end));
+    // The last shot always runs to the end of the ad (its audio does).
+    const b = end >= durationSec - 1e-6 ? durationSec : Math.min(durationSec, onBeat(end));
     if (b - a < 1 / FPS) return;
     shots.push({
       index: shots.length,
@@ -185,18 +193,21 @@ export function planEdit(
   let bodyFrame = 0;
   for (const s of main) {
     const len = s.endSec - s.startSec;
-    const half = s.startSec + Math.round((len / 2) / grid.period) * grid.period;
+    // Split at the beat nearest the frame's middle (any tempo), never at its edges.
+    const midBeat = grid.beats.reduce((b, x) => (Math.abs(x - (s.startSec + len / 2)) < Math.abs(b - (s.startSec + len / 2)) ? x : b), s.startSec + len / 2);
+    const half = midBeat > s.startSec + 0.4 && midBeat < s.endSec - 0.4 ? midBeat : s.startSec + len / 2;
+    const splittable = len >= 1.6;
     const prev = shots[shots.length - 1];
     const sameSource = prev && prev.url === s.url;
-    if (s.segment === "HOOK" && len >= 4 * grid.period * 0.99) {
+    if (s.segment === "HOOK" && splittable) {
       // Hook: two shots per 2 s frame — wide, then a punch-in on the beat.
       push(s, s.startSec, half, { zoom: 1, motion: s.kind === "still" ? "push" : "none" });
       push(s, half, s.endSec, { zoom: 1.22, anchorY: 0.4, motion: s.kind === "still" ? "drift" : "none" });
-    } else if (s.kind === "still" && len >= 4 * grid.period * 0.99) {
+    } else if (s.kind === "still" && splittable) {
       // A still never holds for a whole frame: push, then pull from a tighter frame.
       push(s, s.startSec, half, { motion: "push" });
       push(s, half, s.endSec, { zoom: 1.15, motion: "pull", anchorY: 0.5 });
-    } else if (len >= 4 * grid.period * 0.99 && bodyFrame++ % 2 === 0) {
+    } else if (splittable && bodyFrame++ % 2 === 0) {
       // Every other body frame is cut in two (wide → punch-in) — about 1.3 s per
       // shot on average, the pace of the benchmark TV ads.
       push(s, s.startSec, half, { zoom: sameSource && prev.zoom === 1 ? 1.12 : 1, anchorY: 0.42 });
@@ -221,7 +232,9 @@ export function planEdit(
   // Re-index and close any rounding gaps so shots tile the timeline exactly.
   for (const [i, sh] of shots.entries()) {
     sh.index = i;
-    if (i > 0) sh.startSec = shots[i - 1].endSec;
+    // The video starts at 0 whatever the track's first beat is (a later first
+    // shot would shift every following cut by that much).
+    sh.startSec = i > 0 ? shots[i - 1].endSec : 0;
     sh.frames = Math.max(1, Math.round((sh.endSec - sh.startSec) * FPS));
   }
 

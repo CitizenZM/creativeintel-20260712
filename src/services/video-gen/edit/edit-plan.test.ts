@@ -111,3 +111,13 @@ describe("hook variants", () => {
     }
   });
 });
+
+describe("planEdit on a real track's beats", () => {
+  it("starts at 0 even when the first detected beat is a frame later, and keeps every cut on a beat", () => {
+    const beats = Array.from({ length: 40 }, (_, i) => Math.round((1 / 30 + i * 0.6) * 1000) / 1000); // 100 BPM, offset one frame
+    const p = planEdit(ad, { beats });
+    expect(p.shots[0].startSec).toBe(0);
+    expect(p.shots.reduce((n, s) => n + s.frames, 0)).toBe(Math.round(p.durationSec * 30));
+    for (const b of p.boundaries) expect(p.grid.beats.some((x) => Math.abs(x - b.atSec) < 0.017)).toBe(true);
+  });
+});
