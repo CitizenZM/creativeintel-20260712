@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attentionBlueprint, renderAttentionBlock, scoreScriptAttention, timingEvidence } from "./attention-blueprint";
+import { attentionBlueprint, renderAttentionBlock, renderReferenceBlock, scoreScriptAttention, timingEvidence } from "./attention-blueprint";
 
 describe("attentionBlueprint", () => {
   it("plans a 20 s ad: 2 s hook, payoff by 5 s, re-hooks ≤ 6 s apart, 4 s CTA", () => {
@@ -45,5 +45,25 @@ describe("scoreScriptAttention", () => {
     const r = scoreScriptAttention(bad);
     expect(r.score).toBeLessThan(50);
     expect(r.checks.filter((c) => !c.pass).map((c) => c.key)).toEqual(expect.arrayContaining(["hook_len", "payoff", "rehook", "cta_len", "cta_verb"]));
+  });
+});
+
+describe("renderReferenceBlock", () => {
+  it("hands the writer the best ad's beat timeline and forbids copying it", () => {
+    const block = renderReferenceBlock({
+      title: "TCL QM8 | Brighter than the sun",
+      owner: "Hisense",
+      viewCount: 2_400_000,
+      hookType: "visual_demo",
+      beats: [
+        { startSec: 0, endSec: 1.5, role: "hook", visual: "TV in full sun, glare-free", onScreenText: "Daylight? No problem." },
+        { startSec: 1.5, endSec: 6, role: "demo", visual: "side-by-side with an old TV" },
+        { startSec: 6, endSec: 10, role: "cta", visual: "packshot + price" },
+      ],
+    });
+    expect(block).toContain("2.4M views");
+    expect(block).toContain("0–1.5s HOOK: TV in full sun, glare-free; on-screen \"Daylight? No problem.\"");
+    expect(block).toMatch(/never copy its words, footage or branding/);
+    expect(renderReferenceBlock(null)).toBe("");
   });
 });

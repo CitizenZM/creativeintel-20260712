@@ -1,4 +1,4 @@
-import { renderAttentionBlock, type TimingEvidence } from "@/lib/attention-blueprint";
+import { renderAttentionBlock, renderReferenceBlock, type ReferenceAd, type TimingEvidence } from "@/lib/attention-blueprint";
 import { getPlatformPlaybook, getHookFormulas } from "./platform-playbooks";
 import { describeTemplate, type ScriptTemplate, type VideoType, VIDEO_TYPES } from "./script-templates";
 import { HOW_EXPRESSED_MODES } from "@/lib/script-schema";
@@ -70,6 +70,8 @@ export interface ScriptInput {
   teardowns?: TeardownHighlight[];
   /** Pace measured on this project's competitor teardowns (hook length, beat length, CTA timing). */
   timingEvidence?: TimingEvidence | null;
+  /** The category's best-performing torn-down ad — its structure is the model to follow. */
+  referenceAd?: ReferenceAd | null;
 }
 
 const MAX_BLOCK_CHARS = 1200;
@@ -121,7 +123,7 @@ Write ONE production-ready video ad script that follows the assigned template ex
 ${templateBlock}
 
 ${renderAttentionBlock(durationSec, input.timingEvidence)}
-
+${input.referenceAd ? `\n${renderReferenceBlock(input.referenceAd)}\n` : ""}
 ${platformPlaybook}
 ${hookFormulaNamesBlock}
 

@@ -245,7 +245,8 @@ export function kineticGroups(words: TimedWord[], maxWords = 3, maxChars = 18): 
       cur = [];
     }
     cur.push(w);
-    if (/[.!?;:,]$/.test(w.text)) {
+    // Break after punctuation, also when a closing quote follows it ("room?'").
+    if (/[.!?;:,…]['"’”)]*$/.test(w.text)) {
       groups.push(cur);
       cur = [];
     }

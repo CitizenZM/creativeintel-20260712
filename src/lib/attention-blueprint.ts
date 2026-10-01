@@ -213,3 +213,35 @@ export function scoreScriptAttention(s: ScriptForScoring): { score: number; chec
   const got = checks.reduce((n, c) => n + (c.pass ? c.weight : 0), 0);
   return { score: Math.round((got / max) * 100), checks };
 }
+
+// ─── Reference ad (structure transfer) ──────────────────────────────────────
+
+export interface ReferenceAd {
+  title: string;
+  owner?: string | null;
+  viewCount?: number | null;
+  hookType?: string | null;
+  hookText?: string | null;
+  whyItWorks?: string | null;
+  beats: { startSec: number; endSec: number; role?: string; visual?: string; onScreenText?: string }[];
+}
+
+/**
+ * The best-performing torn-down ad in the category, as a beat timeline the
+ * script copies the STRUCTURE and PACE of — never its words, footage or brand.
+ */
+export function renderReferenceBlock(ref: ReferenceAd | null | undefined): string {
+  if (!ref || !ref.beats.length) return "";
+  const views = ref.viewCount ? `${ref.viewCount >= 1e6 ? `${(ref.viewCount / 1e6).toFixed(1)}M` : ref.viewCount >= 1e3 ? `${Math.round(ref.viewCount / 1e3)}K` : ref.viewCount} views` : "top-ranked";
+  const timeline = ref.beats
+    .slice(0, 10)
+    .map((b) => {
+      const what = [b.visual?.slice(0, 90), b.onScreenText ? `on-screen "${b.onScreenText.slice(0, 40)}"` : ""].filter(Boolean).join("; ");
+      return `  ${Math.round(b.startSec * 10) / 10}–${Math.round(b.endSec * 10) / 10}s ${(b.role || "beat").toUpperCase()}${what ? `: ${what}` : ""}`;
+    })
+    .join("\n");
+  return `REFERENCE AD TO EMULATE — the best performer we tore down in this category: "${ref.title.slice(0, 80)}"${ref.owner ? ` by ${ref.owner}` : ""} (${views}${ref.hookType ? `, ${ref.hookType} hook` : ""}).
+Its beat timeline:
+${timeline}${ref.whyItWorks ? `\nWhy it works: ${ref.whyItWorks.slice(0, 300)}` : ""}
+Mirror its STRUCTURE and PACE — beat roles, order, timing, where the proof and the offer land — scaled to our duration and the attention blueprint. Use only our brand, product and approved claims; never copy its words, footage or branding.`;
+}

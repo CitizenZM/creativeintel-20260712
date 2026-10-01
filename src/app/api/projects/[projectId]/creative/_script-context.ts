@@ -1,4 +1,4 @@
-import { timingEvidence, type TeardownTiming, type TimingEvidence } from "@/lib/attention-blueprint";
+import { timingEvidence, type ReferenceAd, type TeardownTiming, type TimingEvidence } from "@/lib/attention-blueprint";
 import { prisma } from "@/lib/db";
 import { getBrandTruthForPrompts, type BrandCtaOption } from "@/services/brand-kit";
 import type {
@@ -79,6 +79,7 @@ export interface ScriptContext {
   deepAnalysis: DeepAnalysisBlocks;
   teardowns: TeardownHighlight[];
   timingEvidence: TimingEvidence | null;
+  referenceAd: ReferenceAd | null;
 }
 
 /**
@@ -145,7 +146,11 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
   const direction = creativeDirectionLine(project.goalType, campaignSel?.styleCategories);
   if (direction) nicheResearch = [direction, nicheResearch].filter(Boolean).join("\n\n").slice(0, 2800);
 
-  const [teardowns, timing] = await Promise.all([loadTeardownHighlights(projectId), loadTimingEvidence(projectId)]);
+  const [teardowns, timing, referenceAd] = await Promise.all([
+    loadTeardownHighlights(projectId),
+    loadTimingEvidence(projectId),
+    loadReferenceAd(projectId),
+  ]);
 
   const ctaOptions = (
     Array.isArray(brandKit?.ctaOptions) ? brandKit.ctaOptions : []
@@ -214,7 +219,47 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     },
     teardowns,
     timingEvidence: timing,
+    referenceAd,
   };
+}
+
+/** The most-viewed competitor ad with a beat-level teardown — the structure to emulate. */
+export async function loadReferenceAd(projectId: string): Promise<ReferenceAd | null> {
+  try {
+    const rows = await prisma.adTeardown.findMany({
+      where: { projectId, competitorId: { not: null } },
+      select: {
+        hookType: true,
+        hookText: true,
+        whyItWorks: true,
+        beats: true,
+        competitor: { select: { name: true } },
+        contentAsset: { select: { title: true, viewCount: true, overallScore: true } },
+      },
+      take: 60,
+    });
+    const usable = rows
+      .map((r) => ({ r, beats: Array.isArray(r.beats) ? (r.beats as ReferenceAd["beats"]) : [] }))
+      .filter((x) => x.beats.length >= 3);
+    if (!usable.length) return null;
+    usable.sort(
+      (a, b) =>
+        (b.r.contentAsset?.viewCount ?? 0) - (a.r.contentAsset?.viewCount ?? 0) ||
+        (b.r.contentAsset?.overallScore ?? 0) - (a.r.contentAsset?.overallScore ?? 0)
+    );
+    const { r, beats } = usable[0];
+    return {
+      title: r.contentAsset?.title ?? "Competitor ad",
+      owner: r.competitor?.name ?? null,
+      viewCount: r.contentAsset?.viewCount ?? null,
+      hookType: r.hookType,
+      hookText: r.hookText,
+      whyItWorks: r.whyItWorks,
+      beats,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Pace of this project's torn-down competitor ads (hook length, beat length, CTA timing, top hooks). */
@@ -301,6 +346,7 @@ export function buildScriptInput(
     deepAnalysis: ctx.deepAnalysis,
     teardowns: ctx.teardowns,
     timingEvidence: ctx.timingEvidence,
+    referenceAd: ctx.referenceAd,
   };
 }
 

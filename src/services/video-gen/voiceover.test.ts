@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { placeLines, planVoiceover, subtitleCues, toSrt } from "./voiceover";
+import { kineticGroups, placeLines, planVoiceover, subtitleCues, toSrt } from "./voiceover";
 
 describe("planVoiceover", () => {
   it("speaks each beat once, spanning the frames that repeat its line", () => {
@@ -69,5 +69,13 @@ describe("subtitleCues", () => {
 
   it("writes SRT", () => {
     expect(toSrt([{ startSec: 1.5, endSec: 3.25, text: "Meet Ramp." }])).toBe("1\n00:00:01,500 --> 00:00:03,250\nMeet Ramp.\n");
+  });
+});
+
+describe("kineticGroups", () => {
+  const w = (texts: string[]) => texts.map((text, i) => ({ text, startSec: i * 0.3, endSec: i * 0.3 + 0.25 }));
+  it("shows up to three short words at a time and breaks after punctuation, even inside quotes", () => {
+    const g = kineticGroups(w(["Is", "this", "too", "bright", "for", "my", "room?'", "That's", "a", "common", "concern."]));
+    expect(g.map((x) => x.map((y) => y.text).join(" "))).toEqual(["Is this too", "bright for my", "room?'", "That's a common", "concern."]);
   });
 });
