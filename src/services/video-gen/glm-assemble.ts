@@ -67,13 +67,17 @@ export function pangoEscape(text: string): string {
  * Serverless Linux has no fonts and no fontconfig config, so pango can't find
  * even the bundled font. Point fontconfig at assets/fonts before sharp loads.
  */
+/** Brand fonts fetched from Google Fonts land here (see edit/brand-style.ts). */
+export const BRAND_FONT_DIR = path.join(tmpdir(), "brand-fonts");
+
 export async function ensureFontconfig(fontFile: string): Promise<void> {
   if (process.env.FONTCONFIG_FILE) return;
   const conf = path.join(tmpdir(), "creativeintel-fonts.conf");
   await mkdir(path.join(tmpdir(), "fontconfig-cache"), { recursive: true }).catch(() => {});
+  await mkdir(BRAND_FONT_DIR, { recursive: true }).catch(() => {});
   await writeFile(
     conf,
-    `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig><dir>${path.dirname(fontFile)}</dir><cachedir>${path.join(tmpdir(), "fontconfig-cache")}</cachedir></fontconfig>\n`
+    `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig><dir>${path.dirname(fontFile)}</dir><dir>${BRAND_FONT_DIR}</dir><cachedir>${path.join(tmpdir(), "fontconfig-cache")}</cachedir></fontconfig>\n`
   );
   process.env.FONTCONFIG_FILE = conf;
 }
@@ -229,6 +233,8 @@ async function download(url: string, file: string) {
 
 export async function assembleGlmMaster(input: {
   runId: string;
+  /** For Brand Kit packaging (edit engine v2). */
+  projectId?: string;
   aspectRatio: string;
   frames: AssembleFrame[];
   jobs: LibtvJob[];
@@ -259,7 +265,9 @@ export async function assembleGlmMaster(input: {
     if (process.env.EDIT_ENGINE !== "v1") {
       try {
         const { renderEditV2 } = await import("./edit/render-v2");
-        const v2 = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice });
+        const { loadBrandStyle } = await import("./edit/brand-style");
+        const brand = await loadBrandStyle(input.projectId);
+        const v2 = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice, brand });
         const up = (buffer: Buffer, filename: string, contentType: string) => uploadBuffer({ buffer, filename, contentType, folder: "glm-masters" });
         const [m, p, c, vo, srt] = await Promise.all([
           up(await readFile(v2.masterFile), `master-${input.runId}.mp4`, "video/mp4"),
@@ -351,6 +359,7 @@ export async function assembleGlmMaster(input: {
  */
 export async function renderFromRun(input: {
   runId: string;
+  projectId?: string;
   aspectRatio: string;
   frames: AssembleFrame[];
   jobs: LibtvJob[];
@@ -379,7 +388,9 @@ export async function renderFromRun(input: {
       sources.set(seg.url, file);
     }
     const { renderEditV2 } = await import("./edit/render-v2");
-    const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText });
+    const { loadBrandStyle } = await import("./edit/brand-style");
+    const brand = await loadBrandStyle(input.projectId);
+    const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText, brand });
     const tag = `${input.tag}-${Date.now().toString(36)}`;
     const [m, p] = await Promise.all([
       uploadBuffer({ buffer: await readFile(v.masterFile), filename: `${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
@@ -401,6 +412,7 @@ export async function renderFromRun(input: {
 /** One A/B hook variant of a finished run: same clips and body, a different opening. */
 export async function renderHookVariant(input: {
   runId: string;
+  projectId?: string;
   aspectRatio: string;
   frames: AssembleFrame[];
   jobs: LibtvJob[];

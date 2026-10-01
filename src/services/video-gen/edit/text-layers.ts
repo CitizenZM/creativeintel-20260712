@@ -11,9 +11,9 @@
  *
  * All text sits inside the platform safe zone (top 14 % / bottom 20 % clear).
  */
-import { CAPTION_FONT, ensureFontconfig, pangoEscape, SUBTITLE_FONT } from "../glm-assemble";
+import { ensureFontconfig, pangoEscape } from "../glm-assemble";
+import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
 
-export const HIGHLIGHT = "#FFD400";
 
 type Canvas = { w: number; h: number };
 
@@ -61,24 +61,26 @@ async function shadowed(markup: string, plainMarkup: string, opts: { family: str
     .toBuffer();
 }
 
+type Look = Pick<BrandStyle, "highlight" | "button" | "buttonText" | "offerBg" | "offerText" | "headline" | "body">;
+
 /** One state of a kinetic caption: the group's words, word `active` highlighted. */
-export function kineticCaptionPng(words: string[], active: number, canvas: Canvas): Promise<Buffer> {
+export function kineticCaptionPng(words: string[], active: number, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
   const size = Math.round(unit(canvas) * 0.074);
   const markup = words
-    .map((w, i) => `<span foreground="${i === active ? HIGHLIGHT : "white"}">${pangoEscape(w.toUpperCase())}</span>`)
+    .map((w, i) => `<span foreground="${i === active ? look.highlight : "white"}">${pangoEscape(w.toUpperCase())}</span>`)
     .join(" ");
   const plain = `<span foreground="black">${pangoEscape(words.join(" ").toUpperCase())}</span>`;
-  return shadowed(markup, plain, { family: "Montserrat Bold", fontFile: SUBTITLE_FONT, size, width: Math.round(canvas.w * 0.86) });
+  return shadowed(markup, plain, { family: look.body.family, fontFile: look.body.file, size, width: Math.round(canvas.w * 0.86) });
 }
 
-/** The hook headline: big Anton, last word highlighted. */
-export function hookHeadlinePng(text: string, canvas: Canvas): Promise<Buffer> {
+/** The hook headline: big headline face, last word highlighted. */
+export function hookHeadlinePng(text: string, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
   const size = Math.round(unit(canvas) * 0.092);
   const w = text.trim().split(/\s+/);
   const last = w.pop() ?? "";
-  const markup = `<span foreground="white">${pangoEscape(w.join(" ").toUpperCase())}</span>${w.length ? " " : ""}<span foreground="${HIGHLIGHT}">${pangoEscape(last.toUpperCase())}</span>`;
+  const markup = `<span foreground="white">${pangoEscape(w.join(" ").toUpperCase())}</span>${w.length ? " " : ""}<span foreground="${look.highlight}">${pangoEscape(last.toUpperCase())}</span>`;
   const plain = `<span foreground="black">${pangoEscape(text.toUpperCase())}</span>`;
-  return shadowed(markup, plain, { family: "Anton", fontFile: CAPTION_FONT, size, width: Math.round(canvas.w * 0.84) });
+  return shadowed(markup, plain, { family: look.headline.family, fontFile: look.headline.file, size, width: Math.round(canvas.w * 0.84) });
 }
 
 /** A pill: text on a rounded rectangle. */
@@ -104,16 +106,44 @@ async function pill(text: string, canvas: Canvas, style: { size: number; fg: str
 }
 
 /** A short claim ("2,100+ dimming zones"): white on a translucent dark pill. */
-export function claimChipPng(text: string, canvas: Canvas): Promise<Buffer> {
-  return pill(text, canvas, { size: Math.round(unit(canvas) * 0.05), fg: "white", bg: "rgba(0,0,0,0.62)", family: "Montserrat Bold", fontFile: SUBTITLE_FONT, widthPct: 0.8 });
+export function claimChipPng(text: string, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
+  return pill(text, canvas, { size: Math.round(unit(canvas) * 0.05), fg: "white", bg: "rgba(0,0,0,0.62)", family: look.body.family, fontFile: look.body.file, widthPct: 0.8 });
 }
 
-/** The offer on the end card: black Anton on the highlight colour. */
-export function offerCardPng(text: string, canvas: Canvas): Promise<Buffer> {
-  return pill(text.toUpperCase(), canvas, { size: Math.round(unit(canvas) * 0.075), fg: "#111111", bg: HIGHLIGHT, family: "Anton", fontFile: CAPTION_FONT, widthPct: 0.8 });
+/** The offer on the end card, on the brand's accent. */
+export function offerCardPng(text: string, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
+  return pill(text.toUpperCase(), canvas, { size: Math.round(unit(canvas) * 0.075), fg: look.offerText, bg: look.offerBg, family: look.headline.family, fontFile: look.headline.file, widthPct: 0.8 });
 }
 
 /** The CTA button that lands on a beat. */
-export function ctaButtonPng(text: string, canvas: Canvas): Promise<Buffer> {
-  return pill(`${text.toUpperCase()}  ›`, canvas, { size: Math.round(unit(canvas) * 0.058), fg: "white", bg: "#E4002B", family: "Montserrat Bold", fontFile: SUBTITLE_FONT, widthPct: 0.7 });
+export function ctaButtonPng(text: string, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
+  return pill(`${text.toUpperCase()}  ›`, canvas, { size: Math.round(unit(canvas) * 0.058), fg: look.buttonText, bg: look.button, family: look.body.family, fontFile: look.body.file, widthPct: 0.7 });
+}
+
+/** The landing domain under the button, small. */
+export function domainPng(domain: string, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
+  const size = Math.round(unit(canvas) * 0.034);
+  return shadowed(`<span foreground="white">${pangoEscape(domain)}</span>`, `<span foreground="black">${pangoEscape(domain)}</span>`, {
+    family: look.body.family,
+    fontFile: look.body.file,
+    size,
+    width: Math.round(canvas.w * 0.8),
+  });
+}
+
+/** The brand logo for the end card, fitted to a box on a soft dark plate so a light logo reads on any frame. */
+export async function logoPng(url: string, canvas: Canvas): Promise<Buffer | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) return null;
+    const sharp = await sharpLib();
+    const boxW = Math.round(unit(canvas) * 0.34);
+    const boxH = Math.round(unit(canvas) * 0.12);
+    return await sharp(Buffer.from(await res.arrayBuffer()))
+      .resize({ width: boxW, height: boxH, fit: "inside", withoutEnlargement: false })
+      .png()
+      .toBuffer();
+  } catch {
+    return null;
+  }
 }
