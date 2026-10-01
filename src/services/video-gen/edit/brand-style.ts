@@ -25,6 +25,8 @@ export interface BrandStyle {
   logoUrl: string | null;
   ctaText: string;
   domain: string | null;
+  /** The Brand Kit's licensed music track (latest upload), replacing the synthesised bed. */
+  musicUrl: string | null;
 }
 
 export const DEFAULT_STYLE: BrandStyle = {
@@ -38,6 +40,7 @@ export const DEFAULT_STYLE: BrandStyle = {
   logoUrl: null,
   ctaText: "Shop now",
   domain: null,
+  musicUrl: null,
 };
 
 /** WCAG relative luminance of a #RRGGBB colour. */
@@ -116,7 +119,7 @@ export async function loadBrandStyle(projectId: string | null | undefined): Prom
     const { prisma } = await import("@/lib/db");
     const [project, kit, others] = await Promise.all([
       prisma.project.findUnique({ where: { id: projectId }, select: { brandName: true } }),
-      prisma.brandKit.findUnique({ where: { projectId }, include: { assets: { where: { kind: "LOGO" } } } }),
+      prisma.brandKit.findUnique({ where: { projectId }, include: { assets: { where: { kind: { in: ["LOGO", "MUSIC"] } }, orderBy: { createdAt: "asc" } } } }),
       prisma.project.findMany({ select: { brandName: true }, take: 200 }),
     ]);
     if (!kit) return DEFAULT_STYLE;
@@ -125,7 +128,9 @@ export async function loadBrandStyle(projectId: string | null | undefined): Prom
       googleFont(fonts.find((f) => f.role === "headline")?.family ?? ""),
       googleFont(fonts.find((f) => f.role === "body")?.family ?? ""),
     ]);
-    const logo = kit.assets.find((a) => a.variant === "light") ?? kit.assets[0];
+    const logos = kit.assets.filter((a) => a.kind === "LOGO");
+    const logo = logos.find((a) => a.variant === "light") ?? logos[0];
+    const music = kit.assets.filter((a) => a.kind === "MUSIC").pop();
     let domain: string | null = null;
     try {
       domain = kit.landingUrl ? new URL(kit.landingUrl).hostname.replace(/^www\./, "") : null;
@@ -140,6 +145,7 @@ export async function loadBrandStyle(projectId: string | null | undefined): Prom
       logoUrl: logo?.url ?? null,
       ctaText: pickCta((Array.isArray(kit.ctaOptions) ? kit.ctaOptions : []) as { text?: string; priority?: number }[], project?.brandName ?? "", others.map((o) => o.brandName)),
       domain,
+      musicUrl: music?.url ?? null,
     };
   } catch (err) {
     console.warn("[brand-style] falling back to the default look:", err instanceof Error ? err.message.slice(0, 160) : err);

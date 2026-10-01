@@ -24,7 +24,8 @@ import { FPS } from "./beat-grid";
 import { planEdit, type EditPlan, type HookStyle, type PlanInputSegment, type Shot } from "./edit-plan";
 import { synthesizeMusic, toWav } from "./music-synth";
 import { bestWindow, motionScores } from "./motion";
-import { measureMaster, scoreQc, type QcReport } from "./qc";
+import { detectBeats, trackWindowStart } from "./beat-detect";
+import { measureCuts, measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
 import { claimChipPng, ctaButtonPng, domainPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
@@ -106,15 +107,23 @@ export function fxFilter(plan: EditPlan, canvas: Canvas): string {
   const P = f3(plan.grid.period);
   const punches = plan.boundaries.filter((b) => b.transition === "zoom").map((b) => `0.06*gte(t,${f3(b.atSec)})*exp(-(t-${f3(b.atSec)})*12)`);
   const scaleExpr = [`0.022*exp(-mod(t,${P})*18)`, ...punches].join("+");
+  // Flashes decay from the beat frame (largest change exactly on the cut).
+  const flashes = plan.boundaries.filter((b) => b.transition === "flash").map((b) => `0.5*gte(t,${f3(b.atSec - 0.004)})*exp(-(t-${f3(b.atSec)})*28)`);
   const parts = [
-    `eq=brightness='0.045*exp(-mod(t,${P})*22)':eval=frame`,
+    `eq=brightness='${[`0.045*exp(-mod(t,${P})*22)`, ...flashes].join("+")}':eval=frame`,
     `scale=w='2*trunc(${w}*(1+${scaleExpr})/2)':h='2*trunc(${h}*(1+${scaleExpr})/2)':eval=frame`,
     `crop=${w}:${h}`,
   ];
   const fr = 1 / FPS;
   for (const b of plan.boundaries) {
-    if (b.transition === "flash") parts.push(`eq=brightness=0.5:enable='between(t,${f3(b.atSec - fr)},${f3(b.atSec + fr)})'`);
-    if (b.transition === "whip") parts.push(`avgblur=sizeX=48:sizeY=1:enable='between(t,${f3(b.atSec - 3 * fr)},${f3(b.atSec + fr)})'`);
+    // Whip: motion blur ramps up over the three outgoing frames and is gone on
+    // the beat frame, which arrives sharp with the new shot.
+    if (b.transition === "whip") {
+      [8, 18, 32].forEach((size, k) => {
+        const t0 = b.atSec - (3 - k) * fr;
+        parts.push(`avgblur=sizeX=${size}:sizeY=1:enable='between(t,${f3(t0 - 0.004)},${f3(t0 + fr - 0.01)})'`);
+      });
+    }
   }
   parts.push("setsar=1");
   return parts.join(",");
@@ -175,10 +184,30 @@ export async function renderEditV2(input: {
     segment: bySeg.get(s.frameNumber)?.segment ?? null,
     text: s.text ?? null,
   }));
+  // A licensed brand track: detect its beats and drop, start it so the drop
+  // lands on the hook → body cut, and cut the edit on its real beats.
+  let track: { file: string; startSec: number; beats: number[] } | null = null;
+  if (look.musicUrl) {
+    try {
+      const file = path.join(dir, "v2track.audio");
+      const res = await fetch(look.musicUrl, { signal: AbortSignal.timeout(60_000) });
+      if (!res.ok) throw new Error(`music download ${res.status}`);
+      await writeFile(file, Buffer.from(await res.arrayBuffer()));
+      const a = await detectBeats(file);
+      const editSec = planInput.reduce((n, s) => n + s.length, 0);
+      const hookSec = planInput.filter((s) => (s.segment ?? "").toUpperCase() === "HOOK").reduce((n, s) => n + s.length, 0) || 2;
+      const startSec = trackWindowStart(a, hookSec, editSec);
+      track = { file, startSec, beats: a.beats.map((b) => Math.round((b - startSec) * 1000) / 1000).filter((b) => b >= 0) };
+    } catch (err) {
+      console.warn(`[edit-v2] brand music unusable for ${input.runId}, using the generated bed:`, err instanceof Error ? err.message.slice(0, 160) : err);
+      track = null;
+    }
+  }
   const plan = planEdit(planInput, {
     voiceovers: new Map(input.frames.map((f) => [f.frameNumber, f.voiceover ?? null])),
     hookStyle: input.hookStyle,
     hookText: input.hookText,
+    beats: track?.beats,
   });
   const total = plan.durationSec;
 
@@ -272,9 +301,13 @@ export async function renderEditV2(input: {
     }
   }
 
-  const music = synthesizeMusic({ durationSec: total, bpm: plan.grid.bpm, dropSec: plan.dropSec, breakdownSec: plan.breakdownSec, ctaSec: plan.ctaSec, energy: 0.8, seed: input.runId.length });
   const musicFile = path.join(dir, "v2music.wav");
-  await writeFile(musicFile, toWav(music.left, music.right));
+  if (track) {
+    await run(ff, ["-y", "-v", "error", "-ss", f3(track.startSec), "-t", f3(total), "-i", track.file, "-af", `afade=t=out:st=${f3(Math.max(0, total - 0.4))}:d=0.4,aresample=44100`, "-ac", "2", musicFile], { timeout: 60_000 });
+  } else {
+    const music = synthesizeMusic({ durationSec: total, bpm: plan.grid.bpm, dropSec: plan.dropSec, breakdownSec: plan.breakdownSec, ctaSec: plan.ctaSec, energy: 0.8, seed: input.runId.length });
+    await writeFile(musicFile, toWav(music.left, music.right));
+  }
   const sfx = renderSfxBed(plan.sfx, total);
   const sfxFile = path.join(dir, "v2sfx.wav");
   await writeFile(sfxFile, toWav(sfx.left, sfx.right));
@@ -309,6 +342,9 @@ export async function renderEditV2(input: {
 
   // 5. QC, preview, contact sheet.
   const measured = await measureMaster(master, dir);
+  // Cut timing is measured on the hard-cut layer (before light/blur envelopes),
+  // where the content actually changes.
+  measured.cutsSec = await measureCuts(body, dir).catch(() => measured.cutsSec);
   const spokenBeforeCta = words.filter((w) => w.startSec < captionEnd);
   const wordSpan = spokenBeforeCta.length ? spokenBeforeCta.reduce((n, w) => n + Math.max(0, Math.min(total, w.endSec) - w.startSec), 0) : 0;
   const covered = spokenBeforeCta.length

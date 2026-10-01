@@ -17,9 +17,12 @@ const ALLOWED_MIME = new Set([
   "application/pdf",
 ]);
 
+/** Licensed music for the edit (Brand Kit → Music). */
+const AUDIO_MIME = new Set(["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave", "audio/mp4", "audio/x-m4a", "audio/aac"]);
+
 function mimeAllowed(type: string): boolean {
   const t = type.split(";")[0].trim().toLowerCase();
-  return ALLOWED_MIME.has(t) || t.startsWith("font/") || t === "application/font-woff" || t === "application/x-font-ttf";
+  return ALLOWED_MIME.has(t) || AUDIO_MIME.has(t) || t.startsWith("font/") || t === "application/font-woff" || t === "application/x-font-ttf";
 }
 
 export async function GET(
@@ -94,7 +97,7 @@ export async function POST(
 
   if (!mimeAllowed(contentType)) {
     return NextResponse.json(
-      { error: `Unsupported file type: ${contentType || "unknown"}. Allowed: PNG, JPEG, WebP, SVG, PDF, fonts.` },
+      { error: `Unsupported file type: ${contentType || "unknown"}. Allowed: PNG, JPEG, WebP, SVG, PDF, fonts, MP3 / WAV / M4A music.` },
       { status: 415 }
     );
   }

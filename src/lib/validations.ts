@@ -136,7 +136,7 @@ export const brandKitUpdateSchema = z.object({
 
 export type BrandKitUpdateInput = z.infer<typeof brandKitUpdateSchema>;
 
-export const BRAND_ASSET_KINDS = ["LOGO", "PACKSHOT", "LIFESTYLE", "FONT", "OTHER"] as const;
+export const BRAND_ASSET_KINDS = ["LOGO", "PACKSHOT", "LIFESTYLE", "FONT", "MUSIC", "OTHER"] as const;
 export type BrandAssetKind = (typeof BRAND_ASSET_KINDS)[number];
 
 export const brandAssetMetaSchema = z.object({

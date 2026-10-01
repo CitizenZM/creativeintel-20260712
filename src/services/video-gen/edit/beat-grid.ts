@@ -39,3 +39,15 @@ export function nearestBeat(grid: BeatGrid, t: number): number {
 export function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
+
+/** A grid from detected beat times (a brand's own track), clipped to the edit. */
+export function beatGridFromTimes(times: number[], durationSec: number): BeatGrid {
+  // Frame-exact beats: a cut can only happen on a frame, so the grid is the
+  // nearest frame to each detected beat (≤ 17 ms from the music at 30 fps).
+  const beats = [...new Set(times.filter((t) => t >= -1e-6 && t <= durationSec + 1e-6).map((t) => round3(snapToFrame(t))))];
+  if (beats.length < 2) return beatGrid(durationSec);
+  if (beats[0] > 0.05) beats.unshift(0);
+  const gaps = beats.slice(1).map((b, i) => b - beats[i]).sort((a, b) => a - b);
+  const period = gaps[Math.floor(gaps.length / 2)];
+  return { bpm: Math.round((60 / period) * 10) / 10, period, beats, downbeats: beats.filter((_, i) => i % 4 === 0) };
+}

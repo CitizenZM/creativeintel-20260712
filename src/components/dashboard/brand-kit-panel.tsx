@@ -219,6 +219,10 @@ function StringListEditor({
   );
 }
 
+
+const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/svg+xml,application/pdf,font/*";
+const MUSIC_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/aac";
+
 export function BrandKitPanel({ projectId }: { projectId: string }) {
   // The "% complete / Still missing" summary above this panel and the stage
   // rail are server-rendered, so a client-side save left them showing a stale
@@ -474,6 +478,10 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
 
   function pickFile(kind: string, variant?: string) {
     uploadTarget.current = { kind, variant };
+    if (fileInputRef.current) {
+      fileInputRef.current.accept = kind === "MUSIC" ? MUSIC_ACCEPT : IMAGE_ACCEPT;
+      fileInputRef.current.multiple = kind !== "MUSIC";
+    }
     fileInputRef.current?.click();
   }
 
@@ -583,7 +591,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/png,image/jpeg,image/webp,image/svg+xml,application/pdf,font/*"
+        accept={IMAGE_ACCEPT}
         className="hidden"
         onChange={(e) => e.target.files && handleFiles(e.target.files)}
       />
@@ -817,6 +825,35 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
           </p>
         )}
       </FieldShell>
+
+      {/* Music (optional) */}
+      <div className="rounded-xl border border-border bg-card px-3 py-2.5" data-testid="brand-music">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Music track (optional)</p>
+            <p className="text-[11px] text-muted-foreground">
+              A track you have the rights to use in ads (MP3 / WAV / M4A, under 4 MB). The edit detects its tempo and drop and cuts on
+              its beats; without one, an original track is generated for each ad.
+            </p>
+          </div>
+          <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[10px]" onClick={() => pickFile("MUSIC")} disabled={!!uploading}>
+            {uploading === "MUSIC:" ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Upload className="h-2.5 w-2.5" />}
+            {assets.some((a) => a.kind === "MUSIC") ? "Replace" : "Upload"}
+          </Button>
+        </div>
+        {assets
+          .filter((a) => a.kind === "MUSIC")
+          .slice(-1)
+          .map((a) => (
+            <div key={a.id} className="mt-2 flex flex-wrap items-center gap-2">
+              <audio controls src={a.url} className="h-8 max-w-full" />
+              <span className="text-[11px] text-muted-foreground">{a.caption}</span>
+              <button type="button" onClick={() => removeAsset(a.id)} className="text-[11px] underline underline-offset-2">
+                Remove
+              </button>
+            </div>
+          ))}
+      </div>
 
       {/* Colours + fonts + SKU */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
