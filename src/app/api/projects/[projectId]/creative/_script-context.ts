@@ -1,3 +1,5 @@
+import { loadLearning } from "@/services/performance/store";
+import { renderLearningBlock } from "@/services/performance/learn";
 import { timingEvidence, type ReferenceAd, type TeardownTiming, type TimingEvidence } from "@/lib/attention-blueprint";
 import { prisma } from "@/lib/db";
 import { getBrandTruthForPrompts, type BrandCtaOption } from "@/services/brand-kit";
@@ -80,6 +82,7 @@ export interface ScriptContext {
   teardowns: TeardownHighlight[];
   timingEvidence: TimingEvidence | null;
   referenceAd: ReferenceAd | null;
+  performanceBlock: string | null;
 }
 
 /**
@@ -146,10 +149,11 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
   const direction = creativeDirectionLine(project.goalType, campaignSel?.styleCategories);
   if (direction) nicheResearch = [direction, nicheResearch].filter(Boolean).join("\n\n").slice(0, 2800);
 
-  const [teardowns, timing, referenceAd] = await Promise.all([
+  const [teardowns, timing, referenceAd, learning] = await Promise.all([
     loadTeardownHighlights(projectId),
     loadTimingEvidence(projectId),
     loadReferenceAd(projectId),
+    loadLearning(projectId),
   ]);
 
   const ctaOptions = (
@@ -220,6 +224,7 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     teardowns,
     timingEvidence: timing,
     referenceAd,
+    performanceBlock: renderLearningBlock(learning) || null,
   };
 }
 
@@ -347,6 +352,7 @@ export function buildScriptInput(
     teardowns: ctx.teardowns,
     timingEvidence: ctx.timingEvidence,
     referenceAd: ctx.referenceAd,
+    performanceBlock: ctx.performanceBlock,
   };
 }
 

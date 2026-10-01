@@ -8,6 +8,8 @@ describe("missingStyles", () => {
     expect(missingStyles({ variants: [{ hookStyle: "c" } as never] }, now)).toEqual(["p"]);
     expect(missingStyles({ variantsPending: { c: "2026-10-01T11:58:00Z" } }, now)).toEqual(["p"]);
     expect(missingStyles({ variantsPending: { c: "2026-10-01T11:40:00Z" } }, now)).toEqual(["c", "p"]);
+    // A contrast-led master (chosen by real results) gets question and product-blast variants.
+    expect(missingStyles({ hookStyle: "c" }, now)).toEqual(["q", "p"]);
   });
 });
 

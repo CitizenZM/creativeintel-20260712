@@ -6,7 +6,7 @@
 import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db";
 import { isServerEngine } from "@/services/video-gen/libtv-pricing";
-import { AUTO_STYLES, missingStyles, renderVariantForRun, type HookStyle } from "@/services/video-gen/variants";
+import { missingStyles, renderVariantForRun, type HookStyle } from "@/services/video-gen/variants";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -21,7 +21,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   }
   const wanted = Array.isArray(body.styles)
     ? (body.styles.filter((s) => s === "c" || s === "p" || s === "q") as HookStyle[])
-    : missingStyles((run.qcReport ?? {}) as never, Date.now(), AUTO_STYLES);
+    : missingStyles((run.qcReport ?? {}) as never, Date.now());
   if (!wanted.length) return NextResponse.json({ ok: true, started: [] });
   // One render fits a function's time limit; the hook-variants cron makes the rest.
   const style = wanted[0];

@@ -72,6 +72,8 @@ export interface ScriptInput {
   timingEvidence?: TimingEvidence | null;
   /** The category's best-performing torn-down ad — its structure is the model to follow. */
   referenceAd?: ReferenceAd | null;
+  /** Real A/B results of this brand's past ads (hook-style winners). */
+  performanceBlock?: string | null;
 }
 
 const MAX_BLOCK_CHARS = 1200;
@@ -123,7 +125,7 @@ Write ONE production-ready video ad script that follows the assigned template ex
 ${templateBlock}
 
 ${renderAttentionBlock(durationSec, input.timingEvidence)}
-${input.referenceAd ? `\n${renderReferenceBlock(input.referenceAd)}\n` : ""}
+${input.referenceAd ? `\n${renderReferenceBlock(input.referenceAd)}\n` : ""}${input.performanceBlock ? `\n${input.performanceBlock}\n` : ""}
 ${platformPlaybook}
 ${hookFormulaNamesBlock}
 

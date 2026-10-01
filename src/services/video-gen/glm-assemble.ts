@@ -267,7 +267,10 @@ export async function assembleGlmMaster(input: {
         const { renderEditV2 } = await import("./edit/render-v2");
         const { loadBrandStyle } = await import("./edit/brand-style");
         const brand = await loadBrandStyle(input.projectId);
-        const v2 = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice, brand });
+        // The master leads with the hook style real A/B results favour (question by default).
+        const { winningHookStyle } = await import("@/services/performance/store");
+        const hookStyle = await winningHookStyle(input.projectId).catch(() => "q" as const);
+        const v2 = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice, brand, hookStyle });
         const up = (buffer: Buffer, filename: string, contentType: string) => uploadBuffer({ buffer, filename, contentType, folder: "glm-masters" });
         const [m, p, c, vo, srt] = await Promise.all([
           up(await readFile(v2.masterFile), `master-${input.runId}.mp4`, "video/mp4"),
@@ -278,7 +281,7 @@ export async function assembleGlmMaster(input: {
         ]);
         if (m.provider === "inline") throw new Error("No asset storage configured for the master video");
         const url = (x: { provider: string; url: string } | null) => (x && x.provider !== "inline" ? x.url : null);
-        return { masterUrl: m.url, voiceoverUrl: url(vo), subtitlesUrl: url(srt), previewUrl: url(p), contactSheetUrl: url(c), qcReport: v2.qc };
+        return { masterUrl: m.url, voiceoverUrl: url(vo), subtitlesUrl: url(srt), previewUrl: url(p), contactSheetUrl: url(c), qcReport: { ...v2.qc, hookStyle } };
       } catch (err) {
         console.warn(`[assemble] edit engine v2 failed for run ${input.runId}, falling back to v1:`, err instanceof Error ? err.message.slice(0, 400) : err);
       }

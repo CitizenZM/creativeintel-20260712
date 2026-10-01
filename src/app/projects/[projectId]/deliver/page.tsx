@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { StageGuide } from "@/components/layout/stage-guide";
+import { PerformancePanel } from "@/components/deliver/performance-panel";
 import { isPlayable } from "@/components/studio/types";
 import { Download, ExternalLink, Film, FileText, Clapperboard } from "lucide-react";
 
@@ -63,6 +64,8 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
           <Download className="h-3.5 w-3.5" /> Export package (zip)
         </a>
       </div>
+
+      <PerformancePanel projectId={projectId} />
 
       <section>
         <h3 className="flex items-center gap-2 text-sm font-semibold mb-3">

@@ -46,8 +46,20 @@ export function VisionModelPicker({
   }, []);
 
   useEffect(() => {
-    load().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
-  }, [load]);
+    let alive = true;
+    fetch("/api/settings/ai/vision-model", { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Could not load the vision models (${res.status})`);
+        const data = (await res.json()) as PickerData;
+        if (alive) setData(data);
+      })
+      .catch((err: unknown) => {
+        if (alive) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function choose(model: string) {
     const option = data?.options.find((o) => o.model === model);

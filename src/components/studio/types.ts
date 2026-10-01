@@ -55,6 +55,8 @@ export interface LibtvRunView {
     checks: { key: string; label: string; value: number | null; target: string; pass: boolean }[];
     /** A/B hook variants rendered from the same clips. */
     variants?: { hookStyle: string; hookText: string | null; masterUrl: string; previewUrl: string | null; passed: number; total: number; adName?: string }[];
+    /** The master's hook style (q / c / p). */
+    hookStyle?: string;
     /** Hook styles rendering right now (style → ISO start time). */
     variantsPending?: Record<string, string>;
     /** Delivery formats (4:5 / 1:1 / 16:9 / 15 s / 10 s) from the same clips. */
