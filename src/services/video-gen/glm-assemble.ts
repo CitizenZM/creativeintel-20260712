@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
 import type { LibtvJob } from "@/generated/prisma/client";
 import { uploadBuffer } from "@/services/storage";
+import { pMap } from "@/lib/parallel";
 import { DEFAULT_VOICE, placeLines, planVoiceover, subtitleCues, synthesize, toSrt, type SubtitleCue } from "./voiceover";
 import type { QcReport } from "./edit/qc";
 
@@ -366,13 +367,17 @@ export async function speakVoiceover(input: {
   if (!lines.length) return null;
   const voice = input.voice || process.env.TTS_VOICE || DEFAULT_VOICE;
 
-  const spoken: { file: string; words: Awaited<ReturnType<typeof synthesize>>["words"]; duration: number }[] = [];
-  for (const [i, line] of lines.entries()) {
-    const { audio, words } = await synthesize(line.text, voice);
-    const file = path.join(input.dir, `vo${i}.mp3`);
-    await writeFile(file, audio);
-    spoken.push({ file, words, duration: (await durationOf(file)) || line.endSec - line.startSec });
-  }
+  // Lines are spoken three at a time — sequential TTS was a third of assembly time.
+  const spoken = await pMap(
+    lines,
+    async (line, i) => {
+      const { audio, words } = await synthesize(line.text, voice);
+      const file = path.join(input.dir, `vo${i}.mp3`);
+      await writeFile(file, audio);
+      return { file, words, duration: (await durationOf(file)) || line.endSec - line.startSec };
+    },
+    { concurrency: 3 }
+  );
   const placements = placeLines(lines, spoken.map((s) => s.duration), input.totalSec);
 
   const voiceoverFile = path.join(input.dir, "voiceover.mp3");

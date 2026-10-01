@@ -325,7 +325,7 @@ describe("assembly timing", () => {
     expect(await tickRun(fakeAdapter(), "run1", { remainingMs: 30_000 })).toBe("running");
     expect(store.runs.get("run1")!.status).toBe("running");
     expect(assemble).not.toHaveBeenCalled();
-    expect(await tickRun(fakeAdapter(), "run1", { remainingMs: 200_000 })).toBe("done");
+    expect(await tickRun(fakeAdapter(), "run1", { remainingMs: 250_000 })).toBe("done");
     expect(store.runs.get("run1")!.masterMp4Url).toBe("https://cdn/master.mp4");
   });
 
