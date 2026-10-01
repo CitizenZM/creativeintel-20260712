@@ -1,3 +1,4 @@
+import { chosenStructure } from "@/services/structures";
 import { loadLearning } from "@/services/performance/store";
 import { renderLearningBlock } from "@/services/performance/learn";
 import { timingEvidence, type ReferenceAd, type TeardownTiming, type TimingEvidence } from "@/lib/attention-blueprint";
@@ -152,7 +153,7 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
   const [teardowns, timing, referenceAd, learning] = await Promise.all([
     loadTeardownHighlights(projectId),
     loadTimingEvidence(projectId),
-    loadReferenceAd(projectId),
+    chosenStructure(projectId).then((picked) => picked ?? loadReferenceAd(projectId)),
     loadLearning(projectId),
   ]);
 

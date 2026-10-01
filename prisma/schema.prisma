@@ -961,6 +961,9 @@ model CampaignSelection {
   // Ad style categories the user picked on Insights (src/lib/style-categories.ts)
   styleCategories Json? // string[]
 
+  // The saved ad structure scripts follow (AdStructure); null = the best torn-down ad in the category
+  structureId String?
+
   // Confirmation
   confirmedAt DateTime?
   confirmed   Boolean   @default(false)
@@ -1134,4 +1137,31 @@ model AdPerformance {
 
   @@unique([projectId, platform, adName, dateFrom])
   @@index([projectId, hookStyle])
+}
+
+/// A proven ad structure saved from a teardown — hook, beat timeline, proof
+/// devices and the source ad's performance — reusable across brands in the
+/// same category ("structure library"). Scripts follow the structure, never
+/// the source's words, footage or brand.
+model AdStructure {
+  id             String   @id @default(cuid())
+  sourceProjectId String?
+  name           String
+  category       String?
+  goalType       String?
+  sourceTitle    String
+  sourceOwner    String?
+  sourceUrl      String?
+  sourceViews    Int?
+  hookType       String?
+  hookText       String?
+  durationSec    Float?
+  beats          Json // [{startSec, endSec, role, visual, onScreenText}]
+  proofDevices   Json?
+  whyItWorks     String?  @db.Text
+  timesUsed      Int      @default(0)
+  sourceTeardownId String? @unique
+  createdAt      DateTime @default(now())
+
+  @@index([category])
 }

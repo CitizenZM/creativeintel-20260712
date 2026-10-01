@@ -1,3 +1,4 @@
+import { SaveStructureButton } from "./save-structure-button";
 import {
   ExternalLink, Zap, MousePointerClick, BadgeCheck, Tag,
   Layers, Eye, ShieldCheck,
@@ -104,7 +105,7 @@ function beatColor(role?: string): string {
   return BEAT_COLORS[key] || "bg-indigo-500";
 }
 
-export function AdTeardownCard({ asset }: { asset: TeardownAssetView }) {
+export function AdTeardownCard({ asset, projectId }: { asset: TeardownAssetView; projectId?: string }) {
   const t = asset.teardown;
   const beats = asArray<TeardownBeat>(t?.beats);
   const sellingPoints = asArray<TeardownSellingPoint>(t?.sellingPoints);
@@ -133,6 +134,7 @@ export function AdTeardownCard({ asset }: { asset: TeardownAssetView }) {
               </span>
             )}
           </div>
+          {projectId && t && <SaveStructureButton projectId={projectId} teardownId={t.id} />}
           <div className="flex flex-wrap gap-1">
             {asset.platform && (
               <span className="text-[10px] bg-muted border border-border px-1.5 py-0.5 rounded-full">{asset.platform}</span>
