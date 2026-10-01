@@ -36,6 +36,8 @@ export interface JobContext {
   /** The job's compiled settings (e.g. a bring-your-own paid model id). */
   settings?: Record<string, unknown>;
   creditsEstimated?: number;
+  /** Finished reference images (cast lock: the CAST image or the packshot). */
+  referenceUrls?: string[];
 }
 
 /** What an engine must provide; the graph walking is shared. */
@@ -158,6 +160,7 @@ export async function tickRun(
       projectId: run.projectId,
       settings: (j.settings ?? {}) as Record<string, unknown>,
       creditsEstimated: j.creditsEstimated ?? 0,
+      referenceUrls: ((j.leftRefs as string[] | null) ?? []).map((r) => urlOf(r)).filter((u): u is string => !!u),
     };
   };
   const byName = new Map(run.jobs.map((j) => [j.nodeName, j]));
@@ -180,7 +183,15 @@ export async function tickRun(
   }
 
   // Keyframes.
-  const images = run.jobs.filter((x) => x.kind === "image" && x.status === "queued").slice(0, adapter.imagesPerTick);
+  // A keyframe edited from a reference (cast lock) waits until that reference image is done.
+  const refsReady = (j: LibtvJob) =>
+    ((j.leftRefs as string[] | null) ?? []).every((r) => {
+      const ref = byName.get(refName(r));
+      return !ref || ref.kind !== "image" || ref.status === "completed";
+    });
+  const images = run.jobs
+    .filter((x) => x.kind === "image" && x.status === "queued" && refsReady(x))
+    .slice(0, adapter.imagesPerTick);
   await Promise.all(
     images.map(async (j) => {
       if (!(await claimJob(j.id))) return;

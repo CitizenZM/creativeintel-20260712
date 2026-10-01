@@ -133,3 +133,49 @@ export async function getSeedanceTask(taskId: string): Promise<SeedanceTask> {
   const raw = await call<Parameters<typeof parseSeedanceTask>[0]>(`/api/v3/contents/generations/tasks/${encodeURIComponent(taskId)}`);
   return parseSeedanceTask(raw);
 }
+
+/**
+ * Edit a reference image into a new shot (Qwen-Image-Edit): the person or
+ * product in the reference keeps its identity — the basis of the cast lock.
+ * Multipart, like the OpenAI images/edits API.
+ */
+export async function editMatrixImage(
+  prompt: string,
+  referenceUrl: string,
+  opts: { model?: string; projectId?: string | null } = {}
+): Promise<{ buffer: Buffer; contentType: string }> {
+  const key = matrixKey();
+  if (!key) throw new Error("MATRIX_API_KEY is not configured");
+  const ref = await fetch(referenceUrl, { signal: AbortSignal.timeout(60_000) });
+  if (!ref.ok) throw new Error(`Reference image download ${ref.status}`);
+  const refType = ref.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+  const form = new FormData();
+  const model = opts.model ?? "qwen/qwen-image-edit";
+  form.set("model", model);
+  form.set("prompt", prompt);
+  form.set("n", "1");
+  form.set("image", new Blob([await ref.arrayBuffer()], { type: refType }), refType.includes("png") ? "ref.png" : "ref.jpg");
+  const res = await fetch(`${MATRIX_BASE_URL}/v1/images/edits`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}` },
+    body: form,
+    signal: AbortSignal.timeout(170_000),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Matrix ${res.status}: ${text.slice(0, 200)}`);
+  const out = JSON.parse(text) as { data?: { b64_json?: string; url?: string }[]; error?: unknown };
+  const b64 = out.data?.[0]?.b64_json;
+  if (!b64) throw new Error(`Matrix edit returned no image${out.error ? `: ${JSON.stringify(out.error).slice(0, 160)}` : ""}`);
+  const buffer = Buffer.from(b64, "base64");
+  logAiUsage({ provider: "matrix", model, capability: "image", images: 1, projectId: opts.projectId ?? undefined });
+  return { buffer, contentType: buffer[0] === 0x89 ? "image/png" : "image/jpeg" };
+}
+
+/** Keep the reference's identity; describe only the new shot. */
+export function lockedEditPrompt(kind: "cast" | "product", shot: string): string {
+  const keep =
+    kind === "cast"
+      ? "Keep this exact person unchanged — same face, hair, skin tone, build and wardrobe."
+      : "Keep this exact product unchanged — same shape, colour, proportions, screen and logo placement.";
+  return `${keep} New shot: ${shot}`.slice(0, 1800);
+}

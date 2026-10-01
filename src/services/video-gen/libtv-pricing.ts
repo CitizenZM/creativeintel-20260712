@@ -53,6 +53,12 @@ export interface LibtvImageModel {
   note?: string;
   /** Model id on the Matrix gateway (engine "matrix"). */
   matrixModel?: string;
+  /**
+   * Cast lock: the run first renders one reference image of the on-camera
+   * talent, and every keyframe with a person is edited from it (product shots
+   * from the real packshot) — the same face and product in every shot.
+   */
+  lockCharacter?: boolean;
 }
 
 export interface LibtvVideoModel {
@@ -151,7 +157,23 @@ export const IMAGE_MODELS: LibtvImageModel[] = [
     ratios: ["9:16", "16:9", "1:1", "3:4", "4:3"],
     settingsKeys: ["modeType", "ratio"],
     verified: false,
-    note: "Photoreal stills with natural faces and hands (~55 s each) on your Matrix key — about 2¢ an image (estimate, US cents). Runs on Matrix gift credit too.",
+    note: "Photoreal stills with natural faces and hands (~55 s each) on your Matrix key — about 2¢ an image (estimate, US cents). Runs on Matrix gift credit too. Cast-locked: one actor and the real product in every shot.",
+    lockCharacter: true,
+  },
+  {
+    name: "Qwen-Image cast-locked (Matrix keyframes, free GLM clips)",
+    engine: "glm",
+    matrixModel: "qwen/qwen-image",
+    lockCharacter: true,
+    modality: "image",
+    modeType: "text2image",
+    creditsPerImage: 1,
+    quality: "928x1664",
+    qualityKey: "quality",
+    ratios: ["9:16", "16:9", "1:1", "3:4", "4:3"],
+    settingsKeys: ["modeType", "ratio"],
+    verified: false,
+    note: "Consistent cast for the free GLM engine: Qwen-Image keyframes on your Matrix key (gift credit works; ~1¢ each, estimate) — one reference image of the actor, every person shot edited from it, product shots from the real packshot. Clips stay free CogVideoX.",
   },
   {
     name: "Seedream 4.5 (Matrix)",
@@ -494,6 +516,7 @@ export function imageSettings(
   if (model.settingsKeys.includes("count")) settings.count = opts.count ?? 1;
   if (model.qualityKey === "resolution" && model.settingsKeys.includes("quality")) settings.quality = "high";
   if (model.matrixModel) settings.matrixModel = model.matrixModel;
+  if (model.lockCharacter) settings.lockCharacter = 1;
   return settings;
 }
 
@@ -695,7 +718,8 @@ export function modelOptions(
     if (engine === "matrix" && !process.env.MATRIX_API_KEY) return false;
     return freeOnly ? engine === "glm" || engine === "comfyui" || engine === "animatic" : true;
   };
-  const images = IMAGE_MODELS.filter((m) => offered(m.engine));
+  // Matrix keyframes need the key, and spend money, so never in strict free mode.
+  const images = IMAGE_MODELS.filter((m) => offered(m.engine) && !(m.matrixModel && (freeOnly || !process.env.MATRIX_API_KEY)));
   const videos = [...VIDEO_MODELS, ..._extraVideoModels].filter((m) => offered(m.engine) && !(freeOnly && m.zhipuModel));
   return {
     image: images.map((m) => ({

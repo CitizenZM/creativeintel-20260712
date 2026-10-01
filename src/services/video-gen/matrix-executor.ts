@@ -7,7 +7,7 @@
  */
 import { uploadBuffer } from "@/services/storage";
 import { logAiUsage } from "@/services/ai/usage";
-import { generateMatrixImage, getSeedanceTask, isMatrixConfigured, submitSeedance } from "@/services/ai/matrix";
+import { editMatrixImage, generateMatrixImage, getSeedanceTask, isMatrixConfigured, lockedEditPrompt, submitSeedance } from "@/services/ai/matrix";
 import { persistResult } from "@/services/ai/zhipu";
 import { driveRun, type EngineAdapter, type JobContext, type TaskResult, type TickResult } from "./server-executor";
 
@@ -19,6 +19,27 @@ function matrixModel(ctx: JobContext, fallback: string): string {
   return typeof m === "string" && m ? m : fallback;
 }
 
+/**
+ * A Matrix keyframe for any engine: plain text-to-image, or — under the cast
+ * lock — an edit of the run's CAST reference (people) or the packshot (product).
+ */
+export async function matrixKeyframe(prompt: string, ctx: JobContext): Promise<{ url: string }> {
+  const editFrom = ctx.settings?.editFrom;
+  const ref = ctx.referenceUrls?.[0];
+  const { buffer, contentType } =
+    (editFrom === "cast" || editFrom === "product") && ref
+      ? await editMatrixImage(lockedEditPrompt(editFrom, prompt), ref, { projectId: ctx.projectId })
+      : await generateMatrixImage(prompt, { model: matrixModel(ctx, DEFAULT_IMAGE), aspectRatio: ctx.aspectRatio, projectId: ctx.projectId });
+  const up = await uploadBuffer({
+    buffer,
+    filename: `${ctx.nodeName}${contentType === "image/png" ? ".png" : ".jpg"}`,
+    contentType,
+    folder: `matrix-runs/${ctx.runId}`,
+  });
+  if (up.provider === "inline") throw new Error("No asset storage configured — set BLOB_READ_WRITE_TOKEN or CLOUDINARY_URL");
+  return { url: up.url };
+}
+
 export const matrixAdapter: EngineAdapter = {
   engine: "matrix",
   workerId: "matrix-server",
@@ -28,20 +49,8 @@ export const matrixAdapter: EngineAdapter = {
   isConfigured: isMatrixConfigured,
   notConfiguredError: "MATRIX_API_KEY is not configured",
 
-  async generateImage(prompt, ctx) {
-    const { buffer, contentType } = await generateMatrixImage(prompt, {
-      model: matrixModel(ctx, DEFAULT_IMAGE),
-      aspectRatio: ctx.aspectRatio,
-      projectId: ctx.projectId,
-    });
-    const up = await uploadBuffer({
-      buffer,
-      filename: `${ctx.nodeName}${contentType === "image/png" ? ".png" : ".jpg"}`,
-      contentType,
-      folder: `matrix-runs/${ctx.runId}`,
-    });
-    if (up.provider === "inline") throw new Error("No asset storage configured — set BLOB_READ_WRITE_TOKEN or CLOUDINARY_URL");
-    return { url: up.url };
+  generateImage(prompt, ctx) {
+    return matrixKeyframe(prompt, ctx);
   },
 
   async submitVideo(input, ctx) {
