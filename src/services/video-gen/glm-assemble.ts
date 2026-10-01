@@ -35,6 +35,8 @@ export interface AssembleFrame {
   voiceover?: string | null;
   /** HOOK | BODY | CTA — drives the edit's pacing (edit engine v2). */
   segment?: string | null;
+  /** The shot shows a person (headline placement keeps off the face). */
+  hasPerson?: boolean;
 }
 
 export const CAPTION_FONT = path.join(process.cwd(), "assets/fonts/Anton-Regular.ttf");

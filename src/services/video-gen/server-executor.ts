@@ -321,7 +321,7 @@ export async function storyboardFrames(storyboardId: string | null): Promise<Ass
   const sb = await prisma.storyboard.findUnique({ where: { id: storyboardId }, select: { frames: true, frameSeconds: true } });
   const frameSeconds = sb?.frameSeconds || 2;
   const frames = Array.isArray(sb?.frames)
-    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null; segment?: string | null }[])
+    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null; segment?: string | null; imagePrompt?: string | null; scene?: string | null }[])
     : [];
   return frames.map((f, i) => ({
     frameNumber: f.frameNumber ?? i + 1,
@@ -330,6 +330,7 @@ export async function storyboardFrames(storyboardId: string | null): Promise<Ass
     text: typeof f.textOverlay === "string" ? f.textOverlay : null,
     voiceover: typeof f.voiceover === "string" ? f.voiceover : null,
     segment: typeof f.segment === "string" ? f.segment : null,
+    hasPerson: hasPeople(`${f.imagePrompt ?? ""} ${f.scene ?? ""}`),
   }));
 }
 

@@ -25,6 +25,13 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reassemble-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({ action: z.literal("director-review"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({
+    action: z.literal("rerender-shots"),
+    projectId: z.string().min(1),
+    runId: z.string().min(1),
+    /** Default: the shots the AI director flagged. */
+    shotIndexes: z.array(z.number().int().min(0)).optional(),
+  }),
+  z.object({
     action: z.literal("render-export"),
     projectId: z.string().min(1),
     runId: z.string().min(1),

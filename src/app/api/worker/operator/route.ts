@@ -22,7 +22,7 @@ import { LIVE } from "@/services/creative-library";
 import { approveAllFrames, freeRunRefusal, operatorActionSchema } from "@/services/operator";
 import { compileRunFromStoryboard, LibtvCompileError } from "@/services/video-gen/libtv-compile";
 import { isServerEngine } from "@/services/video-gen/libtv-pricing";
-import { approveRun, getRunWithJobs, runDone } from "@/services/video-gen/libtv-queue";
+import { approveRun, cloneRunForRerender, getRunWithJobs, runDone } from "@/services/video-gen/libtv-queue";
 import { assembleGlmMaster } from "@/services/video-gen/glm-assemble";
 import { renderVariantForRun } from "@/services/video-gen/variants";
 import { renderExportForRun } from "@/services/video-gen/exports";
@@ -140,6 +140,18 @@ export async function POST(request: Request) {
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
     }
+  }
+
+  if (input.action === "rerender-shots") {
+    // A new run version re-rendering the chosen shots (default: the director's picks); approve it next.
+    const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId }, select: { id: true, qcReport: true } });
+    if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    const flagged = ((run.qcReport as { director?: { shotIndexes?: number[] } } | null)?.director?.shotIndexes ?? []) as number[];
+    const shots = input.shotIndexes?.length ? input.shotIndexes : flagged;
+    if (!shots.length) return NextResponse.json({ error: "No shots to re-render (run the director review first)" }, { status: 400 });
+    const result = await cloneRunForRerender(run.id, shots);
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+    return NextResponse.json({ ok: true, runId: result.run?.id ?? null, shots, creditsEstimated: result.run?.creditsEstimated ?? 0 }, { status: 201 });
   }
 
   if (input.action === "render-export") {
