@@ -22,6 +22,7 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     budgetMode: z.enum(["economy", "full"]).optional(),
     allowOverBudget: z.boolean().optional(),
   }),
+  z.object({ action: z.literal("reassemble-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({
     action: z.literal("approve-run"),
     projectId: z.string().min(1),

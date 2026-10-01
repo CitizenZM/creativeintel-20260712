@@ -263,6 +263,9 @@ export async function tickRun(
       masterMp4Url: master.masterUrl,
       voiceoverUrl: master.voiceoverUrl,
       subtitlesUrl: master.subtitlesUrl,
+      previewMp4Url: master.previewUrl ?? null,
+      contactSheetUrl: master.contactSheetUrl ?? null,
+      qcReport: master.qcReport ?? null,
       creditsSpent: spent,
     });
     return "done";
@@ -272,12 +275,12 @@ export async function tickRun(
   }
 }
 
-async function storyboardFrames(storyboardId: string | null): Promise<AssembleFrame[]> {
+export async function storyboardFrames(storyboardId: string | null): Promise<AssembleFrame[]> {
   if (!storyboardId) return [];
   const sb = await prisma.storyboard.findUnique({ where: { id: storyboardId }, select: { frames: true, frameSeconds: true } });
   const frameSeconds = sb?.frameSeconds || 2;
   const frames = Array.isArray(sb?.frames)
-    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null }[])
+    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null; segment?: string | null }[])
     : [];
   return frames.map((f, i) => ({
     frameNumber: f.frameNumber ?? i + 1,
@@ -285,6 +288,7 @@ async function storyboardFrames(storyboardId: string | null): Promise<AssembleFr
     endSec: Number.isFinite(f.endSec) ? f.endSec! : (i + 1) * frameSeconds,
     text: typeof f.textOverlay === "string" ? f.textOverlay : null,
     voiceover: typeof f.voiceover === "string" ? f.voiceover : null,
+    segment: typeof f.segment === "string" ? f.segment : null,
   }));
 }
 
