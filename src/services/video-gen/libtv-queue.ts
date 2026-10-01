@@ -426,6 +426,8 @@ export interface RunDoneInput {
   contactSheetUrl?: string | null;
   voiceoverUrl?: string | null;
   subtitlesUrl?: string | null;
+  /** Measured QC of the master (edit engine v2). */
+  qcReport?: unknown;
   creditsSpent?: number | null;
 }
 
@@ -446,6 +448,7 @@ export async function runDone(input: RunDoneInput) {
       contactSheetUrl: input.contactSheetUrl ?? undefined,
       voiceoverUrl: input.voiceoverUrl ?? undefined,
       subtitlesUrl: input.subtitlesUrl ?? undefined,
+      ...(input.qcReport ? { qcReport: input.qcReport as never } : {}),
       creditsSpent: spent,
       error: null,
       completedAt: new Date(),

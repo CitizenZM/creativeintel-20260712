@@ -213,3 +213,43 @@ export async function synthesize(text: string, voice = DEFAULT_VOICE): Promise<{
   }
   throw lastErr instanceof Error ? lastErr : new Error("Edge TTS failed");
 }
+
+export interface TimedWord {
+  text: string;
+  startSec: number;
+  endSec: number;
+}
+
+/** Each script word on the master's timeline (placement start + tempo applied). */
+export function timedWords(words: Word[], placement: Placement, lineText?: string): TimedWord[] {
+  const src = lineText ? alignToSource(words, lineText) : words;
+  return src.map((w) => ({
+    text: w.text,
+    startSec: placement.startSec + w.startSec / placement.tempo,
+    endSec: placement.startSec + (w.startSec + w.durSec) / placement.tempo,
+  }));
+}
+
+/**
+ * Word-by-word caption groups: up to `maxWords` words / `maxChars` characters,
+ * breaking after punctuation, so the viewer reads one short phrase at a time
+ * with the spoken word highlighted.
+ */
+export function kineticGroups(words: TimedWord[], maxWords = 3, maxChars = 18): TimedWord[][] {
+  const groups: TimedWord[][] = [];
+  let cur: TimedWord[] = [];
+  for (const w of words) {
+    const len = [...cur, w].map((x) => x.text).join(" ").length;
+    if (cur.length && (cur.length >= maxWords || len > maxChars)) {
+      groups.push(cur);
+      cur = [];
+    }
+    cur.push(w);
+    if (/[.!?;:,]$/.test(w.text)) {
+      groups.push(cur);
+      cur = [];
+    }
+  }
+  if (cur.length) groups.push(cur);
+  return groups;
+}

@@ -19,6 +19,7 @@ import ffmpegPath from "ffmpeg-static";
 import type { LibtvJob } from "@/generated/prisma/client";
 import { uploadBuffer } from "@/services/storage";
 import { DEFAULT_VOICE, placeLines, planVoiceover, subtitleCues, synthesize, toSrt, type SubtitleCue } from "./voiceover";
+import type { QcReport } from "./edit/qc";
 
 const run = promisify(execFile);
 const FPS = 30;
@@ -31,6 +32,8 @@ export interface AssembleFrame {
   text?: string | null;
   /** The storyboard's voiceover line for this frame (repeated across its beat). */
   voiceover?: string | null;
+  /** HOOK | BODY | CTA — drives the edit's pacing (edit engine v2). */
+  segment?: string | null;
 }
 
 export const CAPTION_FONT = path.join(process.cwd(), "assets/fonts/Anton-Regular.ttf");
@@ -50,7 +53,7 @@ export function wrapCaption(text: string, width = 22): string[] {
 }
 
 /** Pango markup needs &, < and > escaped. */
-function pangoEscape(text: string): string {
+export function pangoEscape(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
@@ -63,7 +66,7 @@ function pangoEscape(text: string): string {
  * Serverless Linux has no fonts and no fontconfig config, so pango can't find
  * even the bundled font. Point fontconfig at assets/fonts before sharp loads.
  */
-async function ensureFontconfig(fontFile: string): Promise<void> {
+export async function ensureFontconfig(fontFile: string): Promise<void> {
   if (process.env.FONTCONFIG_FILE) return;
   const conf = path.join(tmpdir(), "creativeintel-fonts.conf");
   await mkdir(path.join(tmpdir(), "fontconfig-cache"), { recursive: true }).catch(() => {});
@@ -167,6 +170,10 @@ export interface AssembledMaster {
   masterUrl: string;
   voiceoverUrl: string | null;
   subtitlesUrl: string | null;
+  previewUrl?: string | null;
+  contactSheetUrl?: string | null;
+  /** Measured QC of the master (edit engine v2 only). */
+  qcReport?: QcReport | null;
 }
 
 type Settings = {
@@ -245,6 +252,28 @@ export async function assembleGlmMaster(input: {
       sources.set(seg.url, file);
     }
 
+    // Edit engine v2 (beat-cut edit, music, SFX, kinetic captions, QC); the
+    // v1 hard-cut assembly below is its Plan B. EDIT_ENGINE=v1 forces v1.
+    if (process.env.EDIT_ENGINE !== "v1") {
+      try {
+        const { renderEditV2 } = await import("./edit/render-v2");
+        const v2 = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice });
+        const up = (buffer: Buffer, filename: string, contentType: string) => uploadBuffer({ buffer, filename, contentType, folder: "glm-masters" });
+        const [m, p, c, vo, srt] = await Promise.all([
+          up(await readFile(v2.masterFile), `master-${input.runId}.mp4`, "video/mp4"),
+          up(await readFile(v2.previewFile), `preview-${input.runId}.mp4`, "video/mp4"),
+          up(await readFile(v2.contactSheetFile), `sheet-${input.runId}.jpg`, "image/jpeg"),
+          v2.voiceoverFile ? up(await readFile(v2.voiceoverFile), `voiceover-${input.runId}.mp3`, "audio/mpeg") : null,
+          v2.srt ? up(Buffer.from(v2.srt, "utf8"), `subtitles-${input.runId}.srt`, "application/x-subrip") : null,
+        ]);
+        if (m.provider === "inline") throw new Error("No asset storage configured for the master video");
+        const url = (x: { provider: string; url: string } | null) => (x && x.provider !== "inline" ? x.url : null);
+        return { masterUrl: m.url, voiceoverUrl: url(vo), subtitlesUrl: url(srt), previewUrl: url(p), contactSheetUrl: url(c), qcReport: v2.qc };
+      } catch (err) {
+        console.warn(`[assemble] edit engine v2 failed for run ${input.runId}, falling back to v1:`, err instanceof Error ? err.message.slice(0, 400) : err);
+      }
+    }
+
     const parts: string[] = [];
     for (const [i, seg] of segments.entries()) {
       const out = path.join(dir, `seg${String(i).padStart(3, "0")}.mp4`);
@@ -317,14 +346,22 @@ export async function assembleGlmMaster(input: {
  * Speak the storyboard's voiceover, mix it under the silent master and burn in
  * subtitles timed to the spoken words. Returns null when there is nothing to say.
  */
-export async function addVoiceoverAndSubtitles(input: {
+export interface SpokenVoiceover {
+  /** The whole voiceover as one track the length of the master. */
+  voiceoverFile: string;
+  lines: ReturnType<typeof planVoiceover>;
+  placements: ReturnType<typeof placeLines>;
+  /** Raw TTS word timings per line. */
+  words: Awaited<ReturnType<typeof synthesize>>["words"][];
+}
+
+/** Speak each beat's line, place it on its beat and mix one voiceover track. Null when there is nothing to say. */
+export async function speakVoiceover(input: {
   dir: string;
-  master: string;
   frames: AssembleFrame[];
   totalSec: number;
-  canvas: { w: number; h: number };
   voice?: string;
-}): Promise<{ file: string; voiceoverFile: string; srt: string } | null> {
+}): Promise<SpokenVoiceover | null> {
   const lines = planVoiceover(input.frames);
   if (!lines.length) return null;
   const voice = input.voice || process.env.TTS_VOICE || DEFAULT_VOICE;
@@ -338,7 +375,6 @@ export async function addVoiceoverAndSubtitles(input: {
   }
   const placements = placeLines(lines, spoken.map((s) => s.duration), input.totalSec);
 
-  // One voiceover track the length of the master.
   const voiceoverFile = path.join(input.dir, "voiceover.mp3");
   const mixInputs = spoken.flatMap((s) => ["-i", s.file]);
   const chains = placements.map((p, i) => {
@@ -349,6 +385,21 @@ export async function addVoiceoverAndSubtitles(input: {
   await run(ffmpegPath!, ["-y", "-v", "error", ...mixInputs, "-filter_complex", mix, "-map", "[vo]", "-ac", "2", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", "128k", voiceoverFile], {
     timeout: 90_000,
   });
+  return { voiceoverFile, lines, placements, words: spoken.map((s) => s.words) };
+}
+
+export async function addVoiceoverAndSubtitles(input: {
+  dir: string;
+  master: string;
+  frames: AssembleFrame[];
+  totalSec: number;
+  canvas: { w: number; h: number };
+  voice?: string;
+}): Promise<{ file: string; voiceoverFile: string; srt: string } | null> {
+  const vo = await speakVoiceover(input);
+  if (!vo) return null;
+  const { voiceoverFile, lines, placements } = vo;
+  const spoken = vo.words.map((words) => ({ words }));
 
   // Subtitles from the TTS word timings, kept inside the video.
   const cues = spoken

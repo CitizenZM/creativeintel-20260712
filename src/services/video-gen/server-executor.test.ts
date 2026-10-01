@@ -222,6 +222,9 @@ describe("tickRun", () => {
       masterMp4Url: "https://cdn/master.mp4",
       voiceoverUrl: "https://cdn/vo.mp3",
       subtitlesUrl: "https://cdn/subs.srt",
+      previewMp4Url: null,
+      contactSheetUrl: null,
+      qcReport: null,
       creditsSpent: 0,
     });
     expect(run.status).toBe("completed");

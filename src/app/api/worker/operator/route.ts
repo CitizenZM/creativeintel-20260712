@@ -9,6 +9,7 @@
  * POST { action: "approve-frames", projectId, storyboardId }
  * POST { action: "compile-run", projectId, storyboardId, scriptId?, imageModel, videoModel, clipDurationSec?, aspectRatio? }
  * POST { action: "approve-run", projectId, runId, allowPaid?, creditCap? }
+ * POST { action: "reassemble-run", projectId, runId } — re-cut a finished server run from its clips
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -18,7 +19,9 @@ import { LIVE } from "@/services/creative-library";
 import { approveAllFrames, freeRunRefusal, operatorActionSchema } from "@/services/operator";
 import { compileRunFromStoryboard, LibtvCompileError } from "@/services/video-gen/libtv-compile";
 import { isServerEngine } from "@/services/video-gen/libtv-pricing";
-import { approveRun, getRunWithJobs } from "@/services/video-gen/libtv-queue";
+import { approveRun, getRunWithJobs, runDone } from "@/services/video-gen/libtv-queue";
+import { assembleGlmMaster } from "@/services/video-gen/glm-assemble";
+import { storyboardFrames } from "@/services/video-gen/server-executor";
 import { driveServerRun } from "@/services/video-gen/server-engines";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 
@@ -39,6 +42,9 @@ function summarize(run: NonNullable<Awaited<ReturnType<typeof getRunWithJobs>>>)
     masterUrl: r.masterMp4Url ?? null,
     voiceoverUrl: r.voiceoverUrl ?? null,
     subtitlesUrl: r.subtitlesUrl ?? null,
+    previewUrl: r.previewMp4Url ?? null,
+    contactSheetUrl: r.contactSheetUrl ?? null,
+    qc: r.qcReport ?? null,
     error: r.error ?? null,
   };
 }
@@ -95,6 +101,29 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
     }
+  }
+
+  if (input.action === "reassemble-run") {
+    // Re-cut a finished server run from its existing clips (no generation, no spend).
+    const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId } });
+    if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    if (!isServerEngine(run.executor) || run.status !== "completed") {
+      return NextResponse.json({ error: `Only completed server runs can be re-assembled (status ${run.status})` }, { status: 409 });
+    }
+    const jobs = await prisma.libtvJob.findMany({ where: { runId: run.id } });
+    const frames = await storyboardFrames(run.storyboardId);
+    const master = await assembleGlmMaster({ runId: run.id, aspectRatio: run.aspectRatio, frames, jobs });
+    await runDone({
+      runId: run.id,
+      masterMp4Url: master.masterUrl,
+      voiceoverUrl: master.voiceoverUrl,
+      subtitlesUrl: master.subtitlesUrl,
+      previewMp4Url: master.previewUrl ?? null,
+      contactSheetUrl: master.contactSheetUrl ?? null,
+      qcReport: master.qcReport ?? null,
+      creditsSpent: run.creditsSpent,
+    });
+    return NextResponse.json({ ok: true, run: summarize((await getRunWithJobs(run.id))!), qc: master.qcReport ?? null });
   }
 
   // approve-run: free server renders only.
