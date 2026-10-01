@@ -279,7 +279,9 @@ export async function renderEditV2(input: {
     const file = path.join(dir, `v2card${i}.png`);
     const png = card.role === "hook" ? await hookHeadlinePng(card.text, canvas, look) : card.role === "offer" ? await offerCardPng(card.text, canvas, look) : await claimChipPng(card.text, canvas, look);
     await writeFile(file, png);
-    overlays.push({ file, startSec: card.startSec, endSec: card.endSec, y: card.role === "claim" ? 0.3 : 0.22 });
+    // A hook over a person sits in the lower half, off the face (AI director finding).
+    const hookOverPerson = card.role === "hook" && input.frames.some((f) => (f.segment ?? "").toUpperCase() === "HOOK" && f.hasPerson);
+    overlays.push({ file, startSec: card.startSec, endSec: card.endSec, y: card.role === "claim" ? 0.3 : hookOverPerson ? 0.52 : 0.22 });
   }
   if (plan.ctaButton) {
     const file = path.join(dir, "v2cta.png");
