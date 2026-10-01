@@ -343,6 +343,49 @@ export async function assembleGlmMaster(input: {
   }
 }
 
+/** One A/B hook variant of a finished run: same clips and body, a different opening. */
+export async function renderHookVariant(input: {
+  runId: string;
+  aspectRatio: string;
+  frames: AssembleFrame[];
+  jobs: LibtvJob[];
+  hookStyle: "q" | "c" | "p";
+  hookText?: string | null;
+  voice?: string;
+}): Promise<{ hookStyle: string; hookText: string | null; masterUrl: string; previewUrl: string | null; qc: QcReport }> {
+  const segments = planSegments(input.frames, input.jobs);
+  if (!segments.length) throw new Error("Nothing to assemble — no finished clips");
+  const { w, h } = canvasFor(input.aspectRatio);
+  const dir = await mkdtemp(path.join(tmpdir(), `variant-${input.runId}-`));
+  try {
+    const sources = new Map<string, string>();
+    let n = 0;
+    for (const seg of segments) {
+      if (sources.has(seg.url)) continue;
+      const file = path.join(dir, `src${n++}${seg.kind === "clip" ? ".mp4" : ".img"}`);
+      await download(seg.url, file);
+      sources.set(seg.url, file);
+    }
+    const { renderEditV2 } = await import("./edit/render-v2");
+    const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText });
+    const tag = `${input.hookStyle}-${Date.now().toString(36)}`;
+    const [m, p] = await Promise.all([
+      uploadBuffer({ buffer: await readFile(v.masterFile), filename: `variant-${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
+      uploadBuffer({ buffer: await readFile(v.previewFile), filename: `variant-preview-${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
+    ]);
+    if (m.provider === "inline") throw new Error("No asset storage configured for the variant");
+    return {
+      hookStyle: input.hookStyle,
+      hookText: v.plan.cards.find((c) => c.role === "hook")?.text ?? null,
+      masterUrl: m.url,
+      previewUrl: p.provider === "inline" ? null : p.url,
+      qc: v.qc,
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 /**
  * Speak the storyboard's voiceover, mix it under the silent master and burn in
  * subtitles timed to the spoken words. Returns null when there is nothing to say.

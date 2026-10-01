@@ -85,6 +85,7 @@ describe("hookHeadline", () => {
     expect(hookHeadline("Is your TV too dark?")).toBe("Is your TV too dark?");
     expect(hookHeadline("You're probably thinking… 'Is this TV too bright for my living room?'")).toBe("Is this TV too bright for my living room?");
     expect(hookHeadline("We spent three years building the brightest and thinnest television anyone has ever made")).toBeNull();
+    expect(hookHeadline("Tired of TV screens that wash out in daylight?")).toBe("Tired of TV screens that wash out in daylight?");
   });
 });
 
@@ -92,5 +93,21 @@ describe("isCtaLine", () => {
   it("spots an offer line that already asks for the click", () => {
     expect(isCtaLine("Shop Now")).toBe(true);
     expect(isCtaLine("Save $200 this weekend")).toBe(false);
+  });
+});
+
+describe("hook variants", () => {
+  it("rewrites only the opening shot: contrast flags it, product blast swaps in the packshot", () => {
+    const base = planEdit(ad);
+    const c = planEdit(ad, { hookStyle: "c" });
+    const p = planEdit(ad, { hookStyle: "p", hookText: "3,000 nits. Daylight-proof." });
+    expect(c.shots[0].contrast).toBe(true);
+    expect(p.shots[0]).toMatchObject({ kind: "still", url: "prod", motion: "push" });
+    expect(p.cards[0]).toMatchObject({ role: "hook", text: "3,000 nits. Daylight-proof." });
+    for (const v of [c, p]) {
+      expect(v.shots.slice(1).map((s) => [s.url, s.startSec])).toEqual(base.shots.slice(1).map((s) => [s.url, s.startSec]));
+      // The cut out of the opener may change (product → footage gets a whip); the rest is identical.
+      expect(v.boundaries.slice(1)).toEqual(base.boundaries.slice(1));
+    }
   });
 });

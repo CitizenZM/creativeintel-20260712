@@ -52,7 +52,17 @@ export interface Shot {
   motion: "push" | "pull" | "drift" | "none";
   frameNumber: number;
   segment: "HOOK" | "BODY" | "CTA";
+  /** Hook variant "c": the shot opens small and boxed, then fills the frame on beat 2. */
+  contrast?: boolean;
 }
+
+/**
+ * Hook variants for A/B tests on the same edit (libtv-video-ad hook grammar):
+ *   q  question — the hook headline over live footage (default)
+ *   c  contrast — the first shot starts small and boxed, explodes full-bleed on beat 2
+ *   p  product blast — frame one is the real product, pushed at the lens
+ */
+export type HookStyle = "q" | "c" | "p";
 
 export interface Boundary {
   atSec: number;
@@ -111,7 +121,9 @@ export function hookHeadline(text: string): string | null {
   if (quoted && words(quoted).length <= 9) return quoted;
   const sentences = t.split(/(?<=[.!?…])\s+/).filter(Boolean);
   for (const cand of [sentences[sentences.length - 1], t]) {
-    if (cand && words(cand).length <= 7) return cand.replace(/^[.…\s]+/, "");
+    // A question is the classic hook: allow it up to 9 words (three short lines).
+    const limit = /\?['"’”]*$/.test(cand ?? "") ? 9 : 7;
+    if (cand && words(cand).length <= limit) return cand.replace(/^[.…\s]+/, "");
   }
   return null;
 }
@@ -123,7 +135,7 @@ export function isCtaLine(text: string): boolean {
 
 export function planEdit(
   input: PlanInputSegment[],
-  opts: { bpm?: number; voiceovers?: Map<number, string | null> } = {}
+  opts: { bpm?: number; voiceovers?: Map<number, string | null>; hookStyle?: HookStyle; hookText?: string | null } = {}
 ): EditPlan {
   if (!input.length) throw new Error("Nothing to edit");
   // Lay the storyboard segments end to end on frame-exact times.
@@ -199,6 +211,13 @@ export function planEdit(
     const last = ctaFrames[ctaFrames.length - 1];
     push({ ...first, endSec: last.endSec }, first.startSec, last.endSec, { motion: "push" });
   }
+  // Hook variants rewrite only the opening shot; body and CTA stay identical.
+  const opener = shots[0];
+  if (opener && opener.segment === "HOOK" && opts.hookStyle === "c") opener.contrast = true;
+  if (opener && opener.segment === "HOOK" && opts.hookStyle === "p") {
+    const product = laid.find((s) => s.segment === "CTA" && s.kind === "still");
+    if (product) Object.assign(opener, { kind: "still", url: product.url, srcFrom: 0, zoom: 1.1, motion: "push", anchorY: 0.5 });
+  }
   // Re-index and close any rounding gaps so shots tile the timeline exactly.
   for (const [i, sh] of shots.entries()) {
     sh.index = i;
@@ -216,6 +235,8 @@ export function planEdit(
     let tr: Transition = "cut";
     if (Math.abs(at - dropSec) < 1e-3) tr = "flash";
     else if (ctaSec !== null && Math.abs(at - ctaSec) < 1e-3) tr = "whip";
+    // Hook cuts don't advance the body rotation, so hook variants keep identical body transitions.
+    else if (changed && shots[i].segment === "HOOK") tr = "whip";
     else if (changed) tr = BODY_ROTATION[rot++ % BODY_ROTATION.length];
     else if (shots[i].zoom > shots[i - 1].zoom) tr = "zoom";
     boundaries.push({ atSec: at, transition: tr });
@@ -228,7 +249,7 @@ export function planEdit(
   // On-screen text: the hook headline, short claims, the offer on the end card.
   const cards: TextCard[] = [];
   const hookRaw = laid.find((s) => s.segment === "HOOK" && s.text?.trim())?.text?.trim();
-  const hookText = hookRaw ? hookHeadline(hookRaw) : null;
+  const hookText = opts.hookText?.trim() || (hookRaw ? hookHeadline(hookRaw) : null);
   if (hookText) cards.push({ text: hookText, startSec: 0, endSec: Math.max(1.5, dropSec), role: "hook" });
   for (const s of main) {
     if (s.segment !== "BODY" || !s.text?.trim()) continue;

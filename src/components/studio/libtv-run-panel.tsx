@@ -860,6 +860,24 @@ function QcCard({ qc }: { qc: NonNullable<LibtvRunView["qcReport"]> }) {
           ))}
         </tbody>
       </table>
+      {!!qc.variants?.length && (
+        <div className="mt-2 space-y-1" data-testid="hook-variants">
+          <p className="font-medium">Hook variants for A/B tests (same body, different first second)</p>
+          {qc.variants.map((v, i) => (
+            <p key={`${v.hookStyle}-${i}`} className="flex flex-wrap items-center gap-2">
+              <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{HOOK_STYLE_LABEL[v.hookStyle] ?? v.hookStyle}</span>
+              <span className="text-muted-foreground">{v.hookText ?? "—"}</span>
+              <a href={v.masterUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">master</a>
+              {v.previewUrl && (
+                <a href={v.previewUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">720p</a>
+              )}
+              <span className="text-muted-foreground">QC {v.passed}/{v.total}</span>
+            </p>
+          ))}
+        </div>
+      )}
     </details>
   );
 }
+
+const HOOK_STYLE_LABEL: Record<string, string> = { q: "Question", c: "Contrast", p: "Product blast" };
