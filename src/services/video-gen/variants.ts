@@ -109,7 +109,7 @@ export async function renderVariantForRun(runId: string, style: HookStyle, hookT
  * Cron: give the newest finished v2 master (last 3 days) its next missing hook
  * variant. One variant per call — each is a full ~2–3 min render.
  */
-export async function advanceAutoVariants(): Promise<{ runId: string; style: HookStyle } | null> {
+export async function advanceAutoVariants(): Promise<{ runId: string; style: HookStyle | "director" } | null> {
   if (process.env.AUTO_HOOK_VARIANTS === "off") return null;
   const since = new Date(Date.now() - 3 * 86_400_000);
   const runs = await prisma.libtvRun.findMany({
@@ -121,6 +121,12 @@ export async function advanceAutoVariants(): Promise<{ runId: string; style: Hoo
   for (const r of runs) {
     const qc = qcOf(r);
     if (qc.engine !== "edit-v2") continue;
+    // The AI director signs off a new master first (fast — one vision call).
+    if (!qc.director && process.env.AI_DIRECTOR !== "off") {
+      const { reviewAndStore } = await import("./director");
+      await reviewAndStore(r.id);
+      return { runId: r.id, style: "director" };
+    }
     // Evidence first: the style real results favour is rendered before the others.
     const order = (await loadLearning(r.projectId))?.order ?? [];
     const style = missingStyles(qc).sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99))[0];

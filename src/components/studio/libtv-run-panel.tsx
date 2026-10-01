@@ -771,6 +771,14 @@ export function LibtvRunPanel({
                       }
                     : undefined
                 }
+                onFixShots={
+                  ["completed", "failed", "cancelled"].includes(activeRun.status)
+                    ? (shots: number[]) => {
+                        setRerenderShots(new Set(shots));
+                        setShowRerender(true);
+                      }
+                    : undefined
+                }
                 onExport={
                   isServerEngine(activeRun.executor) && activeRun.status === "completed"
                     ? async (format: string) => {
@@ -882,11 +890,13 @@ function QcCard({
   busy,
   onMakeVariants,
   onExport,
+  onFixShots,
 }: {
   qc: NonNullable<LibtvRunView["qcReport"]>;
   busy?: boolean;
   onMakeVariants?: () => void;
   onExport?: (format: string) => void;
+  onFixShots?: (shotIndexes: number[]) => void;
 }) {
   // Captured once per mount (render must stay pure); claims older than 8 min are stale.
   const [now] = useState(() => Date.now());
@@ -921,6 +931,35 @@ function QcCard({
           ))}
         </tbody>
       </table>
+      {qc.director && (
+        <div className="mt-2 rounded-md bg-muted/50 px-2 py-1.5" data-testid="director-review">
+          <p>
+            <span className="font-medium">AI director: {qc.director.score}/100</span>{" "}
+            <span className="text-muted-foreground">{qc.director.summary}</span>
+          </p>
+          {qc.director.shots.filter((s) => !s.ok).length > 0 && (
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
+              {qc.director.shots
+                .filter((s) => !s.ok)
+                .map((s) => (
+                  <li key={s.frameNumber}>
+                    <span className="text-foreground">Frame {s.frameNumber}:</span> {s.issues.join("; ")}
+                  </li>
+                ))}
+            </ul>
+          )}
+          {onFixShots && qc.director.shotIndexes.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onFixShots(qc.director!.shotIndexes)}
+              className="mt-1 rounded-md border border-border px-2 py-1 font-medium hover:border-foreground/40"
+              data-testid="director-fix"
+            >
+              Fix these shots ({qc.director.shotIndexes.length}) — review the re-render
+            </button>
+          )}
+        </div>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {onMakeVariants && missing.length > 0 && (
           <button

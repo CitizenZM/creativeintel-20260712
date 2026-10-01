@@ -12,6 +12,7 @@
  * POST { action: "reassemble-run", projectId, runId } — re-cut a finished server run from its clips
  * POST { action: "render-variant", projectId, runId, hookStyle: q|c|p, hookText? } — A/B hook variant
  * POST { action: "render-export", projectId, runId, format: 4:5|1:1|16:9|15s|10s } — delivery format
+ * POST { action: "director-review", projectId, runId } — AI director sign-off of the master
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -128,6 +129,17 @@ export async function POST(request: Request) {
       creditsSpent: run.creditsSpent,
     });
     return NextResponse.json({ ok: true, run: summarize((await getRunWithJobs(run.id))!), qc: master.qcReport ?? null });
+  }
+
+  if (input.action === "director-review") {
+    const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId }, select: { id: true } });
+    if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    try {
+      const { reviewAndStore } = await import("@/services/video-gen/director");
+      return NextResponse.json({ ok: true, review: await reviewAndStore(run.id) });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+    }
   }
 
   if (input.action === "render-export") {
