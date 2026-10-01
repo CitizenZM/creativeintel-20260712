@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db";
 import { renderHookVariant } from "./glm-assemble";
 import { isServerEngine } from "./libtv-pricing";
 import { storyboardFrames } from "./server-executor";
+import { loadLearning } from "@/services/performance/store";
 
 export type HookStyle = "q" | "c" | "p";
 export const AUTO_STYLES: HookStyle[] = ["c", "p"];
@@ -34,7 +35,10 @@ function qcOf(run: { qcReport: unknown }): Qc {
 }
 
 /** The styles a run still lacks (pending claims younger than the stale limit count as present). */
-export function missingStyles(qc: Qc, now = Date.now(), styles: HookStyle[] = AUTO_STYLES): HookStyle[] {
+export function missingStyles(qc: Qc, now = Date.now(), styles?: HookStyle[]): HookStyle[] {
+  // Variants cover the hook styles the master doesn't use.
+  const master = typeof qc.hookStyle === "string" ? qc.hookStyle : "q";
+  styles ??= (["q", "c", "p"] as HookStyle[]).filter((s) => s !== master);
   const done = new Set((qc.variants ?? []).map((v) => v.hookStyle));
   const pending = qc.variantsPending ?? {};
   return styles.filter((s) => !done.has(s) && !(pending[s] && now - Date.parse(pending[s]) < PENDING_STALE_MS));
@@ -111,13 +115,15 @@ export async function advanceAutoVariants(): Promise<{ runId: string; style: Hoo
   const runs = await prisma.libtvRun.findMany({
     where: { status: "completed", completedAt: { gte: since }, executor: { in: ["glm", "matrix", "comfyui", "animatic"] } },
     orderBy: { completedAt: "desc" },
-    select: { id: true, qcReport: true },
+    select: { id: true, projectId: true, qcReport: true },
     take: 20,
   });
   for (const r of runs) {
     const qc = qcOf(r);
     if (qc.engine !== "edit-v2") continue;
-    const style = missingStyles(qc)[0];
+    // Evidence first: the style real results favour is rendered before the others.
+    const order = (await loadLearning(r.projectId))?.order ?? [];
+    const style = missingStyles(qc).sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99))[0];
     if (!style) continue;
     await renderVariantForRun(r.id, style);
     return { runId: r.id, style };

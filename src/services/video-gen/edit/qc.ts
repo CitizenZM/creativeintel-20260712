@@ -28,6 +28,8 @@ export interface QcReport {
   checks: QcCheck[];
   cutsSec: number[];
   measuredAt: string;
+  /** The master's hook style (q / c / p) — variants cover the other two. */
+  hookStyle?: string;
 }
 
 export interface QcInput {

@@ -218,6 +218,7 @@ model Project {
   adTeardowns       AdTeardown[]
   competitorRollups CompetitorRollup[]
   libtvRuns         LibtvRun[]
+  adPerformance     AdPerformance[]
 }
 
 model Brand {
@@ -1106,4 +1107,31 @@ model AiUsage {
   createdAt    DateTime @default(now())
 
   @@index([createdAt])
+}
+
+/// Real results of ads we made (Meta / TikTok exports or API), matched to our
+/// versions by the A/B ad name (Brand_Script_20s_HookC[_4x5]). Drives the
+/// learning loop: which hook styles win on hook rate and CTR.
+model AdPerformance {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  platform    String // meta | tiktok | youtube | other
+  source      String   @default("csv") // csv | meta-api | tiktok-api
+  adName      String
+  hookStyle   String? // q | c | p — parsed from the ad name
+  format      String? // 9x16 | 4x5 | 1x1 | 16x9 | 15s | 10s
+  dateFrom    DateTime?
+  dateTo      DateTime?
+  impressions Int      @default(0)
+  views3s     Int      @default(0) // 3-second plays (Meta) / 2-second views (TikTok)
+  thruplays   Int      @default(0) // ThruPlays / 6-second views
+  clicks      Int      @default(0)
+  spend       Float    @default(0)
+  conversions Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([projectId, platform, adName, dateFrom])
+  @@index([projectId, hookStyle])
 }

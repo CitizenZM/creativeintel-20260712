@@ -888,16 +888,19 @@ function QcCard({
   onMakeVariants?: () => void;
   onExport?: (format: string) => void;
 }) {
+  // Captured once per mount (render must stay pure); claims older than 8 min are stale.
+  const [now] = useState(() => Date.now());
   const exportPending = Object.entries(qc.exportsPending ?? {})
-    .filter(([, t]) => Date.now() - Date.parse(t) < 8 * 60_000)
+    .filter(([, t]) => now - Date.parse(t) < 8 * 60_000)
     .map(([f]) => f);
   const misses = qc.checks.filter((c) => !c.pass);
   const ok = misses.length === 0;
   const done = new Set((qc.variants ?? []).map((v) => v.hookStyle));
   const pending = Object.entries(qc.variantsPending ?? {})
-    .filter(([, t]) => Date.now() - Date.parse(t) < 8 * 60_000)
+    .filter(([, t]) => now - Date.parse(t) < 8 * 60_000)
     .map(([s]) => s);
-  const missing = ["c", "p"].filter((s) => !done.has(s) && !pending.includes(s));
+  const master = qc.hookStyle ?? "q";
+  const missing = ["q", "c", "p"].filter((s) => s !== master && !done.has(s) && !pending.includes(s));
   return (
     <details className="basis-full rounded-md border border-border px-3 py-2 text-xs" data-testid="qc-report">
       <summary className="cursor-pointer select-none">
