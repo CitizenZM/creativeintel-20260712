@@ -120,6 +120,18 @@ export function ctaButtonPng(text: string, canvas: Canvas, look: Look = DEFAULT_
   return pill(`${text.toUpperCase()}  ›`, canvas, { size: Math.round(unit(canvas) * 0.058), fg: look.buttonText, bg: look.button, family: look.body.family, fontFile: look.body.file, widthPct: 0.7 });
 }
 
+/** A comparison label: ours on the brand accent, the other side on a neutral dark pill. */
+export function comparisonLabelPng(text: string, canvas: Canvas, look: Look = DEFAULT_STYLE, ours = true): Promise<Buffer> {
+  return pill(text.toUpperCase(), canvas, {
+    size: Math.round(unit(canvas) * 0.05),
+    fg: ours ? look.buttonText : "#FFFFFF",
+    bg: ours ? look.button : "rgba(40,40,40,0.85)",
+    family: look.body.family,
+    fontFile: look.body.file,
+    widthPct: 0.6,
+  });
+}
+
 /** The landing domain under the button, small. */
 export function domainPng(domain: string, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
   const size = Math.round(unit(canvas) * 0.034);

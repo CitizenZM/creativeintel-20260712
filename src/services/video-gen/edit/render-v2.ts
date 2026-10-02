@@ -27,7 +27,7 @@ import { bestWindow, motionScores } from "./motion";
 import { detectBeats, trackWindowStart } from "./beat-detect";
 import { measureCuts, measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
-import { claimChipPng, ctaButtonPng, domainPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
+import { claimChipPng, comparisonLabelPng, ctaButtonPng, domainPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
 import { kineticGroups, timedWords, toSrt, subtitleCues, type TimedWord } from "../voiceover";
 import { speakVoiceover, type AssembleFrame, type Segment } from "../glm-assemble";
@@ -56,6 +56,33 @@ export function shotFilter(shot: Shot, canvas: Canvas, beatSec = 0.5): string {
   // first beat, then fills the screen — the size jump is the claim.
   const pre = base.replace(/\[v\]$/, "[pre]");
   return `${pre};[pre]split=2[c1][c2];[c1]boxblur=30:2,eq=brightness=-0.18[cb];[c2]scale=w='2*trunc(iw*if(lt(t,${f3(beatSec)}),0.56,1)/2)':h='2*trunc(ih*if(lt(t,${f3(beatSec)}),0.56,1)/2)':eval=frame[cf];[cb][cf]overlay=(W-w)/2:(H-h)/2:eval=frame,format=yuv420p[v]`;
+}
+
+/**
+ * Comparison composite: ours (the shot as rendered) and the other side (input 1,
+ * a desaturated still) share the frame — stacked top/bottom on vertical
+ * canvases, side by side on landscape — split by a white rule, each labelled
+ * (inputs 2 = ours, 3 = other). Ours is always the second half the eye lands on.
+ */
+export function compareFilter(shotGraph: string, canvas: Canvas): string {
+  const { w, h } = canvas;
+  const vertical = h >= w;
+  const hw = vertical ? w : Math.round(w / 4) * 2;
+  const hh = vertical ? Math.round(h / 4) * 2 : h;
+  const pre = shotGraph.replace(/\[v\]$/, "[ours0]");
+  const stack = vertical ? "vstack" : "hstack";
+  return [
+    pre,
+    `[ours0]scale=${hw}:${hh}:force_original_aspect_ratio=increase,crop=${hw}:${hh},setsar=1[ours]`,
+    `[1:v]fps=${FPS},scale=${hw}:${hh}:force_original_aspect_ratio=increase,crop=${hw}:${hh},hue=s=0.35,eq=brightness=-0.06:contrast=0.9,setsar=1[other]`,
+    `[other][ours]${stack}=inputs=2,format=yuv420p[st]`,
+    vertical
+      ? `[st]drawbox=x=0:y=${hh - 3}:w=${w}:h=6:color=white@0.95:t=fill[ruled]`
+      : `[st]drawbox=x=${hw - 3}:y=0:w=6:h=${h}:color=white@0.95:t=fill[ruled]`,
+    vertical
+      ? `[ruled][3:v]overlay=x=(W-w)/2:y=H*0.16-h/2[l1];[l1][2:v]overlay=x=(W-w)/2:y=H*0.56-h/2,format=yuv420p[v]`
+      : `[ruled][3:v]overlay=x=W*0.25-w/2:y=H*0.12-h/2[l1];[l1][2:v]overlay=x=W*0.75-w/2:y=H*0.12-h/2,format=yuv420p[v]`,
+  ].join(";");
 }
 
 function shotBaseFilter(shot: Shot, canvas: Canvas): string {
@@ -183,7 +210,19 @@ export async function renderEditV2(input: {
     frameNumber: s.frameNumber,
     segment: bySeg.get(s.frameNumber)?.segment ?? null,
     text: s.text ?? null,
+    compare: s.compare ?? null,
   }));
+  // Comparison frames: fetch the other side's image (stacked against ours in the shot).
+  for (const s of input.segments) {
+    const u = s.compare?.otherUrl;
+    if (!u || input.sources.has(u)) continue;
+    const file = path.join(dir, `cmp${input.sources.size}.img`);
+    const res = await fetch(u, { signal: AbortSignal.timeout(60_000) }).catch(() => null);
+    if (res?.ok) {
+      await writeFile(file, Buffer.from(await res.arrayBuffer()));
+      input.sources.set(u, file);
+    }
+  }
   // A licensed brand track: detect its beats and drop, start it so the drop
   // lands on the hook → body cut, and cut the edit on its real beats.
   let track: { file: string; startSec: number; beats: number[] } | null = null;
@@ -243,9 +282,22 @@ export async function renderEditV2(input: {
       const src = input.sources.get(shot.url);
       if (!src) throw new Error(`Missing source for shot ${shot.index}`);
       const inArgs = shot.kind === "clip" ? ["-ss", f3(shot.srcFrom), "-i", src] : ["-loop", "1", "-t", f3(shot.frames / FPS + 0.5), "-i", src];
+      let filter = shotFilter(shot, canvas, plan.grid.period);
+      const otherFile = shot.compare ? input.sources.get(shot.compare.otherUrl) : undefined;
+      if (shot.compare && otherFile) {
+        // Stack the other side against ours, with labels (no generated collage).
+        const labels = [
+          path.join(dir, `cmpl${shot.index}o.png`),
+          path.join(dir, `cmpl${shot.index}t.png`),
+        ];
+        await writeFile(labels[0], await comparisonLabelPng(shot.compare.labelOurs, canvas, look, true));
+        await writeFile(labels[1], await comparisonLabelPng(shot.compare.labelOther, canvas, look, false));
+        inArgs.push("-loop", "1", "-t", f3(shot.frames / FPS + 0.5), "-i", otherFile, "-i", labels[0], "-i", labels[1]);
+        filter = compareFilter(filter, canvas);
+      }
       await run(
         ff,
-        ["-y", "-v", "error", ...inArgs, "-filter_complex", shotFilter(shot, canvas, plan.grid.period), "-map", "[v]", "-frames:v", String(shot.frames), "-an", "-r", String(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", out],
+        ["-y", "-v", "error", ...inArgs, "-filter_complex", filter, "-map", "[v]", "-frames:v", String(shot.frames), "-an", "-r", String(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", out],
         { timeout: 90_000 }
       );
       return out;
@@ -281,7 +333,9 @@ export async function renderEditV2(input: {
     await writeFile(file, png);
     // A hook over a person sits in the lower half, off the face (AI director finding).
     const hookOverPerson = card.role === "hook" && input.frames.some((f) => (f.segment ?? "").toUpperCase() === "HOOK" && f.hasPerson);
-    overlays.push({ file, startSec: card.startSec, endSec: card.endSec, y: card.role === "claim" ? 0.3 : hookOverPerson ? 0.52 : 0.22 });
+    // During a comparison shot a claim belongs to our half (under its label), not over the other side.
+    const overCompare = card.role === "claim" && plan.shots.some((s) => s.compare && s.startSec < card.endSec && s.endSec > card.startSec);
+    overlays.push({ file, startSec: card.startSec, endSec: card.endSec, y: card.role === "claim" ? (overCompare ? 0.63 : 0.3) : hookOverPerson ? 0.52 : 0.22 });
   }
   if (plan.ctaButton) {
     const file = path.join(dir, "v2cta.png");
