@@ -93,7 +93,7 @@ export function withNoText(prompt: string, kind: "image" | "video"): string {
 export const ASSEMBLY_RESERVE_MS = 220_000;
 /** An "assembling" run untouched this long was killed mid-assembly: assemble again. */
 export const STALE_ASSEMBLY_MS = 6 * 60_000;
-/** A synchronous keyframe "running" this long lost its invocation. */
+/** A keyframe / clip "running" this long without a task id lost its invocation. */
 export const IMAGE_STALE_MS = 6 * 60_000;
 const MAX_IMAGE_ATTEMPTS = 3;
 const ACTIVE_RUN = ["approved", "claimed", "running", "assembling"];
@@ -175,11 +175,11 @@ export async function tickRun(
     if (await claimJob(j.id)) await jobDone({ jobId: j.id, resultUrl: j.sourceUrl, creditsSpent: 0 });
   }
 
-  // A synchronous keyframe whose invocation was cut off stays "running" forever:
-  // re-queue it after IMAGE_STALE_MS (fail it after MAX_IMAGE_ATTEMPTS).
-  for (const j of run.jobs.filter((x) => x.kind === "image" && x.status === "running" && !x.nodeId)) {
+  // A keyframe or clip whose invocation was cut off before it got a task id stays
+  // "running" forever: re-queue it after IMAGE_STALE_MS (fail it after MAX_IMAGE_ATTEMPTS).
+  for (const j of run.jobs.filter((x) => (x.kind === "image" || x.kind === "video") && x.status === "running" && !x.nodeId)) {
     if (!j.startedAt || Date.now() - new Date(j.startedAt).getTime() < IMAGE_STALE_MS) continue;
-    if ((j.attempts ?? 0) >= MAX_IMAGE_ATTEMPTS) await jobFailed(j.id, "Keyframe generation timed out repeatedly");
+    if ((j.attempts ?? 0) >= MAX_IMAGE_ATTEMPTS) await jobFailed(j.id, `${j.kind === "video" ? "Clip" : "Keyframe"} submission timed out repeatedly`);
     else await prisma.libtvJob.updateMany({ where: { id: j.id, status: "running" }, data: { status: "queued" } });
   }
 
