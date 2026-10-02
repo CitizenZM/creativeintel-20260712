@@ -337,6 +337,21 @@ describe("assembly timing", () => {
     expect(store.runs.get("run1")!.status).toBe("completed");
   });
 
+  it("re-queues a clip whose submission was cut off before it got a task id", async () => {
+    seed();
+    const k1 = store.jobs.find((j) => j.id === "k1")!;
+    Object.assign(k1, { status: "completed", resultUrl: "https://cdn/K1.png" });
+    Object.assign(store.jobs.find((j) => j.id === "k3")!, { status: "skipped", resultUrl: "https://cdn/packshot.png" });
+    Object.assign(store.jobs.find((j) => j.id === "u1")!, { status: "completed", resultUrl: "https://cdn/packshot.png" });
+    Object.assign(store.jobs.find((j) => j.id === "v1")!, { status: "running", nodeId: null, attempts: 1, startedAt: new Date(Date.now() - 10 * 60_000) });
+    Object.assign(store.runs.get("run1")!, { status: "running" });
+    const adapter = fakeAdapter();
+    await tickRun(adapter, "run1");
+    await tickRun(adapter, "run1");
+    expect(adapter.submitVideo).toHaveBeenCalled();
+    expect(store.jobs.find((j) => j.id === "v1")!.nodeId).toBe("task-V1");
+  });
+
   it("does not touch an assembly that is still in progress", async () => {
     seed();
     allDone();
