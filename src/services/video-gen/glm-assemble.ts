@@ -211,8 +211,10 @@ export type Segment =
 /** The comparison pairing for a frame, when its keyframe was split (comparison.ts). */
 function compareFor(frameNumber: number, jobs: Pick<LibtvJob, "kind" | "status" | "resultUrl" | "settings" | "nodeName">[]): SegmentCompare | undefined {
   for (const j of jobs) {
-    const s = (j.settings ?? {}) as { frameNumber?: number; comparison?: { otherNode?: string; labelOurs?: string; labelOther?: string } };
-    if (j.kind !== "image" || s.frameNumber !== frameNumber || !s.comparison?.otherNode) continue;
+    const s = (j.settings ?? {}) as { frameNumber?: number; coversFrames?: number[]; comparison?: { otherNode?: string; labelOurs?: string; labelOther?: string } };
+    // Every frame the comparison clip covers shows the comparison (not just its first).
+    const covers = s.coversFrames?.length ? s.coversFrames : s.frameNumber ? [s.frameNumber] : [];
+    if (j.kind !== "image" || !covers.includes(frameNumber) || !s.comparison?.otherNode) continue;
     const other = jobs.find((x) => x.nodeName === s.comparison!.otherNode || x.nodeName.startsWith(`${s.comparison!.otherNode}_`));
     if (!other?.resultUrl) return undefined;
     return { otherUrl: other.resultUrl, labelOurs: s.comparison.labelOurs ?? "OURS", labelOther: s.comparison.labelOther ?? "OTHERS" };
