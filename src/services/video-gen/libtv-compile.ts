@@ -44,6 +44,7 @@ import { isComfyConfigured } from "@/services/ai/comfyui";
 import { isZhipuConfigured } from "@/services/ai/zhipu";
 import { isMatrixConfigured } from "@/services/ai/matrix";
 import { hasPeople } from "./prompt-safety";
+import { splitComparisonDrafts } from "./comparison";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { videoDefaults } from "@/services/settings/ai-settings-core";
 
@@ -487,6 +488,9 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
     });
   });
 
+  // Comparison shots are generated as two clean images and stacked in the edit
+  // (asking one image for a split screen returns a collage).
+  await splitComparisonDrafts(drafts, { product: project.productName || project.brandName });
   if (findImageModel(imageModel)?.lockCharacter) lockCast(drafts, imageModel);
 
   const estimate = estimateRun(drafts);

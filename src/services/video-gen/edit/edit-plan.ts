@@ -32,6 +32,8 @@ export interface PlanInputSegment {
   /** HOOK | BODY | CTA (storyboard grid segment). */
   segment?: string | null;
   text?: string | null;
+  /** Comparison frame: the other side's image + labels, stacked by the renderer. */
+  compare?: { otherUrl: string; labelOurs: string; labelOther: string } | null;
 }
 
 export interface Shot {
@@ -54,6 +56,8 @@ export interface Shot {
   segment: "HOOK" | "BODY" | "CTA";
   /** Hook variant "c": the shot opens small and boxed, then fills the frame on beat 2. */
   contrast?: boolean;
+  /** Comparison: the other side (a still) stacked against ours, with labels. */
+  compare?: { otherUrl: string; labelOurs: string; labelOther: string } | null;
 }
 
 /**
@@ -183,6 +187,7 @@ export function planEdit(
       motion: s.kind === "still" ? "push" : "none",
       frameNumber: s.frameNumber,
       segment: s.segment,
+      compare: s.compare ?? null,
       ...extra,
     });
   };
@@ -227,7 +232,7 @@ export function planEdit(
   if (opener && opener.segment === "HOOK" && opts.hookStyle === "c") opener.contrast = true;
   if (opener && opener.segment === "HOOK" && opts.hookStyle === "p") {
     const product = laid.find((s) => s.segment === "CTA" && s.kind === "still");
-    if (product) Object.assign(opener, { kind: "still", url: product.url, srcFrom: 0, zoom: 1.1, motion: "push", anchorY: 0.5 });
+    if (product) Object.assign(opener, { kind: "still", url: product.url, srcFrom: 0, zoom: 1.1, motion: "push", anchorY: 0.5, compare: null });
   }
   // Re-index and close any rounding gaps so shots tile the timeline exactly.
   for (const [i, sh] of shots.entries()) {

@@ -197,12 +197,31 @@ export function canvasFor(aspectRatio: string): { w: number; h: number } {
   return { w: 1080, h: 1920 };
 }
 
+/** A comparison frame: the other side's image and both labels (stacked by the edit). */
+export interface SegmentCompare {
+  otherUrl: string;
+  labelOurs: string;
+  labelOther: string;
+}
+
 export type Segment =
-  | { kind: "clip"; url: string; from: number; length: number; frameNumber: number; text?: string }
-  | { kind: "still"; url: string; length: number; frameNumber: number; text?: string };
+  | { kind: "clip"; url: string; from: number; length: number; frameNumber: number; text?: string; compare?: SegmentCompare }
+  | { kind: "still"; url: string; length: number; frameNumber: number; text?: string; compare?: SegmentCompare };
+
+/** The comparison pairing for a frame, when its keyframe was split (comparison.ts). */
+function compareFor(frameNumber: number, jobs: Pick<LibtvJob, "kind" | "status" | "resultUrl" | "settings" | "nodeName">[]): SegmentCompare | undefined {
+  for (const j of jobs) {
+    const s = (j.settings ?? {}) as { frameNumber?: number; comparison?: { otherNode?: string; labelOurs?: string; labelOther?: string } };
+    if (j.kind !== "image" || s.frameNumber !== frameNumber || !s.comparison?.otherNode) continue;
+    const other = jobs.find((x) => x.nodeName === s.comparison!.otherNode || x.nodeName.startsWith(`${s.comparison!.otherNode}_`));
+    if (!other?.resultUrl) return undefined;
+    return { otherUrl: other.resultUrl, labelOurs: s.comparison.labelOurs ?? "OURS", labelOther: s.comparison.labelOther ?? "OTHERS" };
+  }
+  return undefined;
+}
 
 /** Timeline: one segment per storyboard frame, in order. Pure — unit-tested. */
-export function planSegments(frames: AssembleFrame[], jobs: Pick<LibtvJob, "kind" | "status" | "resultUrl" | "settings">[]): Segment[] {
+export function planSegments(frames: AssembleFrame[], jobs: Pick<LibtvJob, "kind" | "status" | "resultUrl" | "settings" | "nodeName">[]): Segment[] {
   const segments: Segment[] = [];
   for (const f of frames) {
     const length = Math.max(0.5, (f.endSec ?? 0) - (f.startSec ?? 0) || 2);
@@ -215,14 +234,14 @@ export function planSegments(frames: AssembleFrame[], jobs: Pick<LibtvJob, "kind
       const off = s.frameOffsetsSec?.find((o) => o.frameNumber === f.frameNumber);
       const from = off?.clipStartSec ?? 0;
       const len = off ? Math.max(0.5, off.clipEndSec - off.clipStartSec) : length;
-      segments.push({ kind: "clip", url: clip.resultUrl!, from, length: len, frameNumber: f.frameNumber, text: f.text?.trim() || undefined });
+      segments.push({ kind: "clip", url: clip.resultUrl!, from, length: len, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs) });
       continue;
     }
     const still = jobs.find((j) => {
       const s = (j.settings ?? {}) as Settings;
       return j.kind === "image" && j.resultUrl && (s.frameNumber === f.frameNumber || s.coversFrames?.includes(f.frameNumber));
     });
-    if (still) segments.push({ kind: "still", url: still.resultUrl!, length, frameNumber: f.frameNumber, text: f.text?.trim() || undefined });
+    if (still) segments.push({ kind: "still", url: still.resultUrl!, length, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs) });
   }
   return segments;
 }
