@@ -32,7 +32,13 @@ export const glmAdapter: EngineAdapter = {
     // Cast-locked Qwen keyframes (Matrix) for a free GLM run.
     if (typeof ctx.settings?.matrixModel === "string") {
       const { matrixKeyframe } = await import("./matrix-executor");
-      return matrixKeyframe(prompt, ctx);
+      try {
+        return await matrixKeyframe(prompt, ctx);
+      } catch (err) {
+        // Plan B: Matrix out of credit (403 预扣费额度失败) or down — the free run still
+        // renders, with a free CogView keyframe for this shot.
+        console.warn(`[glm] Matrix keyframe ${ctx.nodeName} failed, using CogView:`, err instanceof Error ? err.message.slice(0, 200) : err);
+      }
     }
     const url = await generateImagePersisted(prompt, {
       aspectRatio: ctx.aspectRatio,

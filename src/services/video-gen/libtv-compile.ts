@@ -288,9 +288,13 @@ export function lockCast(drafts: CompiledJobDraft[], imageModel: string, names: 
       creditsEstimated: imageCredits(imageModel),
     });
   }
+  // A hook shot that shows the problem must not show our product solving it yet.
+  const problemShot = (d: CompiledJobDraft) =>
+    String((d.settings as { segment?: unknown }).segment ?? "").toUpperCase() === "HOOK" &&
+    /\b(tired|frustrat|annoy|struggl|squint|dull|washed[- ]out|dim|glare|blurry|old|outdated|problem|fed up|disappoint)/i.test(d.prompt ?? "");
   for (const d of keyframes) {
     const person = withPeople.includes(d);
-    const both = person && showsProduct(d.prompt ?? "");
+    const both = person && showsProduct(d.prompt ?? "") && !problemShot(d);
     d.leftRefs = both ? ["CAST", "PROD-1"] : person ? ["CAST"] : ["PROD-1"];
     d.settings = { ...(d.settings as Record<string, unknown>), editFrom: both ? "cast+product" : person ? "cast" : "product" };
   }
