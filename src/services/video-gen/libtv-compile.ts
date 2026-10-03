@@ -268,8 +268,11 @@ export interface CompileResult {
  * every keyframe with a person is edited from it and every other keyframe from
  * the real packshot, so the face and the product never change between shots.
  */
-export function lockCast(drafts: CompiledJobDraft[], imageModel: string): void {
+export function lockCast(drafts: CompiledJobDraft[], imageModel: string, names: string[] = []): void {
   const keyframes = drafts.filter((d) => d.kind === "image" && /^K\d+$/.test(d.nodeName) && !(d.settings as { compositeLocally?: boolean }).compositeLocally);
+  // A shot that names our product puts the real product in the person's scene.
+  const productTerms = names.map((n) => n.trim().toLowerCase()).filter((n) => n.length >= 2);
+  const showsProduct = (p: string) => productTerms.some((t) => p.toLowerCase().includes(t));
   const withPeople = keyframes.filter((d) => hasPeople(d.prompt ?? ""));
   if (withPeople.length) {
     const sample = withPeople[0];
@@ -286,8 +289,18 @@ export function lockCast(drafts: CompiledJobDraft[], imageModel: string): void {
     });
   }
   for (const d of keyframes) {
-    d.leftRefs = withPeople.includes(d) ? ["CAST"] : ["PROD-1"];
-    d.settings = { ...(d.settings as Record<string, unknown>), editFrom: withPeople.includes(d) ? "cast" : "product" };
+    const person = withPeople.includes(d);
+    const both = person && showsProduct(d.prompt ?? "");
+    d.leftRefs = both ? ["CAST", "PROD-1"] : person ? ["CAST"] : ["PROD-1"];
+    d.settings = { ...(d.settings as Record<string, unknown>), editFrom: both ? "cast+product" : person ? "cast" : "product" };
+  }
+  // The other side of a comparison keeps the same actor (never our product).
+  if (withPeople.length) {
+    for (const d of drafts.filter((x) => x.kind === "image" && (x.settings as { comparisonOf?: unknown }).comparisonOf != null)) {
+      if (!hasPeople(d.prompt ?? "")) continue;
+      d.leftRefs = ["CAST"];
+      d.settings = { ...(d.settings as Record<string, unknown>), editFrom: "cast" };
+    }
   }
 }
 
@@ -491,7 +504,9 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
   // Comparison shots are generated as two clean images and stacked in the edit
   // (asking one image for a split screen returns a collage).
   await splitComparisonDrafts(drafts, { product: project.productName || project.brandName });
-  if (findImageModel(imageModel)?.lockCharacter) lockCast(drafts, imageModel);
+  if (findImageModel(imageModel)?.lockCharacter) {
+    lockCast(drafts, imageModel, [project.brandName, project.productName ?? "", skuName ?? ""].filter(Boolean));
+  }
 
   const estimate = estimateRun(drafts);
   const creditCeiling = maxRunCredits();
