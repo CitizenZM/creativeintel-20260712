@@ -50,6 +50,17 @@ describe("lockCast", () => {
     expect([by.K5X.leftRefs, by.K5X.settings.editFrom]).toEqual([["CAST"], "cast"]);
   });
 
+  it("keeps our product out of a hook shot that shows the problem", () => {
+    const drafts: CompiledJobDraft[] = [
+      { ...draft("K1", "A tired man squints at a washed-out TCL-less screen in daylight"), settings: { frameNumber: 1, segment: "HOOK" } },
+      { ...draft("K3", "The man grins at the TCL QM7L"), settings: { frameNumber: 3, segment: "BODY" } },
+    ];
+    lockCast(drafts, "Qwen-Image (Matrix)", ["TCL", "QM7L"]);
+    const by = Object.fromEntries(drafts.map((d) => [d.nodeName, d]));
+    expect(by.K1.settings.editFrom).toBe("cast");
+    expect(by.K3.settings.editFrom).toBe("cast+product");
+  });
+
   it("adds no CAST when no shot has a person", () => {
     const drafts = [draft("K1", "Macro of the TV edge"), draft("K3", "Wide shot of the TV in an empty loft")];
     lockCast(drafts, "Qwen-Image (Matrix)");
