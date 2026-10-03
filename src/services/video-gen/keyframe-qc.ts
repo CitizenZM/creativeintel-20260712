@@ -28,7 +28,7 @@ export const KEYFRAME_QC_SYSTEM = `You are the quality-control reviewer for AI-g
 - a visibly warped, bent or broken product (screens, devices, packaging)
 - obvious AI artefacts: duplicated objects, smeared areas, broken geometry
 - a collage, split screen, diptych or stacked panels instead of ONE continuous photograph
-- any readable or pseudo text on screens, walls or captions (the edit adds real text later)
+- any readable or pseudo text on screens, walls or captions (the edit adds real text later) — EXCEPT the product's own real logo and model name printed on the device itself, which are correct and expected
 Stylisation, soft focus, motion blur and creative lighting are fine. If unsure, approve.
 Return JSON only: {"ok": boolean, "issues": ["short defect description", ...]}.`;
 

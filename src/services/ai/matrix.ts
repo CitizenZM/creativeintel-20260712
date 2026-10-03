@@ -141,20 +141,23 @@ export async function getSeedanceTask(taskId: string): Promise<SeedanceTask> {
  */
 export async function editMatrixImage(
   prompt: string,
-  referenceUrl: string,
+  referenceUrls: string | string[],
   opts: { model?: string; projectId?: string | null } = {}
 ): Promise<{ buffer: Buffer; contentType: string }> {
   const key = matrixKey();
   if (!key) throw new Error("MATRIX_API_KEY is not configured");
-  const ref = await fetch(referenceUrl, { signal: AbortSignal.timeout(60_000) });
-  if (!ref.ok) throw new Error(`Reference image download ${ref.status}`);
-  const refType = ref.headers.get("content-type")?.split(";")[0] || "image/jpeg";
   const form = new FormData();
   const model = opts.model ?? "qwen/qwen-image-edit";
   form.set("model", model);
   form.set("prompt", prompt);
   form.set("n", "1");
-  form.set("image", new Blob([await ref.arrayBuffer()], { type: refType }), refType.includes("png") ? "ref.png" : "ref.jpg");
+  // Several references (person + product) compose into one scene, in order.
+  for (const [i, url] of (Array.isArray(referenceUrls) ? referenceUrls : [referenceUrls]).entries()) {
+    const ref = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+    if (!ref.ok) throw new Error(`Reference image download ${ref.status}`);
+    const refType = ref.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+    form.append("image", new Blob([await ref.arrayBuffer()], { type: refType }), `ref${i}.${refType.includes("png") ? "png" : "jpg"}`);
+  }
   const res = await fetch(`${MATRIX_BASE_URL}/v1/images/edits`, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}` },
@@ -177,11 +180,15 @@ export async function editMatrixImage(
  * 1,800 → 502 prompt_rewrite_failed), so the shot is cut to its first two
  * sentences after dropping the no-text preamble.
  */
-export function lockedEditPrompt(kind: "cast" | "product", shot: string): string {
+export type EditFrom = "cast" | "product" | "cast+product";
+
+export function lockedEditPrompt(kind: EditFrom, shot: string): string {
   const keep =
     kind === "cast"
       ? "Keep this exact person unchanged — same face, hair, skin tone, build and wardrobe."
-      : "Keep this exact product unchanged — same shape, colour, proportions, screen and logo placement.";
+      : kind === "product"
+        ? "Keep this exact product unchanged — same shape, colour, proportions, screen and logo placement."
+        : "Person from image 1 (same face, hair, wardrobe) with the exact product from image 2 (same shape, screen, logo), product prominent.";
   const body = shot
     .replace(/^No text, letters[^.]*\.\s*/i, "")
     .replace(/\s+/g, " ")

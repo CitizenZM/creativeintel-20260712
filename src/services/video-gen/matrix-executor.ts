@@ -25,11 +25,13 @@ function matrixModel(ctx: JobContext, fallback: string): string {
  */
 export async function matrixKeyframe(prompt: string, ctx: JobContext): Promise<{ url: string }> {
   const editFrom = ctx.settings?.editFrom;
-  const ref = ctx.referenceUrls?.[0];
+  const refs = ctx.referenceUrls ?? [];
   const fresh = () => generateMatrixImage(prompt, { model: matrixModel(ctx, DEFAULT_IMAGE), aspectRatio: ctx.aspectRatio, projectId: ctx.projectId });
+  const usable =
+    (editFrom === "cast" || editFrom === "product") && refs.length >= 1 ? editFrom : editFrom === "cast+product" && refs.length >= 2 ? editFrom : null;
   const { buffer, contentType } =
-    (editFrom === "cast" || editFrom === "product") && ref
-      ? await editMatrixImage(lockedEditPrompt(editFrom, prompt), ref, { projectId: ctx.projectId }).catch((err) => {
+    usable
+      ? await editMatrixImage(lockedEditPrompt(usable, prompt), usable === "cast+product" ? refs.slice(0, 2) : refs[0], { projectId: ctx.projectId }).catch((err) => {
           // Plan B: an unlocked keyframe beats a failed run.
           console.warn(`[matrix] cast-lock edit for ${ctx.nodeName} failed, generating it fresh:`, err instanceof Error ? err.message.slice(0, 200) : err);
           return fresh();

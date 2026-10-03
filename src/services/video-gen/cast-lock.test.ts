@@ -37,6 +37,19 @@ describe("lockCast", () => {
     expect(by.V1.leftRefs).toEqual(["K1"]);
   });
 
+  it("puts the real product in a person's shot that names it, and locks the comparison's other side to the cast", () => {
+    const drafts: CompiledJobDraft[] = [
+      draft("K1", "A man sits on a sofa, bored"),
+      draft("K5", "The man smiles at the TCL QM7L on the wall"),
+      { ...draft("K5X", "The same man squints at an old washed-out TV"), settings: { comparisonOf: 5, frameNumber: null, coversFrames: [] } },
+    ];
+    lockCast(drafts, "Qwen-Image (Matrix)", ["TCL", "QM7L"]);
+    const by = Object.fromEntries(drafts.map((d) => [d.nodeName, d]));
+    expect([by.K1.leftRefs, by.K1.settings.editFrom]).toEqual([["CAST"], "cast"]);
+    expect([by.K5.leftRefs, by.K5.settings.editFrom]).toEqual([["CAST", "PROD-1"], "cast+product"]);
+    expect([by.K5X.leftRefs, by.K5X.settings.editFrom]).toEqual([["CAST"], "cast"]);
+  });
+
   it("adds no CAST when no shot has a person", () => {
     const drafts = [draft("K1", "Macro of the TV edge"), draft("K3", "Wide shot of the TV in an empty loft")];
     lockCast(drafts, "Qwen-Image (Matrix)");
