@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kineticGroups, placeLines, planVoiceover, respell, shownForm, spokenForm, subtitleCues, timedWords, toSrt } from "./voiceover";
+import { escapeXml, kineticGroups, placeLines, planVoiceover, respell, shownForm, spokenForm, subtitleCues, timedWords, toSrt } from "./voiceover";
 
 describe("planVoiceover", () => {
   it("speaks each beat once, spanning the frames that repeat its line", () => {
@@ -100,5 +100,11 @@ describe("caption spellings", () => {
     const timed = timedWords(words, { startSec: 1, tempo: 1 }, line);
     expect(timed.map((w) => w.text).join(" ")).toContain("NXTPAPER 14");
     expect(subtitleCues(words, { startSec: 1, tempo: 1 }, 32, line).map((c) => c.text).join(" ")).toContain("NXTPAPER 14");
+  });
+});
+
+describe("escapeXml", () => {
+  it("escapes what would break the TTS SSML", () => {
+    expect(escapeXml("Bang & Olufsen <3")).toBe("Bang &amp; Olufsen &lt;3");
   });
 });
