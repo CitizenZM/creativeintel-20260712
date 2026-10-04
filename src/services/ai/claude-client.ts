@@ -307,10 +307,11 @@ function modelFor(provider: Route, tier: ModelTier = "standard", capability: Tex
     if (tier === "deep") return env.AI_GLM_MODEL_DEEP || standard;
     return standard;
   }
-  // openrouter
+  // openrouter — DeepSeek by default: strong JSON output at a fraction of GPT-4o's price.
   if (process.env.AI_FALLBACK_MODEL) return process.env.AI_FALLBACK_MODEL;
-  if (process.env.AI_MODEL) return toOpenRouterModel(process.env.AI_MODEL);
-  return "meta-llama/llama-3.3-70b-instruct:free";
+  if (tier === "fast") return env.AI_OPENROUTER_MODEL_FAST || "deepseek/deepseek-v4-flash";
+  if (env.AI_OPENROUTER_MODEL) return env.AI_OPENROUTER_MODEL;
+  return "deepseek/deepseek-v4-pro";
 }
 
 function routeLabel(route: Route): string {

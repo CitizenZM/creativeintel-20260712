@@ -21,10 +21,10 @@ export interface LibtvVideoPrice {
  * Which executor renders a model: LibTV (credits, Mac worker), Zhipu GLM (free
  * cloud, server-side) or ComfyUI (self-hosted GPU, server-side, free per clip).
  */
-export type RenderEngine = "libtv" | "glm" | "comfyui" | "animatic" | "matrix";
+export type RenderEngine = "libtv" | "glm" | "comfyui" | "animatic" | "matrix" | "openrouter";
 
 /** Engines the Next.js server drives itself (server-executor.ts), never the Mac worker. */
-export const SERVER_ENGINES = ["glm", "comfyui", "animatic", "matrix"] as const;
+export const SERVER_ENGINES = ["glm", "comfyui", "animatic", "matrix", "openrouter"] as const;
 export type ServerEngine = (typeof SERVER_ENGINES)[number];
 
 export function isServerEngine(engine: string | null | undefined): engine is ServerEngine {
@@ -36,6 +36,7 @@ export function engineLabel(engine: string | null | undefined): string {
   if (engine === "comfyui") return "ComfyUI (self-hosted)";
   if (engine === "animatic") return "Animatic (free, no key)";
   if (engine === "matrix") return "Matrix (Seedance, paid)";
+  if (engine === "openrouter") return "OpenRouter (Seedream + Veo/Wan, low cost)";
   return "LibTV";
 }
 
@@ -53,6 +54,8 @@ export interface LibtvImageModel {
   note?: string;
   /** Model id on the Matrix gateway (engine "matrix"). */
   matrixModel?: string;
+  /** Model id on OpenRouter (engine "openrouter", or cast-locked keyframes for a free GLM run). */
+  openrouterModel?: string;
   /**
    * Cast lock: the run first renders one reference image of the on-camera
    * talent, and every keyframe with a person is edited from it (product shots
@@ -78,6 +81,8 @@ export interface LibtvVideoModel {
   providerId?: string;
   /** Model id on the Matrix gateway (engine "matrix"); credits are US cents. */
   matrixModel?: string;
+  /** Model id on OpenRouter (engine "openrouter"); credits are US cents. */
+  openrouterModel?: string;
 }
 
 export type LibtvModel = LibtvImageModel | LibtvVideoModel;
@@ -144,6 +149,51 @@ export const IMAGE_MODELS: LibtvImageModel[] = [
     settingsKeys: ["modeType", "ratio"],
     verified: false,
     note: "Free keyframes from Pollinations (Flux) — no key, no credits. Pairs with the free animatic clips.",
+  },
+  {
+    name: "Seedream 5 Flash (OpenRouter)",
+    engine: "openrouter",
+    openrouterModel: "bytedance-seed/seedream-5-0-flash",
+    modality: "image",
+    modeType: "text2image",
+    creditsPerImage: 2,
+    quality: "1K",
+    qualityKey: "quality",
+    ratios: ["9:16", "16:9", "1:1", "3:4", "4:3"],
+    settingsKeys: ["modeType", "ratio"],
+    verified: true,
+    note: "ByteDance Seedream 5 Flash on your OpenRouter key: photoreal, ~10 s a still, 1.8¢ each (measured), reference images free. Cast-locked: one actor and the real product in every shot.",
+    lockCharacter: true,
+  },
+  {
+    name: "Qwen-Image 3 (OpenRouter)",
+    engine: "openrouter",
+    openrouterModel: "qwen/qwen-image-3",
+    modality: "image",
+    modeType: "text2image",
+    creditsPerImage: 3,
+    quality: "1K",
+    qualityKey: "quality",
+    ratios: ["9:16", "16:9", "1:1", "3:4", "4:3"],
+    settingsKeys: ["modeType", "ratio"],
+    verified: false,
+    note: "Qwen-Image 3 on OpenRouter — natural faces and hands, 3¢ each. Cast-locked like Seedream 5 Flash.",
+    lockCharacter: true,
+  },
+  {
+    name: "Seedream 5 Flash cast-locked (OpenRouter keyframes, free GLM clips)",
+    engine: "glm",
+    openrouterModel: "bytedance-seed/seedream-5-0-flash",
+    lockCharacter: true,
+    modality: "image",
+    modeType: "text2image",
+    creditsPerImage: 2,
+    quality: "1K",
+    qualityKey: "quality",
+    ratios: ["9:16", "16:9", "1:1", "3:4", "4:3"],
+    settingsKeys: ["modeType", "ratio"],
+    verified: false,
+    note: "The cheapest consistent run: Seedream 5 Flash keyframes (1.8¢ each, one actor + the real packshot in every shot) with the free GLM CogVideoX clips. OpenRouter has no GLM video model, so clips stay on Zhipu.",
   },
   {
     name: "Qwen-Image (Matrix)",
@@ -306,6 +356,75 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     note: "Zhipu free image-to-video, rendered on the server — 0 credits, watermarked.",
   },
   {
+    name: "Veo 3.1 Lite 720p (OpenRouter)",
+    engine: "openrouter",
+    openrouterModel: "google/veo-3.1-lite",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [
+      { durationSec: 4, resolution: "720P", credits: 12 },
+      { durationSec: 6, resolution: "720P", credits: 18 },
+      { durationSec: 8, resolution: "720P", credits: 24 },
+    ],
+    defaultDurationSec: 4,
+    defaultResolution: "720P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: true,
+    note: "Google Veo 3.1 Lite image-to-video on your OpenRouter key, silent: 3¢ per second (measured: a 4 s clip took ~50 s and cost 11.9¢; faces stayed stable). The low-cost production default.",
+  },
+  {
+    name: "Wan 3.0 720p (OpenRouter)",
+    engine: "openrouter",
+    openrouterModel: "alibaba/wan-3.0",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [
+      { durationSec: 4, resolution: "720P", credits: 40 },
+      { durationSec: 5, resolution: "720P", credits: 50 },
+      { durationSec: 6, resolution: "720P", credits: 60 },
+      { durationSec: 8, resolution: "720P", credits: 80 },
+    ],
+    defaultDurationSec: 5,
+    defaultResolution: "720P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: false,
+    note: "Alibaba Wan 3.0 at 720p — 10¢ per second, any length 2–30 s. A second opinion on motion when Veo Lite looks flat.",
+  },
+  {
+    name: "Kling 3.0 Std 720p (OpenRouter)",
+    engine: "openrouter",
+    openrouterModel: "kwaivgi/kling-v3.0-std",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [
+      { durationSec: 5, resolution: "720P", credits: 42 },
+      { durationSec: 6, resolution: "720P", credits: 50 },
+      { durationSec: 8, resolution: "720P", credits: 67 },
+    ],
+    defaultDurationSec: 5,
+    defaultResolution: "720P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: false,
+    note: "Kuaishou Kling 3.0 Standard — strong human motion, 8.4¢ per second.",
+  },
+  {
+    name: "Seedance 2.0 Fast 720p (OpenRouter)",
+    engine: "openrouter",
+    openrouterModel: "bytedance/seedance-2.0-fast",
+    modality: "video",
+    modeType: "singleImage2video",
+    prices: [
+      { durationSec: 5, resolution: "720P", credits: 45 },
+      { durationSec: 6, resolution: "720P", credits: 54 },
+      { durationSec: 8, resolution: "720P", credits: 72 },
+    ],
+    defaultDurationSec: 5,
+    defaultResolution: "720P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: false,
+    note: "ByteDance Seedance 2.0 Fast on OpenRouter (token-priced; ~45¢ per 5 s clip, estimate). The Matrix quota issue does not apply here.",
+  },
+  {
     name: "Seedance 2.0 Fast 720p (Matrix)",
     engine: "matrix",
     matrixModel: "doubao/seedance-2.0-fast-720p",
@@ -406,6 +525,9 @@ export const COMFY_VIDEO_MODEL = "ComfyUI Video (self-hosted)";
 
 export const MATRIX_IMAGE_MODEL = "Qwen-Image (Matrix)";
 export const MATRIX_VIDEO_MODEL = "Seedance 2.0 Fast 720p (Matrix)";
+
+export const OPENROUTER_IMAGE_MODEL = "Seedream 5 Flash (OpenRouter)";
+export const OPENROUTER_VIDEO_MODEL = "Veo 3.1 Lite 720p (OpenRouter)";
 
 /** The engine a run needs: the video model decides (GLM / ComfyUI models carry their engine). */
 export function engineFor(videoModel: string): RenderEngine {
@@ -516,6 +638,7 @@ export function imageSettings(
   if (model.settingsKeys.includes("count")) settings.count = opts.count ?? 1;
   if (model.qualityKey === "resolution" && model.settingsKeys.includes("quality")) settings.quality = "high";
   if (model.matrixModel) settings.matrixModel = model.matrixModel;
+  if (model.openrouterModel) settings.openrouterModel = model.openrouterModel;
   if (model.lockCharacter) settings.lockCharacter = 1;
   return settings;
 }
@@ -531,6 +654,7 @@ export function videoSettings(
   if (model.zhipuModel) settings.zhipuModel = model.zhipuModel;
   if (model.providerId) settings.providerId = model.providerId;
   if (model.matrixModel) settings.matrixModel = model.matrixModel;
+  if (model.openrouterModel) settings.openrouterModel = model.openrouterModel;
   return settings;
 }
 
@@ -716,17 +840,27 @@ export function modelOptions(
     // Without a Zhipu key a GLM run compiles, then fails on its first job.
     if (engine === "glm" && !glmAvailable) return false;
     if (engine === "matrix" && !process.env.MATRIX_API_KEY) return false;
+    if (engine === "openrouter" && !process.env.OPENROUTER_API_KEY) return false;
     return freeOnly ? engine === "glm" || engine === "comfyui" || engine === "animatic" : true;
   };
   // Matrix keyframes need the key, and spend money, so never in strict free mode.
-  const images = IMAGE_MODELS.filter((m) => offered(m.engine) && !(m.matrixModel && (freeOnly || !process.env.MATRIX_API_KEY)));
+  const images = IMAGE_MODELS.filter(
+    (m) =>
+      offered(m.engine) &&
+      !(m.matrixModel && (freeOnly || !process.env.MATRIX_API_KEY)) &&
+      !(m.openrouterModel && (freeOnly || !process.env.OPENROUTER_API_KEY))
+  );
   const videos = [...VIDEO_MODELS, ..._extraVideoModels].filter((m) => offered(m.engine) && !(freeOnly && m.zhipuModel));
   return {
     image: images.map((m) => ({
       name: m.name,
       modality: "image" as const,
       credits: m.creditsPerImage,
-      unit: m.matrixModel ? `US¢ / ${m.quality} image (Matrix bill, est.)` : `credits / ${m.quality} image`,
+      unit: m.matrixModel
+        ? `US¢ / ${m.quality} image (Matrix bill, est.)`
+        : m.openrouterModel
+        ? `US¢ / ${m.quality} image (OpenRouter bill)`
+        : `credits / ${m.quality} image`,
       verified: m.verified,
       note: m.note,
       engine: m.engine ?? ("libtv" as const),
@@ -742,6 +876,8 @@ export function modelOptions(
           ? `US¢ / ${price.durationSec}s clip (Zhipu bill)`
           : m.matrixModel
           ? `US¢ / ${price.durationSec}s ${price.resolution} clip (Matrix bill, est.)`
+          : m.openrouterModel
+          ? `US¢ / ${price.durationSec}s ${price.resolution} clip (OpenRouter bill)`
           : `credits / ${price.durationSec}s ${price.resolution}`,
         verified: m.verified,
         note: m.note,
