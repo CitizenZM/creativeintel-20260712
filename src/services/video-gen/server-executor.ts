@@ -324,6 +324,20 @@ export async function tickRun(
 }
 
 /**
+ * A frame's on-screen text and voiceover line. A directed frame takes the plan
+ * as-is: a null line means the previous line covers this shot (falling back to
+ * the storyboard line would speak it twice). Pure.
+ */
+export function frameCopy(
+  plan: { vo?: string | null; txt?: string | null } | undefined,
+  storyText: unknown,
+  storyVo: unknown
+): { text: string | null; voiceover: string | null } {
+  if (plan) return { text: plan.txt ?? null, voiceover: plan.vo ?? null };
+  return { text: typeof storyText === "string" ? storyText : null, voiceover: typeof storyVo === "string" ? storyVo : null };
+}
+
+/**
  * The storyboard's frames as the edit sees them. A directed run's plan overrides
  * each frame's voiceover line and on-screen text (the selling-point copy).
  */
@@ -342,8 +356,7 @@ export async function storyboardFrames(storyboardId: string | null, directorPlan
       frameNumber: n,
       startSec: Number.isFinite(f.startSec) ? f.startSec! : i * frameSeconds,
       endSec: Number.isFinite(f.endSec) ? f.endSec! : (i + 1) * frameSeconds,
-      text: p?.txt ?? (typeof f.textOverlay === "string" ? f.textOverlay : null),
-      voiceover: p?.vo ?? (typeof f.voiceover === "string" ? f.voiceover : null),
+      ...frameCopy(p, f.textOverlay, f.voiceover),
       segment: typeof f.segment === "string" ? f.segment : null,
       hasPerson: hasPeople(`${f.imagePrompt ?? ""} ${f.scene ?? ""}`),
     };
