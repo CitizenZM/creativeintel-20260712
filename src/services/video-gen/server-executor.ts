@@ -333,7 +333,9 @@ export function frameCopy(
   storyText: unknown,
   storyVo: unknown
 ): { text: string | null; voiceover: string | null } {
-  if (plan) return { text: plan.txt ?? null, voiceover: plan.vo ?? null };
+  // On-screen text has no "covered by the previous line" meaning: a shot the plan left
+  // without a keyword keeps the storyboard's (the hook headline lives there).
+  if (plan) return { text: plan.txt ?? (typeof storyText === "string" ? storyText : null), voiceover: plan.vo ?? null };
   return { text: typeof storyText === "string" ? storyText : null, voiceover: typeof storyVo === "string" ? storyVo : null };
 }
 
