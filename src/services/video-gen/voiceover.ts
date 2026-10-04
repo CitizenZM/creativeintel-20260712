@@ -217,20 +217,24 @@ export function toSrt(cues: SubtitleCue[]): string {
 }
 
 /** Speak one line with Edge TTS; returns the mp3 and its word timings. Retries transient failures. */
+export const escapeXml = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const unescapeXml = (t: string) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
 export async function synthesize(text: string, voice = DEFAULT_VOICE): Promise<{ audio: Buffer; words: Word[] }> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     const tts = new MsEdgeTTS();
     try {
       await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3, { wordBoundaryEnabled: true });
-      const { audioStream, metadataStream } = tts.toStream(text);
+      // The text goes into SSML unescaped: a bare "&" ("Bang & Olufsen") makes the service return no audio.
+      const { audioStream, metadataStream } = tts.toStream(escapeXml(text));
       const chunks: Buffer[] = [];
       const words: Word[] = [];
       metadataStream?.on("data", (d: Buffer) => {
         try {
           const j = JSON.parse(d.toString()) as { Metadata?: { Type: string; Data: { text: { Text: string }; Offset: number; Duration: number } }[] };
           for (const m of j.Metadata ?? []) {
-            if (m.Type === "WordBoundary") words.push({ text: m.Data.text.Text, startSec: m.Data.Offset / 1e7, durSec: m.Data.Duration / 1e7 });
+            if (m.Type === "WordBoundary") words.push({ text: unescapeXml(m.Data.text.Text), startSec: m.Data.Offset / 1e7, durSec: m.Data.Duration / 1e7 });
           }
         } catch {
           // metadata frames that aren't JSON carry nothing we need

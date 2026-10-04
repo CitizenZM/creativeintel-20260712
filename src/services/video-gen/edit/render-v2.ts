@@ -474,7 +474,8 @@ export async function renderEditV2(input: {
     beats: plan.grid.beats,
     plannedCuts: plan.boundaries.map((b) => b.atSec),
     hookHeadline: plan.cards.some((c) => c.role === "hook" && c.startSec < 2),
-    captionCoverage: spokenBeforeCta.length ? covered / Math.max(0.01, wordSpan) : null,
+    // A script with a voiceover but no spoken words means the voice failed: fail the check, never ship it silent.
+    captionCoverage: spokenBeforeCta.length ? covered / Math.max(0.01, wordSpan) : input.frames.some((f) => f.voiceover?.trim()) ? 0 : null,
     ctaSec: plan.ctaSec,
   });
 
