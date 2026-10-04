@@ -60,7 +60,8 @@ describe("OpenRouter catalogue", () => {
   it("every OpenRouter model has an id, and Veo only offers the lengths it supports (4/6/8 s)", () => {
     for (const m of [...IMAGE_MODELS, ...VIDEO_MODELS].filter((x) => x.engine === "openrouter")) expect(m.openrouterModel).toBeTruthy();
     const veo = VIDEO_MODELS.find((m) => m.openrouterModel === "google/veo-3.1-lite")!;
-    expect(veo.prices.map((p) => p.durationSec)).toEqual([4, 6, 8]);
+    expect([...new Set(veo.prices.map((p) => p.durationSec))]).toEqual([4, 6, 8]);
+    expect(veo.prices.find((p) => p.resolution === "1080P")).toMatchObject({ durationSec: 4, credits: 20 });
   });
 
   it("is the engine default only when the key is present and not in strict free mode", () => {

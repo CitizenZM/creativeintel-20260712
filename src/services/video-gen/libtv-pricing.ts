@@ -363,6 +363,7 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     modeType: "singleImage2video",
     prices: [
       { durationSec: 4, resolution: "720P", credits: 12 },
+      { durationSec: 4, resolution: "1080P", credits: 20 },
       { durationSec: 6, resolution: "720P", credits: 18 },
       { durationSec: 8, resolution: "720P", credits: 24 },
     ],

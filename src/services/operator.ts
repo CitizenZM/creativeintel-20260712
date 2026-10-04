@@ -21,7 +21,33 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     aspectRatio: z.enum(["9:16", "16:9", "1:1", "4:5", "4:3", "3:4"]).optional(),
     budgetMode: z.enum(["economy", "full"]).optional(),
     allowOverBudget: z.boolean().optional(),
+    holdVideos: z.boolean().optional(),
   }),
+  /** Store a prepared image (composite, reference, end card) and return its URL. */
+  z.object({
+    action: z.literal("upload-asset"),
+    projectId: z.string().min(1),
+    filename: z.string().min(1).max(120),
+    contentType: z.enum(["image/jpeg", "image/png"]),
+    base64: z.string().min(10).max(5_000_000),
+  }),
+  /**
+   * Import an approved script as a locked storyboard; creates the project and its brand kit
+   * (packshots, logo) when `project` is given instead of `projectId`.
+   */
+  z.object({
+    action: z.literal("import-script"),
+    projectId: z.string().min(1).optional(),
+    templateProjectId: z.string().min(1).optional(),
+    project: z
+      .object({ name: z.string().min(1), brandName: z.string().min(1), productName: z.string().min(1), productUrl: z.string().url().optional() })
+      .optional(),
+    packshots: z.array(z.object({ url: z.string().url(), variant: z.string().optional() })).max(6).optional(),
+    logoUrl: z.string().url().optional(),
+    storyboard: z.object({ title: z.string().min(1), frames: z.array(z.record(z.string(), z.unknown())).min(1).max(30) }),
+  }),
+  /** Release the held clips of a keyframe-review run and start rendering them. */
+  z.object({ action: z.literal("release-videos"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({ action: z.literal("reassemble-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
   /** Tick an approved server run now instead of waiting for the 5-minute cron (no new spend beyond what was approved). */
   z.object({ action: z.literal("drive-run"), projectId: z.string().min(1), runId: z.string().min(1) }),

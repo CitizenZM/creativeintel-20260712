@@ -255,7 +255,8 @@ export async function tickRun(
   }
   const byNameFresh = new Map(fresh.map((j) => [j.nodeName, j]));
   let inFlight = videos.filter((x) => x.status === "running").length;
-  for (const j of videos.filter((x) => x.status === "queued")) {
+  // A keyframe-review run holds its clips until "release-videos".
+  for (const j of videos.filter((x) => x.status === "queued" && !(x.settings as { hold?: number } | null)?.hold)) {
     if (inFlight >= adapter.maxVideosInFlight) break;
     const ref = byNameFresh.get(refName(((j.leftRefs as string[] | null) ?? [])[0] ?? ""));
     if (ref && !TERMINAL_JOB.has(ref.status)) continue; // keyframe not ready yet
