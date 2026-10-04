@@ -23,6 +23,12 @@ export interface MusicPlan {
   /** 0 calm … 1 high energy. */
   energy?: number;
   seed?: number;
+  /**
+   * "pop" (default): four-on-the-floor EDM bed. "holiday": a warm, light seasonal bed — celesta
+   * arpeggio, sleigh bells, soft piano chords, sine bass, a gentle kick on 1 and 3, no claps,
+   * risers or crashes. Holiday/gift ads use it; it sits further under the voice.
+   */
+  mood?: "pop" | "holiday";
 }
 
 /** Chord roots (Hz) and triads for vi–IV–I–V in C: Am F C G. */
@@ -145,8 +151,141 @@ export interface MusicResult {
   beats: number[];
 }
 
+/** Bell / celesta: inharmonic sine partials, fast attack, long soft decay. */
+function bell(freq: number, dur: number): Float32Array {
+  const n = Math.round(dur * SAMPLE_RATE);
+  const out = new Float32Array(n);
+  const partials: [number, number, number][] = [
+    [1, 1, 3.2],
+    [2.0, 0.35, 5],
+    [3.01, 0.16, 8],
+    [4.17, 0.08, 11],
+  ];
+  for (let i = 0; i < n; i++) {
+    const t = i / SAMPLE_RATE;
+    let v = 0;
+    for (const [m, g, d] of partials) v += g * Math.sin(2 * Math.PI * freq * m * t) * Math.exp(-t * d);
+    out[i] = v * Math.min(1, t / 0.002);
+  }
+  return out;
+}
+
+/** Soft electric-piano chord tone: sine + a little 2nd harmonic, gentle tremolo, decaying. */
+function epiano(freq: number, dur: number): Float32Array {
+  const n = Math.round(dur * SAMPLE_RATE);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SAMPLE_RATE;
+    const trem = 1 - 0.12 * (0.5 + 0.5 * Math.sin(2 * Math.PI * 4.5 * t));
+    out[i] = (Math.sin(2 * Math.PI * freq * t) + 0.22 * Math.sin(2 * Math.PI * freq * 2 * t)) * trem * Math.min(1, t / 0.01) * Math.exp(-t * 1.6) * Math.min(1, Math.max(0, (dur - t) / 0.08));
+  }
+  return out;
+}
+
+/** Sine bass note with a soft attack and release. */
+function sineBass(freq: number, dur: number): Float32Array {
+  const n = Math.round(dur * SAMPLE_RATE);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SAMPLE_RATE;
+    out[i] = (Math.sin(2 * Math.PI * freq * t) + 0.25 * Math.sin(2 * Math.PI * freq * 2 * t)) * Math.min(1, t / 0.015) * Math.min(1, Math.max(0, (dur - t) / 0.05));
+  }
+  return out;
+}
+
+/** Sleigh-bell shake: a cluster of high metallic partials over a bright noise burst. */
+function sleigh(rand: () => number, dur = 0.16): Float32Array {
+  const n = Math.round(dur * SAMPLE_RATE);
+  const out = new Float32Array(n);
+  const freqs = [5200, 6150, 7300, 8400];
+  const noise = noiseHit(dur, 26, 6500, rand);
+  for (let i = 0; i < n; i++) {
+    const t = i / SAMPLE_RATE;
+    let v = 0;
+    for (const f of freqs) v += Math.sin(2 * Math.PI * f * t + f);
+    out[i] = (v * 0.12 + noise[i]) * Math.exp(-t * 24) * Math.min(1, t / 0.006);
+  }
+  return out;
+}
+
+/** I–vi–IV–V in C: C Am F G — bright and seasonal. */
+const HOLIDAY_PROGRESSION: { root: number; chord: number[] }[] = [
+  { root: 65.41, chord: [261.63, 329.63, 392.0] }, // C
+  { root: 55.0, chord: [220.0, 261.63, 329.63] }, // Am
+  { root: 43.65, chord: [174.61, 220.0, 261.63] }, // F
+  { root: 49.0, chord: [196.0, 246.94, 293.66] }, // G
+];
+
+function synthesizeHoliday(plan: MusicPlan): MusicResult {
+  const { durationSec, bpm } = plan;
+  const rand = rng(plan.seed ?? 7);
+  const total = Math.ceil((durationSec + 2) * SAMPLE_RATE);
+  const bus: Bus = { l: new Float32Array(total), r: new Float32Array(total) };
+  const beat = 60 / bpm;
+  const beatsTotal = Math.floor(durationSec / beat);
+  const preDrop = (t: number) => t < plan.dropSec - 1e-6;
+  const bells = sleigh(rand);
+  const K = kick();
+
+  for (let b = 0; b < beatsTotal; b++) {
+    const t = b * beat;
+    // Sleigh bells on the 8ths (accent on the off-beat), lighter before the drop.
+    addMono(bus, t, bells, preDrop(t) ? 0.05 : 0.07, 0.3);
+    addMono(bus, t + beat / 2, bells, preDrop(t) ? 0.08 : 0.11, -0.25);
+    // A soft, low kick on 1 and 3 after the drop — a pulse, not a club beat.
+    if (!preDrop(t) && b % 2 === 0) addMono(bus, t, K, 0.3);
+  }
+  for (let bar = 0; bar * 4 * beat < durationSec; bar++) {
+    const t0 = bar * 4 * beat;
+    const { root, chord } = HOLIDAY_PROGRESSION[bar % HOLIDAY_PROGRESSION.length];
+    // Piano chords on 1 and 3 (2 beats each).
+    for (const half of [0, 2]) {
+      const t = t0 + half * beat;
+      if (t >= durationSec) continue;
+      chord.forEach((f, k) => addMono(bus, t, epiano(f, 2 * beat), 0.075, k === 0 ? -0.3 : k === 2 ? 0.3 : 0));
+    }
+    // Sine bass on the beat.
+    for (let q = 0; q < 4; q++) {
+      const t = t0 + q * beat;
+      if (t >= durationSec) continue;
+      addMono(bus, t, sineBass(q === 2 ? root * 1.5 : root, beat * 0.9), preDrop(t) ? 0.18 : 0.26);
+    }
+    // Celesta arpeggio on quarter notes, two octaves up — sparse, so the voice stays in front.
+    for (let q = 0; q < 4; q++) {
+      const t = t0 + q * beat;
+      if (t >= durationSec) continue;
+      addMono(bus, t, bell(chord[[0, 1, 2, 1][q]] * 2, 0.9), 0.065, q % 2 ? 0.35 : -0.35);
+    }
+  }
+  // A bright chime on the drop and a ringing tonic chord to close — no crashes.
+  for (const f of [1046.5, 1318.5, 1568.0]) addMono(bus, plan.dropSec, bell(f, 1.6), 0.05);
+  const lastBeat = Math.max(0, beatsTotal - 1) * beat;
+  for (const f of HOLIDAY_PROGRESSION[0].chord) addMono(bus, lastBeat, epiano(f, 2.2), 0.14);
+  for (const f of [523.25, 659.25, 783.99]) addMono(bus, lastBeat, bell(f, 1.8), 0.06);
+
+  const n = Math.round(durationSec * SAMPLE_RATE);
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  let peak = 1e-9;
+  for (let i = 0; i < n; i++) {
+    const fade = Math.min(1, (n - i) / (0.25 * SAMPLE_RATE));
+    left[i] = Math.tanh(bus.l[i]) * fade;
+    right[i] = Math.tanh(bus.r[i]) * fade;
+    peak = Math.max(peak, Math.abs(left[i]), Math.abs(right[i]));
+  }
+  const norm = 0.8 / peak;
+  for (let i = 0; i < n; i++) {
+    left[i] *= norm;
+    right[i] *= norm;
+  }
+  const beats: number[] = [];
+  for (let b = 0; b <= beatsTotal; b++) beats.push(Math.round(b * beat * 1000) / 1000);
+  return { left, right, bpm, beats };
+}
+
 /** Render the bed. Pure apart from Math.random in the kick click (inaudible). */
 export function synthesizeMusic(plan: MusicPlan): MusicResult {
+  if (plan.mood === "holiday") return synthesizeHoliday(plan);
   const { durationSec, bpm } = plan;
   const energy = Math.max(0, Math.min(1, plan.energy ?? 0.75));
   const rand = rng(plan.seed ?? 7);

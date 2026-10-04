@@ -71,8 +71,9 @@ describe("planEdit", () => {
     expect(plan.breakdownSec).toBe(14);
     const body = plan.boundaries.filter((b) => b.atSec > 4 && b.atSec < 16 && b.transition !== "cut");
     expect(new Set(body.map((b) => b.transition)).size).toBeGreaterThan(1);
-    expect(plan.sfx.find((e) => e.kind === "impact")?.atSec).toBe(4);
-    expect(plan.sfx.some((e) => e.kind === "click" && e.atSec > 16)).toBe(true);
+    expect(plan.sfx.some((e) => e.kind === "impact")).toBe(false);
+    expect(plan.sfx.find((e) => e.kind === "whoosh" && e.atSec === 4)).toBeTruthy();
+    expect(plan.sfx.find((e) => e.kind === "click")?.atSec).toBe(19);
   });
 
   it("shows the hook headline, short new claims only, and the offer on the end card", () => {
@@ -170,5 +171,12 @@ describe("planEdit — locked-script features", () => {
     const fine = plan.cards.find((c) => c.role === "fine")!;
     expect(fine).toMatchObject({ text: "*Fine print.", endSec: plan.durationSec });
     expect(fine.startSec).toBeCloseTo(cta[0].startSec, 2);
+  });
+});
+
+describe("CTA button", () => {
+  it("bounces in for the last second, even when the offer line is itself a CTA", () => {
+    const p = planEdit(ad);
+    expect(p.ctaButton).toEqual({ text: "Shop now", startSec: 19 });
   });
 });

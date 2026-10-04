@@ -210,6 +210,14 @@ interface Overlay {
   endSec: number;
   /** Vertical centre as a share of the frame height. */
   y: number;
+  /** Drops in from above and bounces to rest (CTA button). */
+  bounce?: boolean;
+}
+
+/** Holiday / gift copy picks the seasonal music bed. */
+export function musicMood(frames: { voiceover?: string | null; textOverlay?: string | null }[]): "pop" | "holiday" {
+  const text = frames.map((f) => `${f.voiceover ?? ""} ${f.textOverlay ?? ""}`).join(" ");
+  return /christmas|holiday|new year|black friday|cyber monday|gift|santa|xmas|winter/i.test(text) ? "holiday" : "pop";
 }
 
 /** Caption windows: each word state is shown until the next word starts (short gaps are held). */
@@ -399,7 +407,7 @@ export async function renderEditV2(input: {
   if (plan.ctaButton) {
     const file = path.join(dir, "v2cta.png");
     await writeFile(file, await ctaButtonPng(input.brand ? look.ctaText : plan.ctaButton.text, canvas, look));
-    overlays.push({ file, startSec: plan.ctaButton.startSec, endSec: total, y: 0.74 });
+    overlays.push({ file, startSec: plan.ctaButton.startSec, endSec: total, y: 0.74, bounce: true });
   }
   // End card branding: the logo lands with the CTA, the domain under the button.
   if (plan.ctaSec !== null) {
@@ -420,7 +428,8 @@ export async function renderEditV2(input: {
   if (track) {
     await run(ff, ["-y", "-v", "error", "-ss", f3(track.startSec), "-t", f3(total), "-i", track.file, "-af", `afade=t=out:st=${f3(Math.max(0, total - 0.4))}:d=0.4,aresample=44100`, "-ac", "2", musicFile], { timeout: 60_000 });
   } else {
-    const music = synthesizeMusic({ durationSec: total, bpm: plan.grid.bpm, dropSec: plan.dropSec, breakdownSec: plan.breakdownSec, ctaSec: plan.ctaSec, energy: 0.8, seed: input.runId.length });
+    const mood = musicMood(input.frames);
+    const music = synthesizeMusic({ durationSec: total, bpm: plan.grid.bpm, dropSec: plan.dropSec, breakdownSec: plan.breakdownSec, ctaSec: plan.ctaSec, energy: mood === "holiday" ? 0.55 : 0.8, seed: input.runId.length, mood });
     await writeFile(musicFile, toWav(music.left, music.right));
   }
   const sfx = renderSfxBed(plan.sfx, total);
@@ -436,14 +445,16 @@ export async function renderEditV2(input: {
   const video = [`[0:v]${fxFilter(plan, canvas)}[fx]`];
   overlays.forEach((o, i) => {
     const from = i === 0 ? "[fx]" : `[o${i - 1}]`;
-    video.push(`${from}[${firstOverlay + i}:v]overlay=x=(W-w)/2:y=H*${o.y}-h/2:enable='between(t,${f3(o.startSec)},${f3(o.endSec)})'[o${i}]`);
+    // A bouncing overlay falls from 9% of the height and bounces to rest (decaying |cos|).
+    const y = o.bounce ? `'H*${o.y}-h/2-H*0.09*abs(cos(2*PI*1.6*(t-${f3(o.startSec)})))*exp(-3.2*(t-${f3(o.startSec)}))'` : `H*${o.y}-h/2`;
+    video.push(`${from}[${firstOverlay + i}:v]overlay=x=(W-w)/2:y=${y}:eval=${o.bounce ? "frame" : "init"}:enable='between(t,${f3(o.startSec)},${f3(o.endSec)})'[o${i}]`);
   });
   const lastV = overlays.length ? `[o${overlays.length - 1}]` : "[fx]";
   video.push(`${lastV}format=yuv420p[v]`);
   const audio = vo
     ? [
         `[${voIdx}:a]aresample=44100,asplit=2[vo][vosc]`,
-        `[${musicIdx}:a]volume=0.32[mus]`,
+        `[${musicIdx}:a]volume=0.26[mus]`,
         `[mus][vosc]sidechaincompress=threshold=0.02:ratio=6:attack=15:release=350[duck]`,
         `[duck][vo][${sfxIdx}:a]amix=inputs=3:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=7,alimiter=limit=0.79:attack=2:release=40:level=disabled,atrim=0:${f3(total)}[a]`,
       ]
