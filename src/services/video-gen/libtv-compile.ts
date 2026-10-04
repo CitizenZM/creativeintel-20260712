@@ -541,7 +541,8 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
     // Action shots (big body movement) render on Kling, which handles human motion best; the rest stay on the run's model.
     const actionName = executor === "openrouter" && videoModel !== ACTION_VIDEO_MODEL ? ACTION_VIDEO_MODEL : null;
     const actionVideo = actionName
-      ? { modelName: actionName, settings: videoSettings(actionName, { durationSec: 3 }), credits: videoCredits(actionName, 3, "720P") }
+      ? // Kling bills a 3 s clip like 5 s (measured 41.6¢ either way): take the full 5 s.
+        { modelName: actionName, settings: videoSettings(actionName, { durationSec: 5 }), credits: videoCredits(actionName, 5, "720P") }
       : null;
     const n = applyDirectedShots(drafts, ad, { castLocked: !!imageEntry?.lockCharacter, videoDirected: executor !== "glm", brandTruth, actionVideo });
     castDescription = ad.cast;
