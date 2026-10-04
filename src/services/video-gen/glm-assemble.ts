@@ -37,6 +37,12 @@ export interface AssembleFrame {
   segment?: string | null;
   /** The shot shows a person (headline placement keeps off the face). */
   hasPerson?: boolean;
+  /** Locked scripts: time-remap factor (4 = a 4 s action shown in 1 s). */
+  speed?: number;
+  /** Locked scripts: push-in → hold → pull-back target (0–1 of the frame). */
+  zoomHit?: { x: number; y: number } | null;
+  /** Locked scripts: legal fine print shown under this frame (end card). */
+  fine?: string | null;
 }
 
 export const CAPTION_FONT = path.join(process.cwd(), "assets/fonts/Anton-Regular.ttf");
@@ -205,8 +211,8 @@ export interface SegmentCompare {
 }
 
 export type Segment =
-  | { kind: "clip"; url: string; from: number; length: number; frameNumber: number; text?: string; compare?: SegmentCompare }
-  | { kind: "still"; url: string; length: number; frameNumber: number; text?: string; compare?: SegmentCompare };
+  | { kind: "clip"; url: string; from: number; length: number; frameNumber: number; text?: string; compare?: SegmentCompare; speed?: number; zoomHit?: { x: number; y: number } | null }
+  | { kind: "still"; url: string; length: number; frameNumber: number; text?: string; compare?: SegmentCompare; zoomHit?: { x: number; y: number } | null };
 
 /** The comparison pairing for a frame, when its keyframe was split (comparison.ts). */
 function compareFor(frameNumber: number, jobs: Pick<LibtvJob, "kind" | "status" | "resultUrl" | "settings" | "nodeName">[]): SegmentCompare | undefined {
@@ -236,14 +242,16 @@ export function planSegments(frames: AssembleFrame[], jobs: Pick<LibtvJob, "kind
       const off = s.frameOffsetsSec?.find((o) => o.frameNumber === f.frameNumber);
       const from = off?.clipStartSec ?? 0;
       const len = off ? Math.max(0.5, off.clipEndSec - off.clipStartSec) : length;
-      segments.push({ kind: "clip", url: clip.resultUrl!, from, length: len, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs) });
+      // A sped-up shot plays `speed` × its length of source in its frame's time.
+      const speed = Math.max(1, f.speed ?? 1);
+      segments.push({ kind: "clip", url: clip.resultUrl!, from, length: speed > 1 ? length : len, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs), speed, zoomHit: f.zoomHit ?? null });
       continue;
     }
     const still = jobs.find((j) => {
       const s = (j.settings ?? {}) as Settings;
       return j.kind === "image" && j.resultUrl && (s.frameNumber === f.frameNumber || s.coversFrames?.includes(f.frameNumber));
     });
-    if (still) segments.push({ kind: "still", url: still.resultUrl!, length, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs) });
+    if (still) segments.push({ kind: "still", url: still.resultUrl!, length, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs), zoomHit: f.zoomHit ?? null });
   }
   return segments;
 }
