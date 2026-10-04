@@ -29,7 +29,7 @@ import { measureCuts, measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
 import { claimChipPng, comparisonLabelPng, ctaButtonPng, domainPng, finePrintPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
-import { kineticGroups, timedWords, toSrt, subtitleCues, type TimedWord } from "../voiceover";
+import { kineticGroups, shownForm, timedWords, toSrt, subtitleCues, type TimedWord } from "../voiceover";
 import { speakVoiceover, type AssembleFrame, type Segment } from "../glm-assemble";
 
 const run = promisify(execFile);
@@ -294,7 +294,7 @@ export async function renderEditV2(input: {
     }
   }
   const plan = planEdit(planInput, {
-    voiceovers: new Map(input.frames.map((f) => [f.frameNumber, f.voiceover ?? null])),
+    voiceovers: new Map(input.frames.map((f) => [f.frameNumber, f.voiceover ? shownForm(f.voiceover) : null])),
     hookStyle: input.hookStyle,
     hookText: input.hookText,
     beats: track?.beats,

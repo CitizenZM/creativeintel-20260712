@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kineticGroups, placeLines, planVoiceover, subtitleCues, toSrt } from "./voiceover";
+import { kineticGroups, placeLines, planVoiceover, respell, shownForm, spokenForm, subtitleCues, timedWords, toSrt } from "./voiceover";
 
 describe("planVoiceover", () => {
   it("speaks each beat once, spanning the frames that repeat its line", () => {
@@ -77,5 +77,28 @@ describe("kineticGroups", () => {
   it("shows up to three short words at a time and breaks after punctuation, even inside quotes", () => {
     const g = kineticGroups(w(["Is", "this", "too", "bright", "for", "my", "room?'", "That's", "a", "common", "concern."]));
     expect(g.map((x) => x.map((y) => y.text).join(" "))).toEqual(["Is this too", "bright for my", "room?'", "That's a common", "concern."]);
+  });
+});
+
+describe("caption spellings", () => {
+  const line = "Unwrap {NXTPAPER 14|Next Paper Fourteen} — no glare.";
+  const words = ["Unwrap", "Next", "Paper", "Fourteen", "no", "glare."].map((text, i) => ({ text, startSec: i * 0.4, durSec: 0.35 }));
+
+  it("speaks the spoken form and shows the caption form", () => {
+    expect(spokenForm(line)).toBe("Unwrap Next Paper Fourteen — no glare.");
+    expect(shownForm(line)).toBe("Unwrap NXTPAPER 14 — no glare.");
+  });
+
+  it("respells the spoken words in captions, keeping the phrase's time span", () => {
+    const out = respell(words, [{ spoken: "Next Paper Fourteen", shown: "NXTPAPER 14" }]);
+    expect(out.map((w) => w.text)).toEqual(["Unwrap", "NXTPAPER", "14", "no", "glare."]);
+    expect(out[1].startSec).toBeCloseTo(0.4);
+    expect(out[2].startSec + out[2].durSec).toBeCloseTo(1.55);
+  });
+
+  it("captions and subtitles of a marked-up line use the caption spelling", () => {
+    const timed = timedWords(words, { startSec: 1, tempo: 1 }, line);
+    expect(timed.map((w) => w.text).join(" ")).toContain("NXTPAPER 14");
+    expect(subtitleCues(words, { startSec: 1, tempo: 1 }, 32, line).map((c) => c.text).join(" ")).toContain("NXTPAPER 14");
   });
 });
