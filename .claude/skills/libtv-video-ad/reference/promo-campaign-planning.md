@@ -30,3 +30,38 @@ generic sport, never league marks.
 - **Life scenes sell the season**: Christmas morning with kids, game day with friends, date night by candlelight,
   New Year's Eve fireworks (true black). No league marks, landmarks or licensed characters.
 - **WAS price** must be the live compare-at price when the ad ships (FTC former-price rule).
+
+## Keyframe-review lessons (Barron, 2026-10-04 — v4 scripts in `reference/examples/tcl-bfcm/locked_v4.py`)
+- **Casting follows the brief's audience.** Write ethnicity, age, hair, skin and wardrobe for *every* person in every
+  prompt (leads, kids, friends, installers) — the image model fills unspecified people at random.
+- **One casting sheet per ad, of the whole family or couple.** `castLock` describes everyone who recurs; each cast
+  shot says who from image 1 is in it ("only the father, not the children"). Group shots: lead sharp in the
+  foreground, extras soft behind — multi-face shots are where identity drifts.
+- **The product reference must show the real frame on all four sides.** An angled or cropped packshot let the model
+  invent thick bezels. Use the straight-front render, measure its screen rectangle from pixel profiles (never trust a
+  vision model's box), paste the shot's own picture on screen, and pass it per shot as `locked.refImageUrl`.
+- **Screen content is composited, not prompted**: village, game, fireworks, art each go on the front render as that
+  shot's reference, so the screen is exact and logo-free. Art-mode TVs: a public-domain masterpiece (Van Gogh's
+  *Sunflowers*) in a cream mat reads instantly as "a TV that hangs like art"; use a full-bleed crop for border shots.
+- **Gift unboxing is shot top-down** (overhead, looking straight down): tear the wrap, lift the lid, lift the product out.
+- **Tablets: show the modes, not just the screen** — a 360° turntable turn (Kling, 5 s remapped ~3×), then a whip from
+  sheet music to hand sketching on the same device.
+- **No thrown food** (popcorn, snacks) — celebrate with props that read festive: red and gold Christmas balloons.
+- **People talk to each other**: every cast shot has a look, a line or a touch between them (whisper, laugh, turn to a
+  friend), relaxed natural body language — never everyone staring at the TV.
+- **A family dog on the floor** (one breed per ad, same dog every shot) makes home scenes feel lived-in.
+- **Art-mode pictures are full-screen** — edge to edge, no mat or inner border, in every shot and on the end card.
+
+## Edit rules (Barron, 2026-10-04 — v7 masters)
+- **First 3 s = the sale pitch**, every promo ad: a question + the offer, one line per hook frame, e.g.
+  "WANT A NEW YEAR GIFT?" → "BLACK FRIDAY: UP TO 40% OFF*" (→ the product's own hook, e.g. free installation).
+  The % comes from the **live** store price vs compare-at (Shopify `/products/<handle>.js`), "UP TO" when sizes
+  differ, with fine print "*Up to N% off vs. compare-at price on <store> as of <date>; Black Friday pricing may vary."
+  VO says the short form ("New Year gift? Black Friday, up to 40% off —"); captions never repeat the headline.
+- **Zoom-ins always land on the product**: locate the device in the actual clip frame at the zoom moment
+  (Gemini box_2d + a claim point: slim → edge, border → corner, nits/zones → bright screen detail), target =
+  0.6·point + 0.4·box centre, clamped inside the box; split-screen shots keep y in 0.3–0.7.
+- **Audio**: **transitions are silent** — no whoosh, thump or shaker on any cut (they read as "cha-cha");
+  the only effect is a soft pop when the CTA button lands. Holiday copy gets the Christmas/New Year bed
+  (Jingle Bells chorus, public domain, on celesta + soft piano, clean bell tones), mixed under the voice.
+- **Last 1 s**: brand logo + a bouncing CTA button ("CLAIM COUPON" via the brand kit CTA) on the end card.

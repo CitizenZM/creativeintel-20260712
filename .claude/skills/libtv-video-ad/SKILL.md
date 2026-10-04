@@ -137,6 +137,7 @@ python3 scripts/av_sync.py out/ad.mp4 assets/music/track_15s.m4a     # once per 
 | `reference/director-v2.md` | selling point → proof, camera grammar, anti-plastic prompting + negatives, Kling/Veo routing, VO budget, 2 s rule, film finish, token economy |
 | `reference/product-research.md` | best-seller order, specs/prices/discounts, verifying promos & services, scenes, image rights |
 | `reference/promo-campaign-planning.md` | BF/CM-style 15 s plan template (3 creatives per product), service-as-hero messaging, disclaimers |
+| `reference/retrospective-tcl-bfcm.md` | TCL BF 2026-10: every failure → rule (hook pitch, casting, bezels, zooms, VO, captions, TTS, SFX, music, CTA, QC, cost) and the skill roadmap — **read before any promo ad** |
 
 ## Scripts
 
