@@ -176,3 +176,11 @@ describe("fitVoiceover", () => {
     expect(ad.shots.get(4)!.voiceover).toBe("Shop the sale now.");
   });
 });
+
+describe("frameCopy (director plan over the storyboard)", () => {
+  it("never falls back to the storyboard line when the plan leaves a shot silent", async () => {
+    const { frameCopy } = await import("./server-executor");
+    expect(frameCopy({ vo: null, txt: "3,000 NITS" }, "old text", "old line")).toEqual({ text: "3,000 NITS", voiceover: null });
+    expect(frameCopy(undefined, "old text", "old line")).toEqual({ text: "old text", voiceover: "old line" });
+  });
+});
