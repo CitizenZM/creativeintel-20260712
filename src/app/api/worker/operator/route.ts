@@ -109,6 +109,15 @@ export async function POST(request: Request) {
     }
   }
 
+  if (input.action === "drive-run") {
+    const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId } });
+    if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    if (!isServerEngine(run.executor)) return NextResponse.json({ error: `Not a server run (executor ${run.executor ?? "none"})` }, { status: 409 });
+    await loadAiSettings();
+    after(() => driveServerRun(run.executor, run.id, 280_000).then(() => undefined));
+    return NextResponse.json({ ok: true, driving: run.id, status: run.status });
+  }
+
   if (input.action === "reassemble-run") {
     // Re-cut a finished server run from its existing clips (no generation, no spend).
     const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId } });
