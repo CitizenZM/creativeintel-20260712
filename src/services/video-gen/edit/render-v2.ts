@@ -104,6 +104,8 @@ function shotBaseFilter(shot: Shot, canvas: Canvas): string {
     return [
       `[0:v]scale=${Math.round((w * z) / 2) * 2}:${Math.round((h * z) / 2) * 2}:force_original_aspect_ratio=increase`,
       `crop=${w}:${h}:(iw-${w})/2:(ih-${h})*${shot.anchorY}`,
+      // Light grade + fine temporal grain: takes the clean, over-smooth AI sheen off generated footage.
+      `eq=contrast=1.04:saturation=0.95,noise=alls=5:allf=t`,
       `fps=${FPS},tpad=stop_mode=clone:stop_duration=5,setsar=1,format=yuv420p[v]`,
     ].join(",");
   }

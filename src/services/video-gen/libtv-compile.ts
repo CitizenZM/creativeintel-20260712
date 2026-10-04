@@ -44,6 +44,7 @@ import { isComfyConfigured } from "@/services/ai/comfyui";
 import { isZhipuConfigured } from "@/services/ai/zhipu";
 import { isMatrixConfigured } from "@/services/ai/matrix";
 import { isOpenRouterConfigured } from "@/services/ai/openrouter-media";
+import { applyDirectedShots, directAd, REALISM_STILL } from "./shot-director";
 import { hasPeople } from "./prompt-safety";
 import { splitComparisonDrafts } from "./comparison";
 import { loadAiSettings } from "@/services/settings/ai-settings";
@@ -269,7 +270,7 @@ export interface CompileResult {
  * every keyframe with a person is edited from it and every other keyframe from
  * the real packshot, so the face and the product never change between shots.
  */
-export function lockCast(drafts: CompiledJobDraft[], imageModel: string, names: string[] = []): void {
+export function lockCast(drafts: CompiledJobDraft[], imageModel: string, names: string[] = [], castDescription: string | null = null): void {
   const keyframes = drafts.filter((d) => d.kind === "image" && /^K\d+$/.test(d.nodeName) && !(d.settings as { compositeLocally?: boolean }).compositeLocally);
   // A shot that names our product puts the real product in the person's scene.
   const productTerms = names.map((n) => n.trim().toLowerCase()).filter((n) => n.length >= 2);
@@ -282,7 +283,9 @@ export function lockCast(drafts: CompiledJobDraft[], imageModel: string, names: 
       kind: "image",
       nodeName: "CAST",
       leftRefs: [],
-      prompt: `Casting reference photo of the ad's on-camera talent, exactly as described here: ${clean(sample.prompt ?? "").slice(0, 700)}. Full body, facing the camera, relaxed neutral expression, plain light-grey studio background, soft even light, photoreal.`,
+      prompt: castDescription
+        ? `Casting reference photo of the ad's on-camera talent: ${clean(castDescription).slice(0, 700)} Three-quarter body, facing the camera, relaxed neutral expression, plain light-grey studio background, soft window light, 85mm lens. ${REALISM_STILL}`
+        : `Casting reference photo of the ad's on-camera talent, exactly as described here: ${clean(sample.prompt ?? "").slice(0, 700)}. Full body, facing the camera, relaxed neutral expression, plain light-grey studio background, soft even light, photoreal.`,
       modelName: imageModel,
       settings: { ...(sample.settings as Record<string, unknown>), castSheet: 1, coversFrames: [], frameNumber: null },
       sourceUrl: null,
@@ -347,7 +350,15 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
   if (executor === "comfyui" && !isComfyConfigured()) {
     throw new LibtvCompileError("ComfyUI is not configured — set COMFYUI_URL to your GPU node (see docs/comfyui-node.md).", 409);
   }
-  const budgetMode: BudgetMode = isBudgetMode(input.budgetMode) ? input.budgetMode : DEFAULT_BUDGET_MODE;
+  // Directed shots: paid-quality engines (OpenRouter / Matrix, or cast-locked keyframes on the free GLM clips)
+  // get a cinematographer pass — one clip per shot instead of one clip stretched over several storyboard frames.
+  const imageEntry = findImageModel(imageModel);
+  const directed = process.env.SHOT_DIRECTOR !== "off" && (executor === "openrouter" || executor === "matrix" || !!imageEntry?.openrouterModel || !!imageEntry?.matrixModel);
+  const budgetMode: BudgetMode = isBudgetMode(input.budgetMode)
+    ? input.budgetMode
+    : directed && executor !== "glm"
+      ? "full"
+      : DEFAULT_BUDGET_MODE;
 
   const [project, storyboard, kit] = await Promise.all([
     prisma.project.findUnique({
@@ -514,9 +525,24 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
 
   // Comparison shots are generated as two clean images and stacked in the edit
   // (asking one image for a split screen returns a collage).
+  let castDescription: string | null = null;
+  if (directed) {
+    const ad = await directAd({
+      frames: normalized,
+      brand: project.brandName,
+      product: project.productName || project.brandName,
+      productFacts: brandTruth,
+      scale,
+      aspectRatio,
+      clipSeconds: clipDurationSec,
+    });
+    const n = applyDirectedShots(drafts, ad, { castLocked: !!imageEntry?.lockCharacter, videoDirected: executor !== "glm", brandTruth });
+    castDescription = ad.cast;
+    console.log(`[compile] shot director (${ad.source}) rewrote ${n} prompts`);
+  }
   await splitComparisonDrafts(drafts, { product: project.productName || project.brandName });
   if (findImageModel(imageModel)?.lockCharacter) {
-    lockCast(drafts, imageModel, [project.brandName, project.productName ?? "", skuName ?? ""].filter(Boolean));
+    lockCast(drafts, imageModel, [project.brandName, project.productName ?? "", skuName ?? ""].filter(Boolean), castDescription);
   }
 
   const estimate = estimateRun(drafts);
