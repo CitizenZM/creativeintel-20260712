@@ -181,6 +181,8 @@ describe("frameCopy (director plan over the storyboard)", () => {
   it("never falls back to the storyboard line when the plan leaves a shot silent", async () => {
     const { frameCopy } = await import("./server-executor");
     expect(frameCopy({ vo: null, txt: "3,000 NITS" }, "old text", "old line")).toEqual({ text: "3,000 NITS", voiceover: null });
+    // …but a shot without a keyword keeps the storyboard's on-screen text (the hook headline).
+    expect(frameCopy({ vo: "Line.", txt: null }, "Is your TV too dark?", "old line")).toEqual({ text: "Is your TV too dark?", voiceover: "Line." });
     expect(frameCopy(undefined, "old text", "old line")).toEqual({ text: "old text", voiceover: "old line" });
   });
 });
