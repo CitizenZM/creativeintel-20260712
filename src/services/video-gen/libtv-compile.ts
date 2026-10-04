@@ -37,6 +37,7 @@ import {
   type BudgetMode,
   engineFor,
   ACTION_VIDEO_MODEL,
+  OPENROUTER_VIDEO_MODEL,
   engineLabel,
   mismatchedImageEngine,
 } from "./libtv-pricing";
@@ -46,6 +47,7 @@ import { isZhipuConfigured } from "@/services/ai/zhipu";
 import { isMatrixConfigured } from "@/services/ai/matrix";
 import { isOpenRouterConfigured } from "@/services/ai/openrouter-media";
 import { applyDirectedShots, directAd, REALISM_STILL, storedPlan, type StoredDirectorPlan } from "./shot-director";
+import { isLockedStoryboard, lockedDrafts, type LockedFrame } from "./locked-script";
 import { hasPeople } from "./prompt-safety";
 import { splitComparisonDrafts } from "./comparison";
 import { loadAiSettings } from "@/services/settings/ai-settings";
@@ -106,6 +108,8 @@ export interface CompileRunInput {
   canvasName?: string;
   budgetMode?: BudgetMode;
   allowOverBudget?: boolean;
+  /** Render keyframes only; clips wait for "release-videos" (keyframe review gate). */
+  holdVideos?: boolean;
 }
 
 export interface FrameOffset {
@@ -438,122 +442,141 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
     resolution: clipResolution,
   });
 
-  const frameSeconds = storyboard.frameSeconds || FRAME_SECONDS;
-  const normalized = frames.map((frame, index) => ({
-    ...frame,
-    frameNumber: frame.frameNumber ?? index + 1,
-    startSec: Number.isFinite(frame.startSec) ? frame.startSec : index * frameSeconds,
-    endSec: Number.isFinite(frame.endSec) ? frame.endSec : (index + 1) * frameSeconds,
-  }));
+  const locked = isLockedStoryboard(storyboard.style);
+  let castDescription: string | null = null;
+  let directorPlan: StoredDirectorPlan | null = null;
+  if (locked) {
+    // An approved script renders exactly as written: per-shot engine, prompts and references.
+    const veo = (resolution: string) => ({ modelName: OPENROUTER_VIDEO_MODEL, settings: videoSettings(OPENROUTER_VIDEO_MODEL, { durationSec: 4, resolution }), credits: videoCredits(OPENROUTER_VIDEO_MODEL, 4, resolution) });
+    const out = lockedDrafts(frames as unknown as LockedFrame[], {
+      imageModel,
+      imgSettings,
+      imageCredits: imageCredits(imageModel),
+      holdVideos: input.holdVideos,
+      video: (engine) =>
+        engine === "kling"
+          ? { modelName: ACTION_VIDEO_MODEL, settings: videoSettings(ACTION_VIDEO_MODEL, { durationSec: 5 }), credits: videoCredits(ACTION_VIDEO_MODEL, 5, "720P") }
+          : veo(engine === "veo1080" ? "1080P" : "720P"),
+    });
+    drafts.push(...out.drafts);
+    castDescription = out.castDescription;
+  } else {
+    const frameSeconds = storyboard.frameSeconds || FRAME_SECONDS;
+    const normalized = frames.map((frame, index) => ({
+      ...frame,
+      frameNumber: frame.frameNumber ?? index + 1,
+      startSec: Number.isFinite(frame.startSec) ? frame.startSec : index * frameSeconds,
+      endSec: Number.isFinite(frame.endSec) ? frame.endSec : (index + 1) * frameSeconds,
+    }));
 
-  const perClip = framesPerClip(clipDurationSec, frameSeconds);
-  const groups = groupFrames(
-    normalized.map((frame) => ({ frameNumber: frame.frameNumber, isCta: frame.segment === "CTA" })),
-    perClip,
-    budgetMode
-  );
-  const groupByStartIndex = new Map(groups.map((g) => [g.startIndex, g]));
-  const coveredIndexes = new Set(groups.flatMap((g) => g.frameIndexes));
+    const perClip = framesPerClip(clipDurationSec, frameSeconds);
+    const groups = groupFrames(
+      normalized.map((frame) => ({ frameNumber: frame.frameNumber, isCta: frame.segment === "CTA" })),
+      perClip,
+      budgetMode
+    );
+    const groupByStartIndex = new Map(groups.map((g) => [g.startIndex, g]));
+    const coveredIndexes = new Set(groups.flatMap((g) => g.frameIndexes));
 
-  normalized.forEach((frame, index) => {
-    const n = frame.frameNumber;
+    normalized.forEach((frame, index) => {
+      const n = frame.frameNumber;
 
-    if (frame.segment === "CTA") {
+      if (frame.segment === "CTA") {
+        drafts.push({
+          shotIndex: index,
+          kind: "image",
+          nodeName: `K${n}`,
+          leftRefs: ["PROD-1"],
+          prompt: imagePromptFor(frame, { scale, aspectRatio, brandTruth }),
+          modelName: null,
+          settings: { compositeLocally: true, frameNumber: n, segment: frame.segment, coversFrames: [n], budgetMode },
+          sourceUrl: null,
+          creditsEstimated: 0,
+        });
+        return;
+      }
+
+      const group = groupByStartIndex.get(index);
+      if (!group) {
+        if (!coveredIndexes.has(index)) {
+          throw new LibtvCompileError(`Frame ${n} was not assigned to a clip group`, 500);
+        }
+        return;
+      }
+
+      const groupFramesList = group.frameIndexes.map((i) => normalized[i]);
+      const offsets = frameOffsets(groupFramesList, frameSeconds, clipDurationSec);
+
       drafts.push({
         shotIndex: index,
         kind: "image",
         nodeName: `K${n}`,
         leftRefs: ["PROD-1"],
         prompt: imagePromptFor(frame, { scale, aspectRatio, brandTruth }),
-        modelName: null,
-        settings: { compositeLocally: true, frameNumber: n, segment: frame.segment, coversFrames: [n], budgetMode },
+        modelName: imageModel,
+        settings: {
+          ...imgSettings,
+          frameNumber: n,
+          segment: frame.segment,
+          coversFrames: group.frameNumbers,
+          budgetMode,
+        },
         sourceUrl: null,
-        creditsEstimated: 0,
+        creditsEstimated: imageCredits(imageModel),
       });
-      return;
+
+      drafts.push({
+        shotIndex: index,
+        kind: "video",
+        nodeName: `V${n}`,
+        leftRefs: [`K${n}`],
+        prompt:
+          groupFramesList.length > 1 ? groupVideoPrompt(groupFramesList) : videoPromptFor(frame, brandTruth),
+        modelName: videoModel,
+        settings: {
+          ...vidSettings,
+          frameNumber: n,
+          segment: frame.segment,
+          coversFrames: group.frameNumbers,
+          frameOffsetsSec: offsets,
+          frameSeconds,
+          budgetMode,
+        },
+        sourceUrl: null,
+        creditsEstimated: videoCredits(videoModel, clipDurationSec, clipResolution),
+      });
+    });
+
+    // Comparison shots are generated as two clean images and stacked in the edit
+    // (asking one image for a split screen returns a collage).
+    if (directed) {
+      const ad = await directAd({
+        frames: normalized,
+        brand: project.brandName,
+        product: project.productName || project.brandName,
+        productFacts: brandTruth,
+        scale,
+        aspectRatio,
+        clipSeconds: clipDurationSec,
+      });
+      // Action shots (big body movement) render on Kling, which handles human motion best; the rest stay on the run's model.
+      const actionName = executor === "openrouter" && videoModel !== ACTION_VIDEO_MODEL ? ACTION_VIDEO_MODEL : null;
+      const actionVideo = actionName
+        ? // Kling bills a 3 s clip like 5 s (measured 41.6¢ either way): take the full 5 s.
+          { modelName: actionName, settings: videoSettings(actionName, { durationSec: 5 }), credits: videoCredits(actionName, 5, "720P") }
+        : null;
+      const n = applyDirectedShots(drafts, ad, { castLocked: !!imageEntry?.lockCharacter, videoDirected: executor !== "glm", brandTruth, actionVideo });
+      castDescription = ad.cast;
+      directorPlan = storedPlan(ad);
+      console.log(`[compile] shot director (${ad.source}) rewrote ${n} prompts`);
+    }
+    await splitComparisonDrafts(drafts, { product: project.productName || project.brandName });
+    if (findImageModel(imageModel)?.lockCharacter) {
+      lockCast(drafts, imageModel, [project.brandName, project.productName ?? "", skuName ?? ""].filter(Boolean), castDescription);
     }
 
-    const group = groupByStartIndex.get(index);
-    if (!group) {
-      if (!coveredIndexes.has(index)) {
-        throw new LibtvCompileError(`Frame ${n} was not assigned to a clip group`, 500);
-      }
-      return;
-    }
 
-    const groupFramesList = group.frameIndexes.map((i) => normalized[i]);
-    const offsets = frameOffsets(groupFramesList, frameSeconds, clipDurationSec);
-
-    drafts.push({
-      shotIndex: index,
-      kind: "image",
-      nodeName: `K${n}`,
-      leftRefs: ["PROD-1"],
-      prompt: imagePromptFor(frame, { scale, aspectRatio, brandTruth }),
-      modelName: imageModel,
-      settings: {
-        ...imgSettings,
-        frameNumber: n,
-        segment: frame.segment,
-        coversFrames: group.frameNumbers,
-        budgetMode,
-      },
-      sourceUrl: null,
-      creditsEstimated: imageCredits(imageModel),
-    });
-
-    drafts.push({
-      shotIndex: index,
-      kind: "video",
-      nodeName: `V${n}`,
-      leftRefs: [`K${n}`],
-      prompt:
-        groupFramesList.length > 1 ? groupVideoPrompt(groupFramesList) : videoPromptFor(frame, brandTruth),
-      modelName: videoModel,
-      settings: {
-        ...vidSettings,
-        frameNumber: n,
-        segment: frame.segment,
-        coversFrames: group.frameNumbers,
-        frameOffsetsSec: offsets,
-        frameSeconds,
-        budgetMode,
-      },
-      sourceUrl: null,
-      creditsEstimated: videoCredits(videoModel, clipDurationSec, clipResolution),
-    });
-  });
-
-  // Comparison shots are generated as two clean images and stacked in the edit
-  // (asking one image for a split screen returns a collage).
-  let castDescription: string | null = null;
-  let directorPlan: StoredDirectorPlan | null = null;
-  if (directed) {
-    const ad = await directAd({
-      frames: normalized,
-      brand: project.brandName,
-      product: project.productName || project.brandName,
-      productFacts: brandTruth,
-      scale,
-      aspectRatio,
-      clipSeconds: clipDurationSec,
-    });
-    // Action shots (big body movement) render on Kling, which handles human motion best; the rest stay on the run's model.
-    const actionName = executor === "openrouter" && videoModel !== ACTION_VIDEO_MODEL ? ACTION_VIDEO_MODEL : null;
-    const actionVideo = actionName
-      ? // Kling bills a 3 s clip like 5 s (measured 41.6¢ either way): take the full 5 s.
-        { modelName: actionName, settings: videoSettings(actionName, { durationSec: 5 }), credits: videoCredits(actionName, 5, "720P") }
-      : null;
-    const n = applyDirectedShots(drafts, ad, { castLocked: !!imageEntry?.lockCharacter, videoDirected: executor !== "glm", brandTruth, actionVideo });
-    castDescription = ad.cast;
-    directorPlan = storedPlan(ad);
-    console.log(`[compile] shot director (${ad.source}) rewrote ${n} prompts`);
   }
-  await splitComparisonDrafts(drafts, { product: project.productName || project.brandName });
-  if (findImageModel(imageModel)?.lockCharacter) {
-    lockCast(drafts, imageModel, [project.brandName, project.productName ?? "", skuName ?? ""].filter(Boolean), castDescription);
-  }
-
   const estimate = estimateRun(drafts);
   const creditCeiling = maxRunCredits();
   if (!input.allowOverBudget && estimate.total > creditCeiling) {

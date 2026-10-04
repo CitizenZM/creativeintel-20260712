@@ -96,6 +96,7 @@ export async function POST(request: Request) {
         aspectRatio: input.aspectRatio,
         budgetMode: input.budgetMode,
         allowOverBudget: input.allowOverBudget === true,
+        holdVideos: input.holdVideos === true,
       });
       return NextResponse.json(
         { runId: result.runId, creditsEstimated: result.creditsEstimated, jobCount: result.jobCount },
@@ -107,6 +108,67 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
     }
+  }
+
+  if (input.action === "upload-asset") {
+    const { uploadBuffer } = await import("@/services/storage");
+    const up = await uploadBuffer({ buffer: Buffer.from(input.base64, "base64"), filename: input.filename, contentType: input.contentType, folder: `scripts/${input.projectId}` });
+    if (up.provider === "inline") return NextResponse.json({ error: "No asset storage configured" }, { status: 500 });
+    return NextResponse.json({ ok: true, url: up.url });
+  }
+
+  if (input.action === "import-script") {
+    let projectId = input.projectId ?? null;
+    if (!projectId) {
+      if (!input.project) return NextResponse.json({ error: "Give projectId or project" }, { status: 400 });
+      const template = input.templateProjectId
+        ? await prisma.project.findUnique({ where: { id: input.templateProjectId }, select: { workspaceId: true } })
+        : null;
+      const created = await prisma.project.create({
+        data: {
+          name: input.project.name,
+          brandName: input.project.brandName,
+          productName: input.project.productName,
+          productUrl: input.project.productUrl ?? null,
+          workspaceId: template?.workspaceId ?? null,
+        },
+        select: { id: true },
+      });
+      projectId = created.id;
+    }
+    if (input.packshots?.length || input.logoUrl) {
+      const kit = await prisma.brandKit.upsert({ where: { projectId }, create: { projectId }, update: {}, select: { id: true } });
+      const assets = [
+        ...(input.packshots ?? []).map((p) => ({ brandKitId: kit.id, kind: "PACKSHOT", variant: p.variant ?? "front", url: p.url, provider: "url", verified: true })),
+        ...(input.logoUrl ? [{ brandKitId: kit.id, kind: "LOGO", variant: "light", url: input.logoUrl, provider: "url", verified: true }] : []),
+      ];
+      // Newest packshot first is PROD-1: clear older packshots so the script's reference wins.
+      if (input.packshots?.length) await prisma.brandAsset.deleteMany({ where: { brandKitId: kit.id, kind: "PACKSHOT" } });
+      if (input.logoUrl) await prisma.brandAsset.deleteMany({ where: { brandKitId: kit.id, kind: "LOGO" } });
+      for (const a of assets) await prisma.brandAsset.create({ data: a });
+    }
+    const sb = await prisma.storyboard.create({
+      data: { projectId, title: input.storyboard.title, frames: input.storyboard.frames as object[], style: "locked-script", frameSeconds: 1 },
+      select: { id: true },
+    });
+    return NextResponse.json({ ok: true, projectId, storyboardId: sb.id }, { status: 201 });
+  }
+
+  if (input.action === "release-videos") {
+    const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId } });
+    if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    const held = await prisma.libtvJob.findMany({ where: { runId: run.id, kind: "video" } });
+    let released = 0;
+    for (const j of held) {
+      const s = { ...((j.settings ?? {}) as Record<string, unknown>) };
+      if (!s.hold) continue;
+      delete s.hold;
+      await prisma.libtvJob.update({ where: { id: j.id }, data: { settings: s as object } });
+      released++;
+    }
+    await loadAiSettings();
+    after(() => driveServerRun(run.executor, run.id, 280_000).then(() => undefined));
+    return NextResponse.json({ ok: true, released });
   }
 
   if (input.action === "drive-run") {
