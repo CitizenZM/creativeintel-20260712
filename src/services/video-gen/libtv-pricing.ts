@@ -397,7 +397,6 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     modality: "video",
     modeType: "singleImage2video",
     prices: [
-      { durationSec: 3, resolution: "720P", credits: 26 },
       { durationSec: 5, resolution: "720P", credits: 42 },
       { durationSec: 6, resolution: "720P", credits: 50 },
       { durationSec: 8, resolution: "720P", credits: 67 },
@@ -406,7 +405,7 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     defaultResolution: "720P",
     settingsKeys: ["modeType", "duration", "resolution"],
     verified: false,
-    note: "Kuaishou Kling 3.0 Standard — strong human motion, 8.4¢ per second.",
+    note: "Kuaishou Kling 3.0 Standard — the strongest human motion on OpenRouter. Measured: a 3 s clip is billed like 5 s (41.6¢), so clips are 5 s.",
   },
   {
     name: "Seedance 2.0 Fast 720p (OpenRouter)",
