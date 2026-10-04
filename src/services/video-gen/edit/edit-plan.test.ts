@@ -57,11 +57,12 @@ describe("planEdit", () => {
     for (const s of plan.shots) expect(s.endSec - s.startSec).toBeLessThanOrEqual(MAX_SHOT_SEC + 1e-6);
   });
 
-  it("uses transitions, not plain cuts, in the opening 3 s and on the last two cuts, and opens with a whoosh", () => {
+  it("uses transitions, not plain cuts, in the opening 3 s and on the last two cuts, all silent", () => {
     const strong = [...plan.boundaries.filter((b) => b.atSec <= 3), ...plan.boundaries.slice(-2)];
     expect(strong.length).toBeGreaterThan(2);
     expect(strong.every((b) => b.transition !== "cut")).toBe(true);
-    expect(plan.sfx.some((e) => e.kind === "whoosh" && e.atSec < 0.5)).toBe(true);
+    // Transitions are silent: the only sound effect is the CTA pop.
+    expect(plan.sfx.map((e) => e.kind)).toEqual(["click"]);
   });
 
   it("puts the drop flash on hook→body, a whip into the CTA, and rotates body transitions", () => {
@@ -72,7 +73,6 @@ describe("planEdit", () => {
     const body = plan.boundaries.filter((b) => b.atSec > 4 && b.atSec < 16 && b.transition !== "cut");
     expect(new Set(body.map((b) => b.transition)).size).toBeGreaterThan(1);
     expect(plan.sfx.some((e) => e.kind === "impact")).toBe(false);
-    expect(plan.sfx.find((e) => e.kind === "whoosh" && e.atSec === 4)).toBeTruthy();
     expect(plan.sfx.find((e) => e.kind === "click")?.atSec).toBe(19);
   });
 

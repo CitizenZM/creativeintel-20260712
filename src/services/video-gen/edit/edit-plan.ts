@@ -316,12 +316,9 @@ export function planEdit(
     // The opening and the ending are where motion sells: no plain cuts there.
     if (tr === "cut" && (at <= STRONG_OPEN_SEC || i >= shots.length - 2)) tr = shots[i].zoom > shots[i - 1].zoom ? "zoom" : "whip";
     boundaries.push({ atSec: at, transition: tr });
-    // Sound design stays under the voice: a soft air whoosh on whips and the drop only — no thumps on
-    // flashes or zoom punches (Barron: loud zoom hits sounded cheap).
-    if (tr === "flash" || tr === "whip") sfx.push({ kind: "whoosh", atSec: at });
   }
-  // The opening reveal (render-v2 fxFilter: a zoom-through from dark) lands with a whoosh.
-  sfx.push({ kind: "whoosh", atSec: 0.18 });
+  // No sound on transitions at all — whooshes and thumps on cuts read as noise ("cha-cha") under the
+  // voice and music (Barron, 2026-10-04). The only effect is the soft pop when the CTA button lands.
 
   // On-screen text: the hook headline, short claims, the offer on the end card.
   const cards: TextCard[] = [];

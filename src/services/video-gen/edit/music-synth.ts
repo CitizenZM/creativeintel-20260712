@@ -194,28 +194,42 @@ function sineBass(freq: number, dur: number): Float32Array {
 }
 
 /** Sleigh-bell shake: a cluster of high metallic partials over a bright noise burst. */
-function sleigh(rand: () => number, dur = 0.16): Float32Array {
+function sleigh(rand: () => number, dur = 0.3): Float32Array {
   const n = Math.round(dur * SAMPLE_RATE);
   const out = new Float32Array(n);
-  const freqs = [5200, 6150, 7300, 8400];
-  const noise = noiseHit(dur, 26, 6500, rand);
+  // Pure metallic partials, no noise: a clean "ting", not a shaker hiss ("cha-cha").
+  const freqs = [2637, 3520, 4186, 5274].map((f) => f * (1 + 0.004 * rand()));
   for (let i = 0; i < n; i++) {
     const t = i / SAMPLE_RATE;
     let v = 0;
     for (const f of freqs) v += Math.sin(2 * Math.PI * f * t + f);
-    out[i] = (v * 0.12 + noise[i]) * Math.exp(-t * 24) * Math.min(1, t / 0.006);
+    out[i] = v * 0.25 * Math.exp(-t * 18) * Math.min(1, t / 0.003);
   }
   return out;
 }
 
-/** I–vi–IV–V in C: C Am F G — bright and seasonal. */
-const HOLIDAY_PROGRESSION: { root: number; chord: number[] }[] = [
-  { root: 65.41, chord: [261.63, 329.63, 392.0] }, // C
-  { root: 55.0, chord: [220.0, 261.63, 329.63] }, // Am
-  { root: 43.65, chord: [174.61, 220.0, 261.63] }, // F
-  { root: 49.0, chord: [196.0, 246.94, 293.66] }, // G
+/**
+ * "Jingle Bells" chorus (James Lord Pierpont, 1857 — public domain) in C: [note Hz, beats] per bar, and the
+ * chord under each bar. Instantly reads as Christmas; the ad's end resolves on a ringing C chord.
+ */
+const E5 = 659.25, F5 = 698.46, G5 = 783.99, C5 = 523.25, D5 = 587.33;
+const JINGLE: [number, number][][] = [
+  [[E5, 1], [E5, 1], [E5, 2]],
+  [[E5, 1], [E5, 1], [E5, 2]],
+  [[E5, 1], [G5, 1], [C5, 1.5], [D5, 0.5]],
+  [[E5, 4]],
+  [[F5, 1], [F5, 1], [F5, 1.5], [F5, 0.5]],
+  [[F5, 1], [E5, 1], [E5, 1], [E5, 0.5], [E5, 0.5]],
+  [[E5, 1], [D5, 1], [D5, 1], [E5, 1]],
+  [[D5, 2], [G5, 2]],
 ];
+const C_CHORD = { root: 65.41, chord: [261.63, 329.63, 392.0] };
+const F_CHORD = { root: 43.65, chord: [174.61, 220.0, 261.63] };
+const D7_CHORD = { root: 73.42, chord: [220.0, 261.63, 293.66, 369.99] };
+const G_CHORD = { root: 49.0, chord: [196.0, 246.94, 293.66] };
+const JINGLE_CHORDS = [C_CHORD, C_CHORD, C_CHORD, C_CHORD, F_CHORD, C_CHORD, D7_CHORD, G_CHORD];
 
+/** I–vi–IV–V in C: C Am F G — bright and seasonal. */
 function synthesizeHoliday(plan: MusicPlan): MusicResult {
   const { durationSec, bpm } = plan;
   const rand = rng(plan.seed ?? 7);
@@ -230,19 +244,19 @@ function synthesizeHoliday(plan: MusicPlan): MusicResult {
   for (let b = 0; b < beatsTotal; b++) {
     const t = b * beat;
     // Sleigh bells on the 8ths (accent on the off-beat), lighter before the drop.
-    addMono(bus, t, bells, preDrop(t) ? 0.05 : 0.07, 0.3);
-    addMono(bus, t + beat / 2, bells, preDrop(t) ? 0.08 : 0.11, -0.25);
+    // Sleigh bells on the off-beat only, light — a sparkle, not a rhythm section.
+    addMono(bus, t + beat / 2, bells, preDrop(t) ? 0.035 : 0.05, -0.25);
     // A soft, low kick on 1 and 3 after the drop — a pulse, not a club beat.
     if (!preDrop(t) && b % 2 === 0) addMono(bus, t, K, 0.3);
   }
   for (let bar = 0; bar * 4 * beat < durationSec; bar++) {
     const t0 = bar * 4 * beat;
-    const { root, chord } = HOLIDAY_PROGRESSION[bar % HOLIDAY_PROGRESSION.length];
+    const { root, chord } = JINGLE_CHORDS[bar % JINGLE_CHORDS.length];
     // Piano chords on 1 and 3 (2 beats each).
     for (const half of [0, 2]) {
       const t = t0 + half * beat;
       if (t >= durationSec) continue;
-      chord.forEach((f, k) => addMono(bus, t, epiano(f, 2 * beat), 0.075, k === 0 ? -0.3 : k === 2 ? 0.3 : 0));
+      chord.forEach((f, k) => addMono(bus, t, epiano(f, 2 * beat), 0.045, k === 0 ? -0.3 : k === 2 ? 0.3 : 0));
     }
     // Sine bass on the beat.
     for (let q = 0; q < 4; q++) {
@@ -250,17 +264,20 @@ function synthesizeHoliday(plan: MusicPlan): MusicResult {
       if (t >= durationSec) continue;
       addMono(bus, t, sineBass(q === 2 ? root * 1.5 : root, beat * 0.9), preDrop(t) ? 0.18 : 0.26);
     }
-    // Celesta arpeggio on quarter notes, two octaves up — sparse, so the voice stays in front.
-    for (let q = 0; q < 4; q++) {
-      const t = t0 + q * beat;
-      if (t >= durationSec) continue;
-      addMono(bus, t, bell(chord[[0, 1, 2, 1][q]] * 2, 0.9), 0.065, q % 2 ? 0.35 : -0.35);
+    // The melody on celesta, doubled an octave down on soft piano for warmth.
+    let at = t0;
+    for (const [f, len] of JINGLE[bar % JINGLE.length]) {
+      if (at < durationSec) {
+        addMono(bus, at, bell(f, Math.max(0.6, len * beat + 0.3)), 0.16, 0.1);
+        addMono(bus, at, epiano(f / 2, len * beat), 0.06, -0.1);
+      }
+      at += len * beat;
     }
   }
   // A bright chime on the drop and a ringing tonic chord to close — no crashes.
   for (const f of [1046.5, 1318.5, 1568.0]) addMono(bus, plan.dropSec, bell(f, 1.6), 0.05);
   const lastBeat = Math.max(0, beatsTotal - 1) * beat;
-  for (const f of HOLIDAY_PROGRESSION[0].chord) addMono(bus, lastBeat, epiano(f, 2.2), 0.14);
+  for (const f of C_CHORD.chord) addMono(bus, lastBeat, epiano(f, 2.2), 0.12);
   for (const f of [523.25, 659.25, 783.99]) addMono(bus, lastBeat, bell(f, 1.8), 0.06);
 
   const n = Math.round(durationSec * SAMPLE_RATE);
