@@ -37,7 +37,7 @@ export async function openrouterKeyframe(prompt: string, ctx: JobContext): Promi
   const usable =
     (editFrom === "cast" || editFrom === "product") && refs.length >= 1 ? editFrom : editFrom === "cast+product" && refs.length >= 2 ? editFrom : null;
   const { buffer, contentType } = usable
-    ? await generateOpenRouterImage(lockedEditPrompt(usable, prompt), {
+    ? await generateOpenRouterImage(lockedEditPrompt(usable, typeof ctx.settings?.directedKeyframe === "string" ? ctx.settings.directedKeyframe : prompt, { maxChars: 1400 }), {
         model,
         aspectRatio: ctx.aspectRatio,
         referenceUrls: usable === "cast+product" ? refs.slice(0, 2) : [refs[0]],

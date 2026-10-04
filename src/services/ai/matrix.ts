@@ -182,7 +182,7 @@ export async function editMatrixImage(
  */
 export type EditFrom = "cast" | "product" | "cast+product";
 
-export function lockedEditPrompt(kind: EditFrom, shot: string): string {
+export function lockedEditPrompt(kind: EditFrom, shot: string, opts: { maxChars?: number } = {}): string {
   const keep =
     kind === "cast"
       ? "Keep this exact person unchanged — same face, hair, skin tone, build and wardrobe."
@@ -193,9 +193,10 @@ export function lockedEditPrompt(kind: EditFrom, shot: string): string {
     .replace(/^No text, letters[^.]*\.\s*/i, "")
     .replace(/\s+/g, " ")
     .trim();
-  const sentences = body.split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
+  // Matrix rewrites (and chokes on) long prompts; OpenRouter models take the whole directed shot.
+  const sentences = body.split(/(?<=[.!?])\s+/).slice(0, opts.maxChars ? 12 : 2).join(" ");
   const tail = "One single photograph of one continuous scene — no collage, split screen or panels; no text on screens or signs.";
-  const room = 430 - keep.length - tail.length - 14;
+  const room = (opts.maxChars ?? 430) - keep.length - tail.length - 14;
   const cut = sentences.length > room ? `${sentences.slice(0, room).replace(/\s+\S*$/, "")}.` : sentences;
   return `${keep} New shot: ${cut} ${tail}`;
 }

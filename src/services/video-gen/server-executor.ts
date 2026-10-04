@@ -19,6 +19,7 @@ import { assembleGlmMaster, type AssembleFrame } from "./glm-assemble";
 import type { ServerEngine } from "./libtv-pricing";
 import { cleanFramePrompt, hasPeople, motionSafePrompt } from "./prompt-safety";
 import { keyframeQcEnabled, reviewKeyframe, shouldReroll } from "./keyframe-qc";
+import { finishDirectedMotion, finishDirectedStill } from "./shot-director";
 
 export type TickResult = "idle" | "running" | "done" | "failed";
 
@@ -207,14 +208,16 @@ export async function tickRun(
   await Promise.all(
     images.map(async (j) => {
       if (!(await claimJob(j.id))) return;
-      const settings = (j.settings ?? {}) as { compositeLocally?: boolean };
+      const settings = (j.settings ?? {}) as { compositeLocally?: boolean; directed?: number };
       try {
         if (settings.compositeLocally) {
           // CTA frames hold on the real packshot — no generation, no text drift.
           await jobDone({ jobId: j.id, resultUrl: urlOf(j.leftRefs ? (j.leftRefs as string[])[0] : "PROD-1"), skipped: true, creditsSpent: 0 });
           return;
         }
-        const out = await adapter.generateImage(withNoText(cleanFramePrompt(j.prompt), "image"), ctxFor(j));
+        // A directed keyframe already carries its own camera, light and surface detail: only the realism block is added.
+        const stillPrompt = settings.directed ? finishDirectedStill(j.prompt) : cleanFramePrompt(j.prompt);
+        const out = await adapter.generateImage(withNoText(stillPrompt, "image"), ctxFor(j));
         if ("url" in out) {
           // AI keyframe QC: send a visibly broken keyframe back once before a clip is made from it.
           const s = (j.settings ?? {}) as { qcAttempts?: number; castSheet?: unknown };
@@ -271,7 +274,11 @@ export async function tickRun(
       continue;
     }
     try {
-      const taskId = await adapter.submitVideo({ prompt: withNoText(motionSafePrompt(cleanFramePrompt(j.prompt)), "video"), imageUrl }, ctxFor(j));
+      // Directed clips keep their camera move and action script; the legacy wrapper ("steady, slow camera,
+      // smooth motion", "cinematic film still, sharp focus") is what made clips static and plastic.
+      const directed = !!(j.settings as { directed?: number } | null)?.directed;
+      const clipPrompt = directed ? finishDirectedMotion(j.prompt) : motionSafePrompt(cleanFramePrompt(j.prompt));
+      const taskId = await adapter.submitVideo({ prompt: withNoText(clipPrompt, "video"), imageUrl }, ctxFor(j));
       await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: taskId } });
       inFlight++;
     } catch (err) {

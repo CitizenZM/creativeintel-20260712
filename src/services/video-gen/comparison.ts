@@ -81,7 +81,8 @@ export async function splitComparisonDrafts(
     const s = await split(d.prompt, opts.product);
     const otherNode = `${d.nodeName}X`;
     d.prompt = s.ours;
-    d.settings = { ...(d.settings as Record<string, unknown>), comparison: { otherNode, labelOurs: s.labelOurs, labelOther: s.labelOther } };
+    const directed = (d.settings as { directed?: number }).directed ? { directedKeyframe: s.ours } : {};
+    d.settings = { ...(d.settings as Record<string, unknown>), ...directed, comparison: { otherNode, labelOurs: s.labelOurs, labelOther: s.labelOther } };
     drafts.splice(drafts.indexOf(d) + 1, 0, {
       shotIndex: d.shotIndex,
       kind: "image",
@@ -89,7 +90,7 @@ export async function splitComparisonDrafts(
       leftRefs: [],
       prompt: s.other,
       modelName: d.modelName,
-      settings: { ...(d.settings as Record<string, unknown>), comparison: undefined, comparisonOf: (d.settings as { frameNumber?: number }).frameNumber ?? null, frameNumber: null, coversFrames: [] },
+      settings: { ...(d.settings as Record<string, unknown>), ...(directed.directedKeyframe ? { directedKeyframe: s.other } : {}), comparison: undefined, comparisonOf: (d.settings as { frameNumber?: number }).frameNumber ?? null, frameNumber: null, coversFrames: [] },
       sourceUrl: null,
       creditsEstimated: d.creditsEstimated,
     });
