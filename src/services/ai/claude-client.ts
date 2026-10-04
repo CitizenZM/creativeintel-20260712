@@ -489,7 +489,13 @@ async function createOnRoute(
   // GLM-4.7-Flash is a hybrid reasoning model; these calls want the JSON
   // answer, not a thinking trace, so switch thinking off.
   const zhipuFamily = provider === "glm" || (customId(provider) && cachedProvider(customId(provider)!)?.type === "zhipu-paid");
-  const extra = zhipuFamily ? ({ thinking: { type: "disabled" } } as Record<string, unknown>) : {};
+  // DeepSeek on OpenRouter reasons by default: the hidden trace burns max_tokens (empty
+  // answers) and costs ~5× the time — OpenRouter's unified switch turns it off.
+  const extra = zhipuFamily
+    ? ({ thinking: { type: "disabled" } } as Record<string, unknown>)
+    : provider === "openrouter"
+      ? ({ reasoning: { enabled: false } } as Record<string, unknown>)
+      : {};
   const reqOpts = { timeout: requestTimeoutMs(modelToUse, effectiveMaxTokens), maxRetries: 0 };
   try {
     return await client.chat.completions.create(
