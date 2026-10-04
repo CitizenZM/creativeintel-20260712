@@ -106,6 +106,8 @@ export interface EditPlan {
 const BODY_ROTATION: Transition[] = ["whip", "zoom", "whip", "flash"];
 
 /** No single framing holds longer than this — a longer shot reads as static. */
+/** The bouncing CTA button holds the last this-many seconds. */
+export const CTA_BUTTON_SEC = 1;
 export const MAX_SHOT_SEC = 2;
 /** The opening seconds and the last cuts always get a transition, never a plain cut. */
 const STRONG_OPEN_SEC = 3;
@@ -314,11 +316,10 @@ export function planEdit(
     // The opening and the ending are where motion sells: no plain cuts there.
     if (tr === "cut" && (at <= STRONG_OPEN_SEC || i >= shots.length - 2)) tr = shots[i].zoom > shots[i - 1].zoom ? "zoom" : "whip";
     boundaries.push({ atSec: at, transition: tr });
-    if (tr === "flash") sfx.push({ kind: "impact", atSec: at });
-    else if (tr === "whip") sfx.push({ kind: "whoosh", atSec: at });
-    else if (tr === "zoom" && changed) sfx.push({ kind: "impact", atSec: at });
+    // Sound design stays under the voice: a soft air whoosh on whips and the drop only — no thumps on
+    // flashes or zoom punches (Barron: loud zoom hits sounded cheap).
+    if (tr === "flash" || tr === "whip") sfx.push({ kind: "whoosh", atSec: at });
   }
-  if (ctaSec !== null) sfx.push({ kind: "click", atSec: round3(Math.min(durationSec - 0.3, ctaSec + 2 * grid.period)) });
   // The opening reveal (render-v2 fxFilter: a zoom-through from dark) lands with a whoosh.
   sfx.push({ kind: "whoosh", atSec: 0.18 });
 
@@ -351,9 +352,9 @@ export function planEdit(
   }
   const offerText = ctaFrames.find((s) => s.text?.trim())?.text?.trim();
   if (offerText && ctaSec !== null) cards.push({ text: offerText, startSec: ctaSec, endSec: durationSec, role: "offer" });
-  // The button lands two beats into the end card — unless the offer line already is the CTA.
-  const ctaButton =
-    ctaSec !== null && !(offerText && isCtaLine(offerText)) ? { text: "Shop now", startSec: round3(ctaSec + 2 * grid.period) } : null;
+  // The CTA button (with the logo) bounces in for the last second of every ad, with a soft pop.
+  const ctaButton = ctaSec !== null ? { text: "Shop now", startSec: round3(Math.max(ctaSec, durationSec - CTA_BUTTON_SEC)) } : null;
+  if (ctaButton) sfx.push({ kind: "click", atSec: ctaButton.startSec });
 
   return { durationSec, grid, dropSec, ctaSec, breakdownSec, shots, boundaries, sfx, cards, ctaButton };
 }
