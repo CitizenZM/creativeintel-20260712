@@ -56,3 +56,27 @@ describe("locked scripts", () => {
     expect(drafts.filter((d) => d.kind === "video").every((d) => (d.settings as { hold?: number }).hold === 1)).toBe(true);
   });
 });
+
+describe("locked scripts — per-shot product reference", () => {
+  const frames = [
+    f(1, { engine: "veo", refs: "product", refImageUrl: "https://x/front.jpg", castLock: "A man." }, "HOOK"),
+    f(2, { engine: "kling", refs: "cast", refImageUrl: "https://x/art.jpg" }),
+    f(3, { engine: "veo", refs: "none", refImageUrl: "https://x/front.jpg" }),
+    f(4, { engine: "veo", refs: "product" }),
+  ];
+  const { drafts } = lockedDrafts(frames, opts);
+  const by = (n: string) => drafts.find((d) => d.nodeName === n)!;
+
+  it("uploads the shot's reference and edits from it instead of the kit packshot", () => {
+    expect(by("REF-1")).toMatchObject({ kind: "upload", sourceUrl: "https://x/front.jpg" });
+    expect(by("K1").leftRefs).toEqual(["REF-1"]);
+    expect(by("K4").leftRefs).toEqual(["PROD-1"]);
+  });
+
+  it("adds the product to a cast-only or no-ref shot", () => {
+    expect(by("K2").leftRefs).toEqual(["CAST", "REF-2"]);
+    expect((by("K2").settings as Record<string, unknown>).editFrom).toBe("cast+product");
+    expect(by("K3").leftRefs).toEqual(["REF-3"]);
+    expect((by("K3").settings as Record<string, unknown>).editFrom).toBe("product");
+  });
+});

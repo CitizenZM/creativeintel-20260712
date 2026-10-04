@@ -10,6 +10,8 @@
  *   zoomHit  {x, y} push-in → hold → pull-back target for the edit (0–1 of the frame)
  *   compare  {other, labelOurs, labelOther} split-screen: the other side is generated from `other`
  *   localImageUrl  the still for engine "local" (end cards, screen close-ups)
+ *   refImageUrl    a per-shot product reference used instead of the kit packshot (e.g. a front render
+ *            whose real bezel must show, or the TV with this shot's picture already on screen)
  *   castLock (first frame) the lead's description for the casting reference image
  * No director rewrite, no comparison LLM split, no cast-lock heuristics.
  */
@@ -26,6 +28,7 @@ export interface LockedBlock {
   zoomHit?: { x: number; y: number };
   compare?: { other: string; labelOurs: string; labelOther: string };
   localImageUrl?: string;
+  refImageUrl?: string;
   castLock?: string;
   fine?: string;
 }
@@ -110,6 +113,16 @@ export function lockedDrafts(
       });
     } else {
       const r = refsFor(L.refs);
+      if (L.refImageUrl) {
+        // The shot's own reference replaces the kit packshot (a shot with no product ref gains one).
+        const ref = `REF-${n}`;
+        drafts.push({ shotIndex: -1, kind: "upload", nodeName: ref, leftRefs: [], prompt: `Product reference for frame ${n}`, modelName: null, settings: {}, sourceUrl: L.refImageUrl, creditsEstimated: 0 });
+        if (!r.leftRefs.includes("PROD-1")) {
+          r.leftRefs = r.editFrom === "cast" ? ["CAST", "PROD-1"] : ["PROD-1"];
+          r.editFrom = r.editFrom === "cast" ? "cast+product" : "product";
+        }
+        r.leftRefs = r.leftRefs.map((x) => (x === "PROD-1" ? ref : x));
+      }
       drafts.push({
         shotIndex: index,
         kind: "image",

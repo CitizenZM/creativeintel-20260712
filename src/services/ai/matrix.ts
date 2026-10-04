@@ -187,8 +187,8 @@ export function lockedEditPrompt(kind: EditFrom, shot: string, opts: { maxChars?
     kind === "cast"
       ? "Keep this exact person unchanged — same face, hair, skin tone, build and wardrobe."
       : kind === "product"
-        ? "Keep this exact product unchanged — same shape, colour, proportions, screen and logo placement."
-        : "Person from image 1 (same face, hair, wardrobe) with the exact product from image 2 (same shape, screen, logo), product prominent.";
+        ? "Keep this exact product unchanged — same shape, colour, proportions, bezel thickness, screen and logo placement."
+        : "Person or people from image 1 (same faces, hair, skin tone, wardrobe) with the exact product from image 2 (same shape, bezel thickness, screen, logo), product prominent.";
   const body = shot
     .replace(/^No text, letters[^.]*\.\s*/i, "")
     .replace(/\s+/g, " ")
