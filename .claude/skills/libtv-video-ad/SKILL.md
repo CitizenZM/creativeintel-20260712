@@ -27,17 +27,20 @@ and cannot hit a beat.
 
 ## Seven phases
 
-1. **Brand intake** — official site `/products.json` (SKUs, prices, claims, image URLs), social
-   footprint, review voice, competitors. Download official product photos; they are the only
-   source of truth for packaging. Confirm which SKU and its real height in cm. Verify live
-   promos before writing any promo claim; mark unlaunched details `[占位]`.
+1. **Brand intake** — `scripts/shopify_research.py` (best-selling order, variants + compare-at prices,
+   spec table, service/promo lines, every official image tagged for rights). Reviews give the real
+   use scenes. Official photos are the only source of truth for the product. Verify live promos and
+   services on the page before writing any claim and copy their limits into the disclaimer; mark
+   unannounced details `[占位]`. See `reference/product-research.md`.
 2. **Reference teardown** — `scripts/analyze_reference.py` on 3–5 benchmark ads. Produce a
    per-cut shot table *and* run `scripts/diagnose_cut.py` on each so the campaign has its own
    measured targets for cut density, static share and motion. Cite video + timestamp for every
    borrowed move.
-3. **Concept + hook** — pick a hook structure per ad (question / contrast / product-blast, see
-   `reference/motion-and-rhythm.md` §5) and write the payoff it sets up. A hook with no payoff
-   in the body is a rejected concept.
+3. **Concept + hook** — selling points first: each gets a visual proof (`reference/director-v2.md` §1).
+   Pick a hook structure per ad (question / contrast / product-blast, `reference/motion-and-rhythm.md`
+   §5) and the payoff it sets up; a promo/service is shown as action by 5 s. A hook with no payoff is a
+   rejected concept. For promo campaigns deliver the approval plan in
+   `reference/promo-campaign-planning.md` — 3 creatives per product — and stop until approved.
 4. **Script** — beat grid from `aubio`, per-cut 画面/运镜/转场/字幕/声音, **a transition named for
    every boundary**, generation plan, cost estimate. Approval gate before spending credits.
 5. **Keyframes** — images first (cheap). A clip inherits its first frame: static keyframe →
@@ -51,7 +54,20 @@ and cannot hit a beat.
    transitions, per-beat accents), then `scripts/qc_gate.py` on every ratio and duration, then
    export 9:16 master + natively-laid-out 4:5 / 1:1 + 720p preview.
 
+## Server render path (CreativeIntel app, 2026-10)
+
+The app now renders the same plan on its own: shot director v2 (selling points, a camera move per shot,
+VO fitted at 2.6 words/s, 1–4 word keywords) → Seedream 5 Flash cast-locked keyframes → Veo 3.1 Lite clips,
+Kling 3.0 for action shots → edit v2 (≤ 2 s framings, strong open/close transitions, film finish) → QC 13
+checks + AI director review. ~$1.5 per 20 s ad on OpenRouter. Rules: `reference/director-v2.md`.
+
 ## Hard rules learned the hard way
+
+- **No plastic**: never prompt "photorealistic / cinematic / 8K"; name imperfections; one hard key light;
+  negatives (3–5) in the model's own field; finish with lifted blacks + luma grain, never a contrast boost
+  with colour noise (measured: it crushed 5 % of pixels and raised saturation).
+- **Every shot moves** (push / pull / orbit / arc / track / crane / whip / rack) and **no framing holds over 2 s**.
+- **Rights**: no league marks (NFL…), film posters or app UI from official images in an ad.
 
 - **No frame is ever drawn twice.** Every synthetic frame carries ≥2 motions (push + bob, pan +
   breathe, light sweep, text easing) and synthetic camera moves get `motion_blur`. A still with
@@ -118,6 +134,9 @@ python3 scripts/av_sync.py out/ad.mp4 assets/music/track_15s.m4a     # once per 
 | `reference/product-consistency.md` | cutout, scale rule + audit, bottle swap with finger preservation |
 | `reference/reference-analysis.md` | the local video-teardown method and its token economics |
 | `reference/lessons.md` | every failure from all three runs and its fix |
+| `reference/director-v2.md` | selling point → proof, camera grammar, anti-plastic prompting + negatives, Kling/Veo routing, VO budget, 2 s rule, film finish, token economy |
+| `reference/product-research.md` | best-seller order, specs/prices/discounts, verifying promos & services, scenes, image rights |
+| `reference/promo-campaign-planning.md` | BF/CM-style 15 s plan template (3 creatives per product), service-as-hero messaging, disclaimers |
 
 ## Scripts
 
@@ -129,6 +148,7 @@ python3 scripts/av_sync.py out/ad.mp4 assets/music/track_15s.m4a     # once per 
 | `diagnose_cut.py` | cuts, static share, motion, beat offsets for any video |
 | `av_sync.py` | audio lag between a render and its source music |
 | `screens.py` | composite original content into device panels |
+| `shopify_research.py` | brand-store intake: best sellers, specs, prices, service lines, images + rights tags |
 | `analyze_reference.py` | reference-ad teardown with transcript + contact sheets |
 | `cutout.swift` / `face_box.swift` / `person_mask.swift` | Apple Vision subject lift, scale audit |
 | `build_cut_example.py` / `build_multi_ratio_example.py` | skeleton builders |
