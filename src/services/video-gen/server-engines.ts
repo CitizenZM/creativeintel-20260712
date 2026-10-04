@@ -1,5 +1,5 @@
 /**
- * Registry of the engines the Next.js server renders itself (GLM, ComfyUI, animatic, Matrix).
+ * Registry of the engines the Next.js server renders itself (GLM, ComfyUI, animatic, Matrix, OpenRouter).
  * Routes and the cron sweep dispatch through here by `LibtvRun.executor`.
  */
 import { isServerEngine, type ServerEngine } from "./libtv-pricing";
@@ -8,12 +8,14 @@ import { glmAdapter } from "./glm-executor";
 import { comfyAdapter } from "./comfy-executor";
 import { animaticAdapter } from "./animatic-executor";
 import { matrixAdapter } from "./matrix-executor";
+import { openrouterAdapter } from "./openrouter-executor";
 
 const ADAPTERS: Record<ServerEngine, EngineAdapter> = {
   glm: glmAdapter,
   comfyui: comfyAdapter,
   animatic: animaticAdapter,
   matrix: matrixAdapter,
+  openrouter: openrouterAdapter,
 };
 
 export function adapterFor(executor: string | null | undefined): EngineAdapter | null {

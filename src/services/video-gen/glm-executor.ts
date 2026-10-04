@@ -29,8 +29,15 @@ export const glmAdapter: EngineAdapter = {
   notConfiguredError: "ZHIPU_API_KEY is not configured",
 
   async generateImage(prompt, ctx) {
-    // Cast-locked Qwen keyframes (Matrix) for a free GLM run.
-    if (typeof ctx.settings?.matrixModel === "string") {
+    // Cast-locked keyframes (OpenRouter Seedream, or Matrix Qwen) for a free GLM run.
+    if (typeof ctx.settings?.openrouterModel === "string") {
+      const { openrouterKeyframe } = await import("./openrouter-executor");
+      try {
+        return await openrouterKeyframe(prompt, ctx);
+      } catch (err) {
+        console.warn(`[glm] OpenRouter keyframe ${ctx.nodeName} failed, using CogView:`, err instanceof Error ? err.message.slice(0, 200) : err);
+      }
+    } else if (typeof ctx.settings?.matrixModel === "string") {
       const { matrixKeyframe } = await import("./matrix-executor");
       try {
         return await matrixKeyframe(prompt, ctx);

@@ -43,6 +43,7 @@ import { isStrictFree } from "@/lib/cost-mode";
 import { isComfyConfigured } from "@/services/ai/comfyui";
 import { isZhipuConfigured } from "@/services/ai/zhipu";
 import { isMatrixConfigured } from "@/services/ai/matrix";
+import { isOpenRouterConfigured } from "@/services/ai/openrouter-media";
 import { hasPeople } from "./prompt-safety";
 import { splitComparisonDrafts } from "./comparison";
 import { loadAiSettings } from "@/services/settings/ai-settings";
@@ -313,7 +314,7 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
   // bring-your-own paid video models); strict free mode defaults to — and only
   // renders with — the free GLM models.
   const snap = await loadAiSettings();
-  const defaults = videoDefaults(snap.settings.video, isStrictFree(), snap.providers, { comfyAvailable: isComfyConfigured(), glmAvailable: isZhipuConfigured(), matrixAvailable: isMatrixConfigured() });
+  const defaults = videoDefaults(snap.settings.video, isStrictFree(), snap.providers, { comfyAvailable: isComfyConfigured(), glmAvailable: isZhipuConfigured(), matrixAvailable: isMatrixConfigured(), openrouterAvailable: isOpenRouterConfigured() });
   const {
     projectId,
     storyboardId,
@@ -331,11 +332,17 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
       400
     );
   }
+  if (findImageModel(imageModel)?.openrouterModel && !isOpenRouterConfigured()) {
+    throw new LibtvCompileError("This keyframe model needs an OpenRouter key — set OPENROUTER_API_KEY (openrouter.ai) and redeploy.", 409);
+  }
   if (executor === "glm" && !isZhipuConfigured()) {
     throw new LibtvCompileError("The free GLM engine needs a Zhipu key — set ZHIPU_API_KEY (bigmodel.cn) and redeploy.", 409);
   }
   if (executor === "matrix" && !isMatrixConfigured()) {
     throw new LibtvCompileError("The Matrix engine needs a key — set MATRIX_API_KEY (mzsjai.com) and redeploy.", 409);
+  }
+  if (executor === "openrouter" && !isOpenRouterConfigured()) {
+    throw new LibtvCompileError("The OpenRouter engine needs a key — set OPENROUTER_API_KEY (openrouter.ai) and redeploy.", 409);
   }
   if (executor === "comfyui" && !isComfyConfigured()) {
     throw new LibtvCompileError("ComfyUI is not configured — set COMFYUI_URL to your GPU node (see docs/comfyui-node.md).", 409);

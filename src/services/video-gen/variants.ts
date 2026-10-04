@@ -113,7 +113,7 @@ export async function advanceAutoVariants(): Promise<{ runId: string; style: Hoo
   if (process.env.AUTO_HOOK_VARIANTS === "off") return null;
   const since = new Date(Date.now() - 3 * 86_400_000);
   const runs = await prisma.libtvRun.findMany({
-    where: { status: "completed", completedAt: { gte: since }, executor: { in: ["glm", "matrix", "comfyui", "animatic"] } },
+    where: { status: "completed", completedAt: { gte: since }, executor: { in: ["glm", "matrix", "openrouter", "comfyui", "animatic"] } },
     orderBy: { completedAt: "desc" },
     select: { id: true, projectId: true, qcReport: true },
     take: 20,
