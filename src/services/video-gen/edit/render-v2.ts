@@ -215,8 +215,8 @@ interface Overlay {
 }
 
 /** Holiday / gift copy picks the seasonal music bed. */
-export function musicMood(frames: { voiceover?: string | null; textOverlay?: string | null }[]): "pop" | "holiday" {
-  const text = frames.map((f) => `${f.voiceover ?? ""} ${f.textOverlay ?? ""}`).join(" ");
+export function musicMood(frames: { voiceover?: string | null; text?: string | null }[]): "pop" | "holiday" {
+  const text = frames.map((f) => `${f.voiceover ?? ""} ${f.text ?? ""}`).join(" ");
   return /christmas|holiday|new year|black friday|cyber monday|gift|santa|xmas|winter/i.test(text) ? "holiday" : "pop";
 }
 
@@ -381,7 +381,14 @@ export async function renderEditV2(input: {
   const groups = kineticGroups(words.filter((w) => w.startSec < captionEnd));
   const windows = captionWindows(groups, captionEnd);
   const overlays: Overlay[] = [];
+  // A caption that only repeats the headline or claim already on screen is dropped (no "NEW YEAR GIFT?" twice).
+  const bare = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}%]+/gu, " ").trim();
+  const repeatsCard = (win: (typeof windows)[number]) => {
+    const said = bare(groups[win.group].map((x) => x.text).join(" "));
+    return !!said && plan.cards.some((c) => (c.role === "hook" || c.role === "claim") && c.startSec < win.endSec && c.endSec > win.startSec && bare(c.text).includes(said));
+  };
   for (const [i, win] of windows.entries()) {
+    if (repeatsCard(win)) continue;
     const file = path.join(dir, `v2cap${String(i).padStart(3, "0")}.png`);
     await writeFile(file, await kineticCaptionPng(groups[win.group].map((x) => x.text), win.word, canvas, look));
     overlays.push({ file, startSec: win.startSec, endSec: win.endSec, y: 0.7 });
