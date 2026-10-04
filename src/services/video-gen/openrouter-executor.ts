@@ -15,6 +15,7 @@ import {
   isOpenRouterConfigured,
   submitOpenRouterVideo,
 } from "@/services/ai/openrouter-media";
+import { negativePromptFor } from "./shot-director";
 import { driveRun, type EngineAdapter, type JobContext, type TaskResult, type TickResult } from "./server-executor";
 
 const DEFAULT_IMAGE = "bytedance-seed/seedream-5-0-flash";
@@ -73,8 +74,10 @@ export const openrouterAdapter: EngineAdapter = {
 
   async submitVideo(input, ctx) {
     const resolution = typeof ctx.settings?.resolution === "string" ? ctx.settings.resolution : undefined;
+    const model = modelOf(ctx, DEFAULT_VIDEO);
     return submitOpenRouterVideo({
-      model: modelOf(ctx, DEFAULT_VIDEO),
+      model,
+      negativePrompt: ctx.settings?.directed ? negativePromptFor(model) : undefined,
       prompt: input.prompt,
       imageUrl: input.imageUrl,
       aspectRatio: ctx.aspectRatio,

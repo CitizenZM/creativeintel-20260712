@@ -76,7 +76,7 @@ export async function renderVariantForRun(runId: string, style: HookStyle, hookT
   await setPending(runId, style, new Date().toISOString());
   try {
     const jobs = await prisma.libtvJob.findMany({ where: { runId } });
-    const frames = await storyboardFrames(run.storyboardId);
+    const frames = await storyboardFrames(run.storyboardId, run.directorPlan);
     const v = await renderHookVariant({ runId, projectId: run.projectId, aspectRatio: run.aspectRatio, frames, jobs, hookStyle: style, hookText });
     const [project, script] = await Promise.all([
       prisma.project.findUnique({ where: { id: run.projectId }, select: { brandName: true } }),

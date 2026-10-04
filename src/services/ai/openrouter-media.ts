@@ -106,10 +106,22 @@ export interface OpenRouterVideoInput {
   durationSec: number;
   /** "720p" / "480p" … (case-insensitive). */
   resolution?: string;
+  /** Sent through the provider's own negative-prompt field (Kling, Veo). */
+  negativePrompt?: string;
 }
 
-export function openrouterVideoBody(input: OpenRouterVideoInput, withAudioFlag = true): Record<string, unknown> {
+/** Provider passthrough for the negative prompt (slugs and field names per the video models API). */
+export function negativeOptions(model: string, negative?: string): Record<string, unknown> | null {
+  if (!negative) return null;
+  if (/^kwaivgi\//.test(model)) return { options: { kling: { negative_prompt: negative } } };
+  if (/^google\/veo/.test(model)) return { options: { "google-vertex": { parameters: { negativePrompt: negative } } } };
+  return null;
+}
+
+export function openrouterVideoBody(input: OpenRouterVideoInput, withAudioFlag = true, withProvider = true): Record<string, unknown> {
+  const provider = withProvider ? negativeOptions(input.model, input.negativePrompt) : null;
   return {
+    ...(provider ? { provider } : {}),
     model: input.model,
     prompt: input.prompt,
     aspect_ratio: openrouterAspect(input.aspectRatio),
@@ -123,10 +135,12 @@ export function openrouterVideoBody(input: OpenRouterVideoInput, withAudioFlag =
 
 /** Submit a clip; returns the job id to poll. */
 export async function submitOpenRouterVideo(input: OpenRouterVideoInput): Promise<string> {
-  const send = (withAudioFlag: boolean) => call<{ id?: string }>("/videos", { body: openrouterVideoBody(input, withAudioFlag) });
+  const send = (withAudioFlag: boolean, withProvider = true) => call<{ id?: string }>("/videos", { body: openrouterVideoBody(input, withAudioFlag, withProvider) });
   const out = await send(true).catch((err) => {
-    // A model without an audio option rejects the flag: retry without it.
-    if (/generate_audio|audio/i.test(String(err instanceof Error ? err.message : err))) return send(false);
+    const msg = String(err instanceof Error ? err.message : err);
+    // A model without an audio option rejects the flag; a refused passthrough option is dropped.
+    if (/generate_audio|audio/i.test(msg)) return send(false);
+    if (/provider|option|negative/i.test(msg)) return send(true, false);
     throw err;
   });
   if (!out.id) throw new Error("OpenRouter accepted the clip but returned no job id");

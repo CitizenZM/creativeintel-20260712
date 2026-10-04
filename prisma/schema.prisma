@@ -721,6 +721,8 @@ model LibtvRun {
   voiceoverUrl     String? // the master's voiceover alone (mp3), for re-mixing in an editor
   subtitlesUrl     String? // SRT of the voiceover, timed to the master
   qcReport         Json? // measured QC of the master (edit engine v2: pacing, beat sync, loudness, captions)
+  // The shot director's plan: selling points, per-frame voiceover line, on-screen keyword, camera move.
+  directorPlan     Json?
   // The deliverable for its script, picked by the user (one per script).
   isFinal          Boolean   @default(false)
   // Set when this run re-renders chosen scenes of an earlier run.

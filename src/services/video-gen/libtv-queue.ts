@@ -314,6 +314,8 @@ export async function cloneRunForRerender(runId: string, shotIndexes: number[]):
       aspectRatio: run.aspectRatio,
       clipDurationSec: run.clipDurationSec,
       creditsEstimated,
+      // The re-render keeps the director's copy (voiceover and on-screen keywords).
+      directorPlan: run.directorPlan ?? undefined,
       jobs: { create: jobs },
     },
   });

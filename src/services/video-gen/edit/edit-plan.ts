@@ -95,6 +95,11 @@ export interface EditPlan {
 
 const BODY_ROTATION: Transition[] = ["whip", "zoom", "whip", "flash"];
 
+/** No single framing holds longer than this — a longer shot reads as static. */
+export const MAX_SHOT_SEC = 2;
+/** The opening seconds and the last cuts always get a transition, never a plain cut. */
+const STRONG_OPEN_SEC = 3;
+
 function seg(s: PlanInputSegment): "HOOK" | "BODY" | "CTA" {
   const v = (s.segment ?? "").toUpperCase();
   return v === "HOOK" || v === "CTA" ? v : "BODY";
@@ -110,6 +115,8 @@ const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").tri
 export function isClaimWorthShowing(text: string, voiceover: string | null | undefined): boolean {
   const w = words(text);
   if (!w.length || w.length > 6) return false;
+  // A 1–4 word keyword ("3,000 NITS") punches the selling point even when the voiceover says it.
+  if (w.length <= 4) return true;
   const vo = norm(voiceover ?? "");
   return !vo || !vo.includes(norm(text));
 }
@@ -227,6 +234,38 @@ export function planEdit(
     const last = ctaFrames[ctaFrames.length - 1];
     push({ ...first, endSec: last.endSec }, first.startSec, last.endSec, { motion: "push" });
   }
+  // Nothing holds one framing for more than MAX_SHOT_SEC: a long shot is cut on
+  // a beat into parts that alternate framing; a clip continues its action across the cut.
+  for (let i = 0; i < shots.length; i++) {
+    const s = shots[i];
+    const len = s.endSec - s.startSec;
+    if (len <= MAX_SHOT_SEC + 1e-6) continue;
+    const parts = Math.ceil(len / MAX_SHOT_SEC - 1e-6);
+    const cuts: number[] = [];
+    for (let k = 1; k < parts; k++) {
+      const ideal = s.startSec + (k * len) / parts;
+      const beat = onBeat(ideal);
+      const at = beat - s.startSec > 0.4 && s.endSec - beat > 0.4 && Math.abs(beat - ideal) < 0.5 ? beat : snapToFrame(ideal);
+      if (at > (cuts[cuts.length - 1] ?? s.startSec) + 0.3) cuts.push(at);
+    }
+    const edges = [s.startSec, ...cuts, s.endSec];
+    const pieces: Shot[] = edges.slice(0, -1).map((a, k) => {
+      const b = edges[k + 1];
+      const tight = k % 2 === 1;
+      return {
+        ...s,
+        startSec: a,
+        endSec: b,
+        frames: Math.round((b - a) * FPS),
+        srcFrom: s.kind === "clip" ? round3(s.srcFrom + (a - s.startSec)) : 0,
+        zoom: tight ? Math.min(1.3, Math.max(1, s.zoom) * 1.14) : s.zoom,
+        anchorY: tight ? 0.42 : s.anchorY,
+        motion: s.kind === "still" ? (tight ? "pull" : "push") : s.motion,
+      };
+    });
+    shots.splice(i, 1, ...pieces);
+    i += pieces.length - 1;
+  }
   // Hook variants rewrite only the opening shot; body and CTA stay identical.
   const opener = shots[0];
   if (opener && opener.segment === "HOOK" && opts.hookStyle === "c") opener.contrast = true;
@@ -257,12 +296,16 @@ export function planEdit(
     else if (changed && shots[i].segment === "HOOK") tr = "whip";
     else if (changed) tr = BODY_ROTATION[rot++ % BODY_ROTATION.length];
     else if (shots[i].zoom > shots[i - 1].zoom) tr = "zoom";
+    // The opening and the ending are where motion sells: no plain cuts there.
+    if (tr === "cut" && (at <= STRONG_OPEN_SEC || i >= shots.length - 2)) tr = shots[i].zoom > shots[i - 1].zoom ? "zoom" : "whip";
     boundaries.push({ atSec: at, transition: tr });
     if (tr === "flash") sfx.push({ kind: "impact", atSec: at });
     else if (tr === "whip") sfx.push({ kind: "whoosh", atSec: at });
     else if (tr === "zoom" && changed) sfx.push({ kind: "impact", atSec: at });
   }
   if (ctaSec !== null) sfx.push({ kind: "click", atSec: round3(Math.min(durationSec - 0.3, ctaSec + 2 * grid.period)) });
+  // The opening reveal (render-v2 fxFilter: a zoom-through from dark) lands with a whoosh.
+  sfx.push({ kind: "whoosh", atSec: 0.18 });
 
   // On-screen text: the hook headline, short claims, the offer on the end card.
   const cards: TextCard[] = [];
