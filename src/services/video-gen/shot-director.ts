@@ -1,178 +1,251 @@
 /**
- * Shot director — turns each storyboard beat into what an image-to-video model
- * actually needs: a photographic first frame and a motion script.
+ * Shot director — the ad's cinematographer and copy editor in one LLM pass.
  *
- * Why it exists: the storyboard's `imagePrompt` / `videoPrompt` are previews
- * ("cinematic storyboard concept art"), so clips made from them were thin and
- * contradictory ("Beat 1 close-up … Beat 2 wide shot" inside one 4 s clip),
- * moved barely at all, and looked plastic. A directed shot has ONE continuous
- * action, a named shot size / lens / camera move, a timed action script,
- * concrete light and surface detail, and a shared look across the whole ad.
+ * From the storyboard it plans, for the whole ad at once (one call, compact
+ * JSON both ways to keep tokens down):
+ *   1. selling points — what the product claims and HOW a camera proves each
+ *   2. per shot: a camera move (push / pull / orbit / arc / track / crane / whip /
+ *      rack focus — never locked off), a photographic first frame, a timed motion
+ *      script, whether it is an action shot (rendered on Kling), the voiceover
+ *      line (fitted to the shot's length) and a ≤ 4-word on-screen keyword
  *
- * Measured on identical first frames (Veo 3.1 Lite): the old prompt produced an
- * in-clip scene change; the directed prompt a single continuous shot with the
- * actor acting.
+ * Realism (from practice notes on AI footage): name the imperfections, light
+ * with one hard raking key, ask for 35 mm documentary handheld; never ask for
+ * "photorealistic / cinematic / 8K" (that's where the plastic comes from), and
+ * keep negatives to 3–5 terms in the model's own negative-prompt field.
  */
 import { z } from "zod";
 import type { GridFrame } from "@/lib/storyboard-grid";
 import type { CompiledJobDraft } from "./libtv-compile";
+import { isComparisonPrompt } from "./comparison";
 
-/** Surface realism that stops the waxy, airbrushed AI look. Appended to every directed still. */
+/** Surface realism for every directed still. */
 export const REALISM_STILL =
-  "Photographed on a full-frame cinema camera in natural available light: lifelike skin with visible pores, fine lines and slight unevenness, flyaway hairs, real fabric weave and creases, micro-scratches and dust on surfaces, shallow depth of field with real lens falloff, subtle film grain, true-to-life colour, no retouching, no beauty filter.";
+  "35mm film photograph, handheld, documentary, observational framing. One hard warm key light raking from the side. Unretouched skin: visible pores, fine vellus hair, colour variation across cheeks and nose, slight asymmetry, small blemishes; real fabric weave and creases; dust, fingerprints and wear on surfaces.";
 
-/** Motion realism + the failure modes to avoid. Appended to every directed clip. */
-export const REALISM_MOTION =
-  "Live-action footage at natural speed (not slow motion): handheld micro-movement, real-world physics, motion blur on fast moves, consistent lighting, matte natural skin. Avoid: plastic or waxy skin, airbrushed faces, CGI or 3D-render look, over-sharpening, oversaturated HDR, morphing faces or hands, floating objects, text or logos.";
+/** Motion realism for every directed clip (negatives go in the model's negative-prompt field). */
+export const REALISM_MOTION = "Shot on 35mm film, handheld, documentary, observational. Real-world physics at natural speed, motion blur on fast moves.";
 
-/** Hex codes become literal text in images. */
-function stripHex(prompt: string): string {
-  return prompt.replace(/#[0-9a-f]{6}\b/gi, "").replace(/\s{2,}/g, " ").trim();
+/** 3–5 negatives per model family (more over-constrains). */
+export const NEGATIVE_PROMPTS: Record<"kling" | "veo" | "other", string> = {
+  kling: "waxy skin, plastic texture, rubbery motion, floating hair, doll-like features",
+  veo: "over-smoothed, detail loss, watercolor effect, painterly artifacts, pristine condition",
+  other: "waxy skin, plastic texture, over-smoothed, CGI render",
+};
+
+export function negativePromptFor(model: string): string {
+  return /kling/i.test(model) ? NEGATIVE_PROMPTS.kling : /veo/i.test(model) ? NEGATIVE_PROMPTS.veo : NEGATIVE_PROMPTS.other;
+}
+
+/** Words that pull models toward the glossy render look. */
+const PLASTIC_WORDS = /\b(?:hyper-?realistic|photo-?realistic|ultra[- ]realistic|cinematic|8k|4k uhd|masterpiece|award[- ]winning|perfect skin|flawless|studio[- ]perfect|octane|unreal engine|3d render)\b/gi;
+
+function tidy(prompt: string): string {
+  return prompt.replace(/#[0-9a-f]{6}\b/gi, "").replace(PLASTIC_WORDS, "").replace(/\s+([.,;])/g, "$1").replace(/\s{2,}/g, " ").trim();
 }
 
 export function finishDirectedStill(prompt: string): string {
-  const p = stripHex(prompt);
-  return /film grain/i.test(p) ? p : `${p} ${REALISM_STILL}`;
+  const p = tidy(prompt);
+  return p.includes("35mm film photograph") ? p : `${p} ${REALISM_STILL}`;
 }
 
 export function finishDirectedMotion(prompt: string): string {
-  const p = stripHex(prompt);
-  return /avoid:/i.test(p) ? p : `${p} ${REALISM_MOTION}`;
+  const p = tidy(prompt);
+  return p.includes("Shot on 35mm film") ? p : `${p} ${REALISM_MOTION}`;
 }
+
+export const CAMERA_MOVES = ["push_in", "pull_out", "orbit", "arc", "track", "crane", "whip", "rack_focus", "handheld_follow"] as const;
 
 export interface DirectedShot {
   frameNumber: number;
   keyframe: string;
   motion: string;
+  camera: string;
+  /** Strong human/body motion — rendered on the action model (Kling). */
+  action: boolean;
+  voiceover: string | null;
+  onScreen: string | null;
+  sellingPoint: number | null;
+}
+
+export interface SellingPoint {
+  claim: string;
+  proof: string;
 }
 
 export interface DirectedAd {
   shots: Map<number, DirectedShot>;
-  /** A standalone description of the on-camera talent for the casting reference photo. */
   cast: string | null;
+  sellingPoints: SellingPoint[];
   source: "llm" | "fallback";
 }
 
 const outSchema = z.object({
-  cast: z.string().optional(),
+  sp: z.array(z.object({ claim: z.string(), proof: z.string() })).optional(),
+  cast: z.string().nullable().optional(),
   shots: z
     .array(
       z.object({
-        frameNumber: z.coerce.number(),
-        keyframe: z.string().min(30),
-        motion: z.string().min(30),
+        f: z.coerce.number(),
+        sp: z.coerce.number().nullable().optional(),
+        cam: z.string().optional(),
+        act: z.coerce.boolean().optional(),
+        vo: z.string().nullable().optional(),
+        txt: z.string().nullable().optional(),
+        kf: z.string().min(30),
+        mo: z.string().min(30),
       })
     )
     .min(1),
 });
 
-export const DIRECTOR_SYSTEM = `You are the cinematographer and director of a 15–30 s vertical performance ad. You write prompts for photoreal image models (the FIRST FRAME of each shot) and image-to-video models (Veo, Kling, Wan: the MOTION of each shot). Return JSON only:
-{"cast": "the on-camera talent as one standalone paragraph (age, ethnicity, build, hair, skin, face details, wardrobe fabrics and colours) — omit if no person appears", "shots": [{"frameNumber": n, "keyframe": "...", "motion": "..."}]}
+export const DIRECTOR_SYSTEM = `You direct a short vertical performance ad: think like a creative director, shoot like a commercial DP. Output JSON only:
+{"sp":[{"claim":"selling point","proof":"what the camera shows that proves it"}],
+ "cast":"on-camera talent as one paragraph: age, ethnicity, build, hair, skin, face, wardrobe fabric/colour (null if nobody appears)",
+ "shots":[{"f":frameNumber,"sp":index into sp or null,"cam":"push_in|pull_out|orbit|arc|track|crane|whip|rack_focus|handheld_follow","act":true if a person makes a big body movement,"vo":"voiceover line","txt":"on-screen keyword","kf":"first frame","mo":"motion"}]}
 
-KEYFRAME (70–110 words, plain sentences, no lists, no brand lettering):
-- Start with shot size, angle, lens and aperture (e.g. "Medium close-up, eye level, 35mm f/2.8").
-- Subject: age, features, hair, wardrobe fabric and colour, expression — caught MID-ACTION, never posed, never looking at camera unless the beat needs it.
-- Environment: location plus three concrete lived-in props. Light: the source, its direction, colour temperature and quality (window light, practical lamp, overcast), plus one atmosphere detail (dust motes, steam, haze).
-- Surface truth: skin pores and fine lines, fabric weave and creases, specular highlights on glass or metal, small imperfections. It should look photographed candidly, not rendered or studio-perfect.
-
-MOTION (60–100 words) — ONE continuous shot, one setting, one shot size:
-- Open with the camera move and its speed (handheld push-in, gimbal tracking, slow dolly out, 20° orbit, rack focus, whip pan). Never describe a cut, a second shot, a change of shot size, "Beat 1 / Beat 2", or a scene change inside the clip.
-- Then a timed action script ("0–1.5 s: …  1.5–4 s: …") with strong physical verbs and body mechanics. Something visibly moves in the FIRST second — the clip never opens on a held pose. Include at least one large motion (a turn, a reach, an object entering frame) and secondary motion (hair, fabric, steam, dust, reflections, light shifting).
-- The camera is NEVER locked off: no tripod, "static" or "locked-off" shots. Even a close-up or insert has handheld drift, a slow 4–6 % push, a slight orbit or parallax past a foreground object.
-- The main motion is physical action by a person or the product (hands, body, an object entering or moving), not only light or glare changing. Give speed words ("quickly", "in one smooth sweep").
-- Never freeze: no "frozen", "holds", "final static frame". End mid-movement, on a move that can be cut on.
-
-RULES
-- Continuity: the same talent, wardrobe, location family, colour grade and lens language in every shot (write "the same <short description>"). Vary shot size and camera move from shot to shot (wide, medium, close, insert; push, track, orbit, static-handheld) so the edit has contrast.
-- Products are described by what they are and do. A screen shows a specific vivid image (a sunset over a mountain lake, a football match, a colourful nature documentary) — never text or UI. Show the product being used: a hand, a remote, a light changing in the room.
-- If a frame's own imagePrompt asks for a comparison (split screen, versus, before/after), keep the words "split screen" in its keyframe and describe both sides, but write the motion for the brand's side only.
-- Never put text, logos, captions, prices or UI in a frame. No celebrities.
-- Every frame in the input gets exactly one shot, using its frameNumber.`;
-
-interface DirectorFrameView {
-  frameNumber: number;
-  segment: string;
-  seconds: string;
-  voiceover: string;
-  scene: string;
-  visualDirection: string;
-  shotType: string;
-  cameraMove: string;
-  subject: string;
-  productAction: string;
-  sellingPoint: string;
-  imagePrompt: string;
-}
+1 SELLING POINTS: pick 2–4 from productFacts. Each gets a VISUAL proof (brightness: a sunlit room and the picture still punches; contrast: a night scene with true black beside a bright moon; colour: a macaw's feathers). Every BODY shot proves one selling point.
+2 CAMERA — every shot moves, nothing is locked off or held: push_in / pull_out / orbit / arc (30–60°) / track / crane / whip / rack_focus / handheld_follow. Never repeat a move on consecutive shots. The product hero shot is an orbit while the product (or the room around it) turns, reading as a 360° reveal. The first shot opens on a fast move (whip or fast push_in); the last non-CTA shot pulls out or cranes up to reveal.
+3 CONTINUITY — each clip is ONE continuous take in one place (no cuts, no shot-size change, no "Beat 1/Beat 2"). Movement direction carries across cuts (a push into shot n continues as forward motion in n+1). Same talent, wardrobe, location and light family throughout.
+4 kf (55–85 words): shot size, angle, lens (e.g. "Medium close-up, low angle, 35mm"). Subject mid-action, never posed. Location + 2 concrete lived-in props. One hard key light: source, side, colour temperature. Name small imperfections (pores, creases, dust, fingerprints). Screens show a specific vivid image (macaw, football match, sunset lake) — never text or UI. Dark scenes are lit by the screen glow plus a practical lamp: faces and furniture readable on a phone, never underexposed. Never write photorealistic, cinematic, 8K, flawless or perfect.
+5 mo (45–75 words): start with the camera move and speed, then "0–1s: … 1–3s: …" physical actions with strong verbs; movement in the very first second; secondary motion (hair, fabric, steam, reflections); end MID-movement, never frozen or holding.
+6 vo: rewrite the storyboard voiceover so it sells — name the selling point with a concrete number or benefit. The whole ad speaks about 2.5 words per second, so most lines cover 2 shots: write the line on the first shot and set vo null on the shot(s) it covers. A line has at most the "words" of its shot plus those of the shots it covers. Lines read as one script in order. CTA line = the offer + action.
+7 txt: 1–4 punchy words for the screen (e.g. "3,000 NITS", "TRUE BLACK"). HOOK = the hook question/claim ≤ 6 words. CTA = the offer. Never a full sentence.
+8 cmp:1 marks a comparison frame: its kf MUST start "Split screen:" and describe both sides; mo covers only the brand side.
+Every input frame gets exactly one shot with its f. No brand lettering, logos, prices or UI inside images.`;
 
 const cut = (s: unknown, n: number) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 
-export function frameView(f: GridFrame): DirectorFrameView {
-  return {
-    frameNumber: f.frameNumber,
-    segment: cut(f.segment, 12),
-    seconds: `${f.startSec}–${f.endSec}s`,
-    voiceover: cut(f.voiceover, 160),
-    scene: cut(f.scene, 220),
-    visualDirection: cut(f.visualDirection, 220),
-    shotType: cut(f.shotType, 60),
-    cameraMove: cut(f.cameraMove, 80),
-    subject: cut(f.subject, 120),
-    productAction: cut(f.productAction, 160),
-    sellingPoint: cut(f.sellingPoint, 100),
-    imagePrompt: cut(f.imagePrompt, 320),
+/** The director's view of one frame — short keys, empty fields dropped (token budget). */
+export function frameView(f: GridFrame): Record<string, unknown> {
+  const len = Math.max(0.5, (f.endSec ?? 0) - (f.startSec ?? 0));
+  const scene = [f.scene, f.visualDirection, f.imagePrompt].map((x) => cut(x, 200)).filter(Boolean).join(" | ");
+  const v: Record<string, unknown> = {
+    f: f.frameNumber,
+    seg: cut(f.segment, 8),
+    words: Math.max(3, Math.floor(len * 2.6)),
+    vo: cut(f.voiceover, 160),
+    txt: cut(f.textOverlay, 60),
+    scene: scene.slice(0, 380),
+    act: cut(f.productAction || f.subject, 140),
+    sp: cut(f.sellingPoint, 90),
   };
+  if (isComparisonPrompt(`${f.imagePrompt ?? ""} ${f.visualDirection ?? ""} ${f.scene ?? ""}`)) v.cmp = 1;
+  for (const k of Object.keys(v)) if (v[k] === "" || v[k] == null) delete v[k];
+  return v;
 }
 
-const STORYBOARD_STYLE = /\b(?:cinematic )?storyboard concept art\b|\bconcept art\b|\btvc video ad\b|\byoutube video ad\b|\bphotorealistic\b/gi;
+const STORYBOARD_STYLE = /\b(?:cinematic )?storyboard concept art\b|\bconcept art\b|\btvc video ad\b|\byoutube video ad\b/gi;
+const FALLBACK_MOVES = ["fast push-in", "slow pull-out", "30° arc to the left", "tracking move to the right", "crane up", "orbit around the subject"];
 
-/**
- * No model available: a single-action shot from the storyboard's own fields —
- * still better than the old "Beat 1 / Beat 2" prompt (one move, one action,
- * movement from the first frame).
- */
-export function fallbackShot(f: GridFrame): DirectedShot {
-  const base = cut(f.imagePrompt || f.visualDirection || f.scene, 420).replace(STORYBOARD_STYLE, "").replace(/\s{2,}/g, " ").trim();
+/** No model available: a single-action shot with a moving camera, from the storyboard's own fields. */
+export function fallbackShot(f: GridFrame, i = 0): DirectedShot {
+  const base = tidy(cut(f.imagePrompt || f.visualDirection || f.scene, 420).replace(STORYBOARD_STYLE, ""));
   const size = cut(f.shotType, 40) || "Medium shot";
   const action = cut(f.productAction || f.subject || f.scene, 200) || "the action unfolds";
-  const move = cut(f.cameraMove, 80) || "slow handheld push-in";
+  const move = cut(f.cameraMove, 80) || FALLBACK_MOVES[i % FALLBACK_MOVES.length];
   return {
     frameNumber: f.frameNumber,
-    keyframe: `${size}, eye level, 35mm lens at f/2.8, candid documentary photograph. ${base} Natural window light, lived-in details, caught mid-action.`,
-    motion: `${move.charAt(0).toUpperCase()}${move.slice(1)}, one continuous shot with no cut. 0–1.5 s: ${action}, visible movement from the very first frame. 1.5 s to the end: the action carries through and ends mid-movement; hair, fabric and light move naturally.`,
+    keyframe: `${size}, eye level, 35mm lens. ${base} One hard window light from the side, lived-in details, caught mid-action.`,
+    motion: `${move.charAt(0).toUpperCase()}${move.slice(1)}, one continuous take with no cut. 0–1s: ${action}, movement from the very first frame. 1s to the end: the action carries through and ends mid-movement; hair, fabric and light move naturally.`,
+    camera: move,
+    action: false,
+    voiceover: null,
+    onScreen: null,
+    sellingPoint: null,
   };
 }
 
-/** Parse + complete the model's answer: every frame gets a shot (fallback for any it skipped). Pure. */
-export function completeShots(frames: GridFrame[], raw: z.infer<typeof outSchema> | null): DirectedAd {
-  const byNumber = new Map<number, DirectedShot>();
-  for (const s of raw?.shots ?? []) {
-    byNumber.set(s.frameNumber, { frameNumber: s.frameNumber, keyframe: s.keyframe.trim(), motion: s.motion.trim() });
+/** Make sure a comparison frame still triggers the comparison split. */
+function keepComparison(kf: string, isCmp: boolean): string {
+  return isCmp && !isComparisonPrompt(kf) ? `Split screen: ${kf}` : kf;
+}
+
+export const WORDS_PER_SEC = 2.6;
+
+const wordCount = (t: string | null) => (t ? t.split(/\s+/).filter(Boolean).length : 0);
+
+/** Cut a line to `max` words at the last clause boundary that keeps most of it. */
+export function trimLine(line: string, max: number): string {
+  const w = line.split(/\s+/).filter(Boolean);
+  if (w.length <= max) return line;
+  const kept = w.slice(0, max).join(" ");
+  const b = Math.max(kept.lastIndexOf(","), kept.lastIndexOf(";"), kept.lastIndexOf(" — "), kept.lastIndexOf("."));
+  const clause = b > kept.length * 0.5 ? kept.slice(0, b) : kept;
+  return `${clause.replace(/[\s,;:—-]+$/, "")}.`;
+}
+
+/**
+ * Fit the voiceover to the ad's length. A line too long for its shot first takes
+ * over the following shots (their lines are dropped — never across into the CTA),
+ * and is trimmed at a clause boundary if it still doesn't fit. Without this the
+ * TTS is sped up and pushes every later line off its shot. Pure.
+ */
+export function fitVoiceover(frames: GridFrame[], shots: Map<number, DirectedShot>): void {
+  const order = [...frames].sort((a, b) => a.frameNumber - b.frameNumber);
+  const budget = (f: GridFrame) => Math.max(3, Math.floor(Math.max(0.5, f.endSec - f.startSec) * WORDS_PER_SEC));
+  for (let i = 0; i < order.length; i++) {
+    const shot = shots.get(order[i].frameNumber);
+    if (!shot?.voiceover) continue;
+    const isCta = (f: GridFrame) => String(f.segment).toUpperCase() === "CTA";
+    let allow = budget(order[i]);
+    let j = i + 1;
+    while (wordCount(shot.voiceover) > allow * 1.15 && j < order.length && isCta(order[j]) === isCta(order[i])) {
+      allow += budget(order[j]);
+      const next = shots.get(order[j].frameNumber);
+      if (next) next.voiceover = null;
+      j++;
+    }
+    if (wordCount(shot.voiceover) > Math.ceil(allow * 1.15)) shot.voiceover = trimLine(shot.voiceover, allow);
   }
+}
+
+/** Complete the model's answer: every frame gets a shot (fallback for any it skipped). Pure. */
+export function completeShots(frames: GridFrame[], raw: z.infer<typeof outSchema> | null): DirectedAd {
+  const byNumber = new Map((raw?.shots ?? []).map((s) => [s.f, s]));
   const shots = new Map<number, DirectedShot>();
   let usedLlm = false;
-  for (const f of frames) {
+  frames.forEach((f, i) => {
     const s = byNumber.get(f.frameNumber);
-    if (s) usedLlm = true;
-    shots.set(f.frameNumber, s ?? fallbackShot(f));
-  }
-  return { shots, cast: raw?.cast?.trim() || null, source: usedLlm ? "llm" : "fallback" };
+    const isCmp = frameView(f).cmp === 1;
+    if (!s) {
+      const fb = fallbackShot(f, i);
+      shots.set(f.frameNumber, { ...fb, keyframe: keepComparison(fb.keyframe, isCmp) });
+      return;
+    }
+    usedLlm = true;
+    const txt = cut(s.txt, 48);
+    shots.set(f.frameNumber, {
+      frameNumber: f.frameNumber,
+      keyframe: keepComparison(s.kf.trim(), isCmp),
+      motion: s.mo.trim(),
+      camera: cut(s.cam, 24) || "push_in",
+      action: !!s.act,
+      voiceover: cut(s.vo, 220) || null,
+      onScreen: txt && txt.split(/\s+/).length <= 6 ? txt : null,
+      sellingPoint: typeof s.sp === "number" ? s.sp : null,
+    });
+  });
+  fitVoiceover(frames, shots);
+  return {
+    shots,
+    cast: raw?.cast?.trim() || null,
+    sellingPoints: (raw?.sp ?? []).slice(0, 5).map((p) => ({ claim: cut(p.claim, 80), proof: cut(p.proof, 160) })),
+    source: usedLlm ? "llm" : "fallback",
+  };
 }
 
 export interface DirectInput {
   frames: GridFrame[];
   brand: string;
   product: string;
-  /** What the product is and looks like (kit facts). */
   productFacts?: string;
-  /** Real-world size line, so props and people are scaled right. */
   scale?: string;
   aspectRatio: string;
   clipSeconds: number;
-  /** The ad's voiceover/script hook — what the viewer hears while each shot plays. */
-  script?: string;
 }
 
-/** Direct the whole ad in one call so the look stays consistent; never throws. */
+/** Direct the whole ad in one call; never throws. */
 export async function directAd(input: DirectInput): Promise<DirectedAd> {
   if (process.env.SHOT_DIRECTOR === "off" || process.env.MOCK_AI === "true") return completeShots(input.frames, null);
   try {
@@ -180,20 +253,13 @@ export async function directAd(input: DirectInput): Promise<DirectedAd> {
     const user = JSON.stringify({
       brand: input.brand,
       product: input.product,
-      productFacts: cut(input.productFacts, 500),
-      scale: cut(input.scale, 240),
-      aspectRatio: input.aspectRatio,
-      clipSeconds: input.clipSeconds,
-      script: cut(input.script, 500),
+      productFacts: cut(input.productFacts, 450),
+      scale: cut(input.scale, 160),
+      ratio: input.aspectRatio,
+      clipSec: input.clipSeconds,
       frames: input.frames.map(frameView),
     });
-    const raw = await analyzeWithClaude({
-      systemPrompt: DIRECTOR_SYSTEM,
-      userPrompt: user,
-      responseSchema: outSchema,
-      maxTokens: 6000,
-      tier: "deep",
-    });
+    const raw = await analyzeWithClaude({ systemPrompt: DIRECTOR_SYSTEM, userPrompt: user, responseSchema: outSchema, maxTokens: 5000, tier: "deep" });
     return completeShots(input.frames, raw);
   } catch (err) {
     console.warn("[director] shot design failed, using the fallback:", err instanceof Error ? err.message.slice(0, 200) : err);
@@ -201,16 +267,33 @@ export async function directAd(input: DirectInput): Promise<DirectedAd> {
   }
 }
 
+/** What the edit needs from the plan, stored on the run (LibtvRun.directorPlan). */
+export interface StoredDirectorPlan {
+  sellingPoints: SellingPoint[];
+  frames: Record<string, { vo: string | null; txt: string | null; cam: string; act: boolean }>;
+}
+
+export function storedPlan(ad: DirectedAd): StoredDirectorPlan | null {
+  if (ad.source !== "llm") return null;
+  const frames: StoredDirectorPlan["frames"] = {};
+  for (const [n, s] of ad.shots) frames[String(n)] = { vo: s.voiceover, txt: s.onScreen, cam: s.camera, act: s.action };
+  return { sellingPoints: ad.sellingPoints, frames };
+}
+
 /**
  * Replace the storyboard-preview prompts of the compiled keyframe (K<n>) and
- * clip (V<n>) jobs with the directed ones, and mark them `directed` so the
- * executor adds the realism block instead of the old "cinematic film still"
- * wrapper. `directedKeyframe` is the uncut text the cast-lock edit uses.
+ * clip (V<n>) jobs with the directed ones, and mark them `directed`.
+ * `actionVideo` re-routes action shots to the action model (Kling).
  */
 export function applyDirectedShots(
   drafts: CompiledJobDraft[],
   ad: DirectedAd,
-  opts: { castLocked: boolean; videoDirected: boolean; brandTruth?: string }
+  opts: {
+    castLocked: boolean;
+    videoDirected: boolean;
+    brandTruth?: string;
+    actionVideo?: { modelName: string; settings: Record<string, unknown>; credits: number } | null;
+  }
 ): number {
   let n = 0;
   for (const d of drafts) {
@@ -224,7 +307,12 @@ export function applyDirectedShots(
       n++;
     } else if (d.kind === "video" && /^V/.test(d.nodeName) && opts.videoDirected) {
       d.prompt = `${shot.motion}\n\nThe product keeps its exact size, shape and colour throughout.`;
-      d.settings = { ...settings, directed: 1 };
+      d.settings = { ...settings, directed: 1, camera: shot.camera };
+      if (shot.action && opts.actionVideo) {
+        d.modelName = opts.actionVideo.modelName;
+        d.settings = { ...(d.settings as Record<string, unknown>), ...opts.actionVideo.settings, actionShot: 1 };
+        d.creditsEstimated = opts.actionVideo.credits;
+      }
       n++;
     }
   }

@@ -126,7 +126,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Only completed server runs can be re-assembled (status ${run.status})` }, { status: 409 });
     }
     const jobs = await prisma.libtvJob.findMany({ where: { runId: run.id } });
-    const frames = await storyboardFrames(run.storyboardId);
+    const frames = await storyboardFrames(run.storyboardId, run.directorPlan);
     const master = await assembleGlmMaster({ runId: run.id, projectId: run.projectId, aspectRatio: run.aspectRatio, frames, jobs });
     await runDone({
       runId: run.id,

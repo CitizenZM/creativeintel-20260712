@@ -36,6 +36,7 @@ import {
   videoSettings,
   type BudgetMode,
   engineFor,
+  ACTION_VIDEO_MODEL,
   engineLabel,
   mismatchedImageEngine,
 } from "./libtv-pricing";
@@ -44,7 +45,7 @@ import { isComfyConfigured } from "@/services/ai/comfyui";
 import { isZhipuConfigured } from "@/services/ai/zhipu";
 import { isMatrixConfigured } from "@/services/ai/matrix";
 import { isOpenRouterConfigured } from "@/services/ai/openrouter-media";
-import { applyDirectedShots, directAd, REALISM_STILL } from "./shot-director";
+import { applyDirectedShots, directAd, REALISM_STILL, storedPlan, type StoredDirectorPlan } from "./shot-director";
 import { hasPeople } from "./prompt-safety";
 import { splitComparisonDrafts } from "./comparison";
 import { loadAiSettings } from "@/services/settings/ai-settings";
@@ -526,6 +527,7 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
   // Comparison shots are generated as two clean images and stacked in the edit
   // (asking one image for a split screen returns a collage).
   let castDescription: string | null = null;
+  let directorPlan: StoredDirectorPlan | null = null;
   if (directed) {
     const ad = await directAd({
       frames: normalized,
@@ -536,8 +538,14 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
       aspectRatio,
       clipSeconds: clipDurationSec,
     });
-    const n = applyDirectedShots(drafts, ad, { castLocked: !!imageEntry?.lockCharacter, videoDirected: executor !== "glm", brandTruth });
+    // Action shots (big body movement) render on Kling, which handles human motion best; the rest stay on the run's model.
+    const actionName = executor === "openrouter" && videoModel !== ACTION_VIDEO_MODEL ? ACTION_VIDEO_MODEL : null;
+    const actionVideo = actionName
+      ? { modelName: actionName, settings: videoSettings(actionName, { durationSec: 3 }), credits: videoCredits(actionName, 3, "720P") }
+      : null;
+    const n = applyDirectedShots(drafts, ad, { castLocked: !!imageEntry?.lockCharacter, videoDirected: executor !== "glm", brandTruth, actionVideo });
     castDescription = ad.cast;
+    directorPlan = storedPlan(ad);
     console.log(`[compile] shot director (${ad.source}) rewrote ${n} prompts`);
   }
   await splitComparisonDrafts(drafts, { product: project.productName || project.brandName });
@@ -578,6 +586,7 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
       aspectRatio,
       clipDurationSec,
       creditsEstimated: estimate.total,
+      directorPlan: directorPlan ? (directorPlan as object) : undefined,
       jobs: {
         create: drafts.map((d) => ({
           projectId,

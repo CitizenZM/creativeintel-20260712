@@ -53,7 +53,7 @@ export async function renderExportForRun(runId: string, format: ExportFormat): P
   try {
     const [jobs, frames, project, script] = await Promise.all([
       prisma.libtvJob.findMany({ where: { runId } }),
-      storyboardFrames(run.storyboardId),
+      storyboardFrames(run.storyboardId, run.directorPlan),
       prisma.project.findUnique({ where: { id: run.projectId }, select: { brandName: true } }),
       run.scriptId ? prisma.script.findUnique({ where: { id: run.scriptId }, select: { title: true } }) : null,
     ]);

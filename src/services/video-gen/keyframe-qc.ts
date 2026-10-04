@@ -33,6 +33,19 @@ Stylisation, soft focus, motion blur and creative lighting are fine. If unsure, 
 Return JSON only: {"ok": boolean, "issues": ["short defect description", ...]}.`;
 
 /** Review one keyframe. Never throws: a failed review approves (QC must not block a render). */
+/** A 512 px JPEG data URL: vision tokens scale with pixels, and defects show at this size. */
+export async function smallImage(url: string, maxSide = 512): Promise<string> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) return url;
+    const sharp = (await import("sharp")).default;
+    const jpg = await sharp(Buffer.from(await res.arrayBuffer())).resize({ width: maxSide, height: maxSide, fit: "inside" }).jpeg({ quality: 78 }).toBuffer();
+    return `data:image/jpeg;base64,${jpg.toString("base64")}`;
+  } catch {
+    return url;
+  }
+}
+
 export async function reviewKeyframe(imageUrl: string, shot: string): Promise<KeyframeVerdict | null> {
   try {
     const { analyzeWithClaude } = await import("@/services/ai/claude-client");
@@ -40,7 +53,7 @@ export async function reviewKeyframe(imageUrl: string, shot: string): Promise<Ke
       systemPrompt: KEYFRAME_QC_SYSTEM,
       userPrompt: [
         { type: "text", text: `Intended shot: ${shot.replace(/\s+/g, " ").slice(0, 400)}\nReview this keyframe:` },
-        { type: "image_url", url: imageUrl },
+        { type: "image_url", url: await smallImage(imageUrl) },
       ],
       responseSchema: verdictSchema,
       maxTokens: 300,

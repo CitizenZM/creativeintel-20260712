@@ -397,6 +397,7 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     modality: "video",
     modeType: "singleImage2video",
     prices: [
+      { durationSec: 3, resolution: "720P", credits: 26 },
       { durationSec: 5, resolution: "720P", credits: 42 },
       { durationSec: 6, resolution: "720P", credits: 50 },
       { durationSec: 8, resolution: "720P", credits: 67 },
@@ -528,6 +529,8 @@ export const MATRIX_VIDEO_MODEL = "Seedance 2.0 Fast 720p (Matrix)";
 
 export const OPENROUTER_IMAGE_MODEL = "Seedream 5 Flash (OpenRouter)";
 export const OPENROUTER_VIDEO_MODEL = "Veo 3.1 Lite 720p (OpenRouter)";
+/** Directed action shots (big body movement) render on Kling: the strongest human motion on OpenRouter. */
+export const ACTION_VIDEO_MODEL = "Kling 3.0 Std 720p (OpenRouter)";
 
 /** The engine a run needs: the video model decides (GLM / ComfyUI models carry their engine). */
 export function engineFor(videoModel: string): RenderEngine {

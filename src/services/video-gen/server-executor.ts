@@ -302,7 +302,7 @@ export async function tickRun(
   });
   if (count !== 1) return "running"; // another tick is assembling
   try {
-    const frames = await storyboardFrames(run.storyboardId);
+    const frames = await storyboardFrames(run.storyboardId, run.directorPlan);
     const master = await assembleGlmMaster({ runId, projectId: run.projectId, aspectRatio: run.aspectRatio, frames, jobs: now as LibtvJob[] });
     // Free runs spend 0; bring-your-own paid clips record their cost.
     const spent = now.reduce((sum, x) => sum + (x.creditsSpent ?? 0), 0);
@@ -323,22 +323,31 @@ export async function tickRun(
   }
 }
 
-export async function storyboardFrames(storyboardId: string | null): Promise<AssembleFrame[]> {
+/**
+ * The storyboard's frames as the edit sees them. A directed run's plan overrides
+ * each frame's voiceover line and on-screen text (the selling-point copy).
+ */
+export async function storyboardFrames(storyboardId: string | null, directorPlan?: unknown): Promise<AssembleFrame[]> {
   if (!storyboardId) return [];
   const sb = await prisma.storyboard.findUnique({ where: { id: storyboardId }, select: { frames: true, frameSeconds: true } });
   const frameSeconds = sb?.frameSeconds || 2;
   const frames = Array.isArray(sb?.frames)
     ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null; segment?: string | null; imagePrompt?: string | null; scene?: string | null }[])
     : [];
-  return frames.map((f, i) => ({
-    frameNumber: f.frameNumber ?? i + 1,
-    startSec: Number.isFinite(f.startSec) ? f.startSec! : i * frameSeconds,
-    endSec: Number.isFinite(f.endSec) ? f.endSec! : (i + 1) * frameSeconds,
-    text: typeof f.textOverlay === "string" ? f.textOverlay : null,
-    voiceover: typeof f.voiceover === "string" ? f.voiceover : null,
-    segment: typeof f.segment === "string" ? f.segment : null,
-    hasPerson: hasPeople(`${f.imagePrompt ?? ""} ${f.scene ?? ""}`),
-  }));
+  const plan = (directorPlan as { frames?: Record<string, { vo?: string | null; txt?: string | null }> } | null)?.frames ?? {};
+  return frames.map((f, i) => {
+    const n = f.frameNumber ?? i + 1;
+    const p = plan[String(n)];
+    return {
+      frameNumber: n,
+      startSec: Number.isFinite(f.startSec) ? f.startSec! : i * frameSeconds,
+      endSec: Number.isFinite(f.endSec) ? f.endSec! : (i + 1) * frameSeconds,
+      text: p?.txt ?? (typeof f.textOverlay === "string" ? f.textOverlay : null),
+      voiceover: p?.vo ?? (typeof f.voiceover === "string" ? f.voiceover : null),
+      segment: typeof f.segment === "string" ? f.segment : null,
+      hasPerson: hasPeople(`${f.imagePrompt ?? ""} ${f.scene ?? ""}`),
+    };
+  });
 }
 
 /** Keep ticking a run until it settles or the time budget runs out. */

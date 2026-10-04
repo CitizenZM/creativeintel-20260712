@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hookHeadline, isClaimWorthShowing, isCtaLine, planEdit, type PlanInputSegment } from "./edit-plan";
+import { MAX_SHOT_SEC, hookHeadline, isClaimWorthShowing, isCtaLine, planEdit, type PlanInputSegment } from "./edit-plan";
 
 const clip = (n: number, url: string, segment: string, text?: string): PlanInputSegment => ({
   kind: "clip",
@@ -44,12 +44,24 @@ describe("planEdit", () => {
     expect(hook.map((s) => s.zoom)).toEqual([1, 1.22, 1, 1.22]);
   });
 
-  it("never holds a still for a whole frame and merges the CTA into one end card", () => {
+  it("never holds a still for a whole frame and merges the CTA into one end card, cut in two framings", () => {
     const five = plan.shots.filter((s) => s.frameNumber === 5);
     expect(five.map((s) => s.motion)).toEqual(["push", "pull"]);
     const cta = plan.shots.filter((s) => s.segment === "CTA");
-    expect(cta).toHaveLength(1);
-    expect([cta[0].startSec, cta[0].endSec]).toEqual([16, 20]);
+    expect(cta).toHaveLength(2);
+    expect([cta[0].startSec, cta[1].endSec]).toEqual([16, 20]);
+    expect(cta[1].zoom).toBeGreaterThan(cta[0].zoom);
+  });
+
+  it("never holds one framing longer than 2 s", () => {
+    for (const s of plan.shots) expect(s.endSec - s.startSec).toBeLessThanOrEqual(MAX_SHOT_SEC + 1e-6);
+  });
+
+  it("uses transitions, not plain cuts, in the opening 3 s and on the last two cuts, and opens with a whoosh", () => {
+    const strong = [...plan.boundaries.filter((b) => b.atSec <= 3), ...plan.boundaries.slice(-2)];
+    expect(strong.length).toBeGreaterThan(2);
+    expect(strong.every((b) => b.transition !== "cut")).toBe(true);
+    expect(plan.sfx.some((e) => e.kind === "whoosh" && e.atSec < 0.5)).toBe(true);
   });
 
   it("puts the drop flash on hook→body, a whip into the CTA, and rotates body transitions", () => {
@@ -75,7 +87,9 @@ describe("planEdit", () => {
 describe("isClaimWorthShowing", () => {
   it("drops long lines and lines the voiceover already says", () => {
     expect(isClaimWorthShowing("Shop the Seasonal Sale today and save big", null)).toBe(false);
-    expect(isClaimWorthShowing("Meet Ramp", "Meet Ramp, the corporate card")).toBe(false);
+    expect(isClaimWorthShowing("Meet the new Ramp card", "Meet the new Ramp card for teams")).toBe(false);
+    // A 1–4 word keyword is shown even when the voiceover says it.
+    expect(isClaimWorthShowing("Meet Ramp", "Meet Ramp, the corporate card")).toBe(true);
     expect(isClaimWorthShowing("4K at 144Hz", "Silky motion for gaming")).toBe(true);
   });
 });

@@ -49,6 +49,16 @@ export interface EditV2Result {
 const f3 = (n: number) => n.toFixed(3);
 
 /** Per-shot video filter: reframe a clip, or fit a still and give it a camera move. */
+export const FILM_FINISH = [
+  "gblur=sigma=0.45",
+  "curves=master='0/0.035 0.25/0.245 0.75/0.735 1/0.94'",
+  "eq=saturation=0.88",
+  "colorbalance=rs=0.025:gs=0.005:bs=-0.02:rh=-0.01:bh=0.01",
+  "noise=c0s=8:c0f=t",
+  "gblur=sigma=0.35",
+  "vignette=angle=PI/7",
+].join(",");
+
 export function shotFilter(shot: Shot, canvas: Canvas, beatSec = 0.5): string {
   const base = shotBaseFilter(shot, canvas);
   if (!shot.contrast) return base;
@@ -104,8 +114,11 @@ function shotBaseFilter(shot: Shot, canvas: Canvas): string {
     return [
       `[0:v]scale=${Math.round((w * z) / 2) * 2}:${Math.round((h * z) / 2) * 2}:force_original_aspect_ratio=increase`,
       `crop=${w}:${h}:(iw-${w})/2:(ih-${h})*${shot.anchorY}`,
-      // Light grade + fine temporal grain: takes the clean, over-smooth AI sheen off generated footage.
-      `eq=contrast=1.04:saturation=0.95,noise=alls=5:allf=t`,
+      // Film finish for generated footage (the "clean plastic render" look is crushed blacks, clipped
+      // highlights, over-saturation and razor edges): soften the digital crunch, lift blacks and roll
+      // highlights off, pull saturation ~12 %, warm the shadows, then luma-only temporal grain that is
+      // softened to film-like size. No contrast boost, no colour noise, no halation or bloom.
+      FILM_FINISH,
       `fps=${FPS},tpad=stop_mode=clone:stop_duration=5,setsar=1,format=yuv420p[v]`,
     ].join(",");
   }
@@ -135,15 +148,21 @@ export function fxFilter(plan: EditPlan, canvas: Canvas): string {
   const { w, h } = canvas;
   const P = f3(plan.grid.period);
   const punches = plan.boundaries.filter((b) => b.transition === "zoom").map((b) => `0.06*gte(t,${f3(b.atSec)})*exp(-(t-${f3(b.atSec)})*12)`);
-  const scaleExpr = [`0.022*exp(-mod(t,${P})*18)`, ...punches].join("+");
+  const D = f3(plan.durationSec);
+  // Opening: a zoom-through from 1.28× that settles in ~0.3 s; ending: a slow push over the last 0.8 s.
+  const intro = `0.28*exp(-t*9)`;
+  const outro = `0.06*max(0,(t-${D}+0.8)/0.8)`;
+  const scaleExpr = [`0.022*exp(-mod(t,${P})*18)`, intro, outro, ...punches].join("+");
   // Flashes decay from the beat frame (largest change exactly on the cut).
   const flashes = plan.boundaries.filter((b) => b.transition === "flash").map((b) => `0.5*gte(t,${f3(b.atSec - 0.004)})*exp(-(t-${f3(b.atSec)})*28)`);
   const parts = [
-    `eq=brightness='${[`0.045*exp(-mod(t,${P})*22)`, ...flashes].join("+")}':eval=frame`,
+    `eq=brightness='${[`0.045*exp(-mod(t,${P})*22)`, `-0.55*exp(-t*16)`, ...flashes].join("+")}':eval=frame`,
     `scale=w='2*trunc(${w}*(1+${scaleExpr})/2)':h='2*trunc(${h}*(1+${scaleExpr})/2)':eval=frame`,
     `crop=${w}:${h}`,
   ];
   const fr = 1 / FPS;
+  // The opening frames arrive with motion blur that clears as the zoom settles.
+  [24, 14, 6].forEach((size, k) => parts.push(`avgblur=sizeX=${size}:sizeY=${Math.round(size / 3)}:enable='between(t,${f3(k * fr - 0.004)},${f3((k + 1) * fr - 0.01)})'`));
   for (const b of plan.boundaries) {
     // Whip: motion blur ramps up over the three outgoing frames and is gone on
     // the beat frame, which arrives sharp with the new shot.
