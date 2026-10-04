@@ -23,6 +23,8 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     allowOverBudget: z.boolean().optional(),
   }),
   z.object({ action: z.literal("reassemble-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
+  /** Tick an approved server run now instead of waiting for the 5-minute cron (no new spend beyond what was approved). */
+  z.object({ action: z.literal("drive-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({ action: z.literal("director-review"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({ action: z.literal("save-structure"), projectId: z.string().min(1), teardownId: z.string().min(1) }),
   z.object({ action: z.literal("choose-structure"), projectId: z.string().min(1), structureId: z.string().min(1).nullable() }),
