@@ -132,6 +132,17 @@ export function comparisonLabelPng(text: string, canvas: Canvas, look: Look = DE
   });
 }
 
+/** Legal fine print: small, light, wrapped to the safe width; sits above the bottom safe zone. */
+export function finePrintPng(text: string, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
+  const size = Math.round(unit(canvas) * 0.019);
+  return shadowed(`<span foreground="#E8E8E8">${pangoEscape(text)}</span>`, `<span foreground="black">${pangoEscape(text)}</span>`, {
+    family: look.body.family,
+    fontFile: look.body.file,
+    size,
+    width: Math.round(canvas.w * 0.86),
+  });
+}
+
 /** The landing domain under the button, small. */
 export function domainPng(domain: string, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
   const size = Math.round(unit(canvas) * 0.034);

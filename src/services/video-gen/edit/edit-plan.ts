@@ -34,6 +34,12 @@ export interface PlanInputSegment {
   text?: string | null;
   /** Comparison frame: the other side's image + labels, stacked by the renderer. */
   compare?: { otherUrl: string; labelOurs: string; labelOther: string } | null;
+  /** Time-remap factor (clips): `speed` × length of source plays in `length`. */
+  speed?: number;
+  /** Push-in → hold → pull-back target (0–1 of the frame). */
+  zoomHit?: { x: number; y: number } | null;
+  /** Legal fine print shown while this frame plays. */
+  fine?: string | null;
 }
 
 export interface Shot {
@@ -58,6 +64,10 @@ export interface Shot {
   contrast?: boolean;
   /** Comparison: the other side (a still) stacked against ours, with labels. */
   compare?: { otherUrl: string; labelOurs: string; labelOther: string } | null;
+  /** Time-remap factor (1 = natural speed). */
+  speed?: number;
+  /** Push-in → hold → pull-back target (0–1 of the frame), rendered as a camera move. */
+  zoomHit?: { x: number; y: number } | null;
 }
 
 /**
@@ -77,7 +87,7 @@ export interface TextCard {
   text: string;
   startSec: number;
   endSec: number;
-  role: "hook" | "claim" | "offer";
+  role: "hook" | "claim" | "offer" | "fine";
 }
 
 export interface EditPlan {
@@ -185,7 +195,7 @@ export function planEdit(
       index: shots.length,
       kind: s.kind,
       url: s.url,
-      srcFrom: s.kind === "clip" ? round3(s.from + (start - s.startSec)) : 0,
+      srcFrom: s.kind === "clip" ? round3(s.from + (start - s.startSec) * (s.speed ?? 1)) : 0,
       startSec: a,
       endSec: b,
       frames: Math.round((b - a) * FPS),
@@ -195,6 +205,8 @@ export function planEdit(
       frameNumber: s.frameNumber,
       segment: s.segment,
       compare: s.compare ?? null,
+      speed: s.speed ?? 1,
+      zoomHit: s.zoomHit ?? null,
       ...extra,
     });
   };
@@ -229,17 +241,20 @@ export function planEdit(
       push(s, s.startSec, s.endSec, { zoom: sameSource && prev.zoom === 1 ? 1.14 : 1, anchorY: 0.42 });
     }
   }
-  if (ctaFrames.length) {
-    const first = ctaFrames[0];
-    const last = ctaFrames[ctaFrames.length - 1];
-    push({ ...first, endSec: last.endSec }, first.startSec, last.endSec, { motion: "push" });
+  // Consecutive CTA frames on the same still merge into one end card; a different still
+  // (e.g. a side view with a measurement) is its own framing.
+  for (let i = 0; i < ctaFrames.length; ) {
+    let j = i;
+    while (j + 1 < ctaFrames.length && ctaFrames[j + 1].url === ctaFrames[i].url) j++;
+    push({ ...ctaFrames[i], endSec: ctaFrames[j].endSec }, ctaFrames[i].startSec, ctaFrames[j].endSec, { motion: i === 0 ? "push" : "pull" });
+    i = j + 1;
   }
   // Nothing holds one framing for more than MAX_SHOT_SEC: a long shot is cut on
   // a beat into parts that alternate framing; a clip continues its action across the cut.
   for (let i = 0; i < shots.length; i++) {
     const s = shots[i];
     const len = s.endSec - s.startSec;
-    if (len <= MAX_SHOT_SEC + 1e-6) continue;
+    if (len <= MAX_SHOT_SEC + 1e-6 || (s.speed ?? 1) > 1 || s.zoomHit) continue;
     const parts = Math.ceil(len / MAX_SHOT_SEC - 1e-6);
     const cuts: number[] = [];
     for (let k = 1; k < parts; k++) {
@@ -311,7 +326,14 @@ export function planEdit(
   const cards: TextCard[] = [];
   const hookRaw = laid.find((s) => s.segment === "HOOK" && s.text?.trim())?.text?.trim();
   const hookText = opts.hookText?.trim() || (hookRaw ? hookHeadline(hookRaw) : null);
-  if (hookText) cards.push({ text: hookText, startSec: 0, endSec: Math.max(1.5, dropSec), role: "hook" });
+  // Several hook frames with their own text (locked scripts): each line holds its own frame;
+  // otherwise the first line holds the whole hook.
+  const hookFrames = laid.filter((s) => s.segment === "HOOK" && s.text?.trim());
+  if (hookFrames.length > 1 && !opts.hookText) {
+    hookFrames.forEach((s, i) =>
+      cards.push({ text: s.text!.trim(), startSec: s.startSec, endSec: i === hookFrames.length - 1 ? Math.max(s.endSec, dropSec) : s.endSec, role: "hook" })
+    );
+  } else if (hookText) cards.push({ text: hookText, startSec: 0, endSec: Math.max(1.5, dropSec), role: "hook" });
   for (const s of main) {
     if (s.segment !== "BODY" || !s.text?.trim()) continue;
     if (!isClaimWorthShowing(s.text, opts.voiceovers?.get(s.frameNumber))) continue;
@@ -321,6 +343,11 @@ export function planEdit(
       continue;
     }
     cards.push({ text: s.text.trim(), startSec: s.startSec, endSec: s.endSec, role: "claim" });
+  }
+  const fine = laid.find((s) => s.fine?.trim())?.fine?.trim();
+  if (fine) {
+    const from = laid.filter((s) => s.fine?.trim()).reduce((m, s) => Math.min(m, s.startSec), durationSec);
+    cards.push({ text: fine, startSec: from, endSec: durationSec, role: "fine" });
   }
   const offerText = ctaFrames.find((s) => s.text?.trim())?.text?.trim();
   if (offerText && ctaSec !== null) cards.push({ text: offerText, startSec: ctaSec, endSec: durationSec, role: "offer" });

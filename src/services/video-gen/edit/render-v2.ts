@@ -27,7 +27,7 @@ import { bestWindow, motionScores } from "./motion";
 import { detectBeats, trackWindowStart } from "./beat-detect";
 import { measureCuts, measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
-import { claimChipPng, comparisonLabelPng, ctaButtonPng, domainPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
+import { claimChipPng, comparisonLabelPng, ctaButtonPng, domainPng, finePrintPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
 import { kineticGroups, timedWords, toSrt, subtitleCues, type TimedWord } from "../voiceover";
 import { speakVoiceover, type AssembleFrame, type Segment } from "../glm-assemble";
@@ -59,8 +59,33 @@ export const FILM_FINISH = [
   "vignette=angle=PI/7",
 ].join(",");
 
+/**
+ * Zoom hit: the camera pushes in toward a highlight (1 → 1.6× in 0.35 s, eased), holds 0.3 s and pulls
+ * back to the full frame in 0.35 s, with a light blur while it moves. Starts just after the cut.
+ */
+export const ZOOM_HIT = { start: 0.15, ramp: 0.35, hold: 0.3, peak: 0.6 };
+
+export function zoomHitFilter(input: string, target: { x: number; y: number }, canvas: Canvas): string {
+  const { w, h } = canvas;
+  const { start: a, ramp: r, hold: hd, peak } = ZOOM_HIT;
+  const p1 = `clip((t-${f3(a)})/${f3(r)},0,1)`;
+  const p2 = `clip((t-${f3(a + r + hd)})/${f3(r)},0,1)`;
+  const env = `(${p1}*${p1}*(3-2*${p1})-${p2}*${p2}*(3-2*${p2}))`;
+  const z = `(1+${peak}*${env})`;
+  const x = Math.min(1, Math.max(0, target.x));
+  const y = Math.min(1, Math.max(0, target.y));
+  const moving = `between(t,${f3(a)},${f3(a + r)})+between(t,${f3(a + r + hd)},${f3(a + 2 * r + hd)})`;
+  return [
+    `${input}scale=w='2*trunc(${w}*${z}/2)':h='2*trunc(${h}*${z}/2)':eval=frame`,
+    `crop=${w}:${h}:x='min(max(${x}*iw-${w}/2,0),iw-${w})':y='min(max(${y}*ih-${h}/2,0),ih-${h})'`,
+    `gblur=sigma=2.2:enable='${moving}'`,
+    `setsar=1,format=yuv420p[v]`,
+  ].join(",");
+}
+
 export function shotFilter(shot: Shot, canvas: Canvas, beatSec = 0.5): string {
-  const base = shotBaseFilter(shot, canvas);
+  const raw = shotBaseFilter(shot, canvas);
+  const base = shot.zoomHit ? `${raw.replace(/\[v\]$/, "[zh]")};${zoomHitFilter("[zh]", shot.zoomHit, canvas)}` : raw;
   if (!shot.contrast) return base;
   // Contrast hook: the picture sits small in a dimmed, blurred frame for the
   // first beat, then fills the screen — the size jump is the claim.
@@ -111,8 +136,10 @@ function shotBaseFilter(shot: Shot, canvas: Canvas): string {
   }
   if (shot.kind === "clip") {
     const z = shot.zoom;
+    // Time-remap (the 1-second install): speed the source up and blend frames into motion blur.
+    const remap = (shot.speed ?? 1) > 1 ? `setpts=(PTS-STARTPTS)/${f3(shot.speed!)},tmix=frames=${Math.min(5, Math.ceil(shot.speed!))},` : "";
     return [
-      `[0:v]scale=${Math.round((w * z) / 2) * 2}:${Math.round((h * z) / 2) * 2}:force_original_aspect_ratio=increase`,
+      `[0:v]${remap}scale=${Math.round((w * z) / 2) * 2}:${Math.round((h * z) / 2) * 2}:force_original_aspect_ratio=increase`,
       `crop=${w}:${h}:(iw-${w})/2:(ih-${h})*${shot.anchorY}`,
       // Film finish for generated footage (the "clean plastic render" look is crushed blacks, clipped
       // highlights, over-saturation and razor edges): soften the digital crunch, lift blacks and roll
@@ -232,6 +259,9 @@ export async function renderEditV2(input: {
     segment: bySeg.get(s.frameNumber)?.segment ?? null,
     text: s.text ?? null,
     compare: s.compare ?? null,
+    speed: s.kind === "clip" ? (s.speed ?? 1) : 1,
+    zoomHit: s.zoomHit ?? null,
+    fine: bySeg.get(s.frameNumber)?.fine ?? null,
   }));
   // Comparison frames: fetch the other side's image (stacked against ours in the shot).
   for (const s of input.segments) {
@@ -275,7 +305,7 @@ export async function renderEditV2(input: {
   const motionCache = new Map<string, Awaited<ReturnType<typeof motionScores>>>();
   let prevHook: { url: string; from: number; to: number } | null = null;
   for (const shot of plan.shots) {
-    if (shot.segment !== "HOOK" || shot.kind !== "clip") {
+    if (shot.segment !== "HOOK" || shot.kind !== "clip" || (shot.speed ?? 1) > 1) {
       prevHook = null;
       continue;
     }
@@ -350,13 +380,21 @@ export async function renderEditV2(input: {
   }
   for (const [i, card] of plan.cards.entries()) {
     const file = path.join(dir, `v2card${i}.png`);
-    const png = card.role === "hook" ? await hookHeadlinePng(card.text, canvas, look) : card.role === "offer" ? await offerCardPng(card.text, canvas, look) : await claimChipPng(card.text, canvas, look);
+    const png =
+      card.role === "hook"
+        ? await hookHeadlinePng(card.text, canvas, look)
+        : card.role === "offer"
+          ? await offerCardPng(card.text, canvas, look)
+          : card.role === "fine"
+            ? await finePrintPng(card.text, canvas, look)
+            : await claimChipPng(card.text, canvas, look);
     await writeFile(file, png);
     // A hook over a person sits in the lower half, off the face (AI director finding).
     const hookOverPerson = card.role === "hook" && input.frames.some((f) => (f.segment ?? "").toUpperCase() === "HOOK" && f.hasPerson);
     // During a comparison shot a claim belongs to our half (under its label), not over the other side.
     const overCompare = card.role === "claim" && plan.shots.some((s) => s.compare && s.startSec < card.endSec && s.endSec > card.startSec);
-    overlays.push({ file, startSec: card.startSec, endSec: card.endSec, y: card.role === "claim" ? (overCompare ? 0.63 : 0.3) : hookOverPerson ? 0.52 : 0.22 });
+    const y = card.role === "fine" ? 0.9 : card.role === "claim" ? (overCompare ? 0.63 : 0.3) : hookOverPerson ? 0.52 : 0.22;
+    overlays.push({ file, startSec: card.startSec, endSec: card.endSec, y });
   }
   if (plan.ctaButton) {
     const file = path.join(dir, "v2cta.png");

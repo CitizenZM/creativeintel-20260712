@@ -135,3 +135,40 @@ describe("planEdit on a real track's beats", () => {
     for (const b of p.boundaries) expect(p.grid.beats.some((x) => Math.abs(x - b.atSec) < 0.017)).toBe(true);
   });
 });
+
+describe("planEdit — locked-script features", () => {
+  const seg = (n: number, url: string, segment: string, length: number, extra: Partial<PlanInputSegment> = {}): PlanInputSegment => ({ kind: "clip", url, from: 0, length, frameNumber: n, segment, ...extra });
+  const ad: PlanInputSegment[] = [
+    seg(1, "door", "HOOK", 1, { text: "BLACK FRIDAY" }),
+    seg(2, "install", "HOOK", 1, { text: "FREE INSTALLATION INCLUDED*", speed: 4 }),
+    seg(3, "tear", "HOOK", 1, { text: "SURPRISE — TCL HOLIDAY FREE INSTALLATION INCLUDED*" }),
+    seg(4, "nits", "BODY", 1.5, { text: "3,000 NITS", zoomHit: { x: 0.5, y: 0.3 } }),
+    seg(5, "front", "CTA", 1.5, { kind: "still", text: "BLACK FRIDAY DEAL — SHOP AT TCL.COM", fine: "*Fine print." }),
+    seg(6, "side", "CTA", 1.5, { kind: "still", text: "BLACK FRIDAY DEAL — SHOP AT TCL.COM", fine: "*Fine print." }),
+  ];
+  const plan = planEdit(ad);
+  const shot = (n: number) => plan.shots.filter((s) => s.frameNumber === n);
+
+  it("shows each hook frame's own line for its own frame", () => {
+    expect(plan.cards.filter((c) => c.role === "hook").map((c) => [c.text, c.startSec])).toEqual([
+      ["BLACK FRIDAY", 0],
+      ["FREE INSTALLATION INCLUDED*", 1],
+      ["SURPRISE — TCL HOLIDAY FREE INSTALLATION INCLUDED*", 2],
+    ]);
+  });
+
+  it("carries speed and zoom hits to the shots and never splits them", () => {
+    expect(shot(2)).toHaveLength(1);
+    expect(shot(2)[0].speed).toBe(4);
+    expect(shot(4)).toHaveLength(1);
+    expect(shot(4)[0].zoomHit).toEqual({ x: 0.5, y: 0.3 });
+  });
+
+  it("keeps two different end-card stills as two framings, with the fine print under both", () => {
+    const cta = plan.shots.filter((s) => s.segment === "CTA");
+    expect(cta.map((s) => s.url)).toEqual(["front", "side"]);
+    const fine = plan.cards.find((c) => c.role === "fine")!;
+    expect(fine).toMatchObject({ text: "*Fine print.", endSec: plan.durationSec });
+    expect(fine.startSec).toBeCloseTo(cta[0].startSec, 2);
+  });
+});
