@@ -44,6 +44,52 @@ export interface SubtitleCue {
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
+/**
+ * Caption spellings in a voiceover line: `{NXTPAPER 14|Next Paper Fourteen}` is
+ * spoken as "Next Paper Fourteen" and captioned as "NXTPAPER 14" (brand names,
+ * numbers, units the voice must say in words).
+ */
+const SPELLING = /\{([^{}|]+)\|([^{}]+)\}/g;
+export const spokenForm = (text: string) => text.replace(SPELLING, "$2");
+export const shownForm = (text: string) => text.replace(SPELLING, "$1");
+export function spellingsIn(text: string): { spoken: string; shown: string }[] {
+  return [...text.matchAll(SPELLING)].map((m) => ({ shown: m[1].trim(), spoken: m[2].trim() }));
+}
+const bare = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+
+/** Replace each spoken phrase's words with its caption spelling, spreading the phrase's time over the new words. */
+export function respell(words: Word[], spellings: { spoken: string; shown: string }[]): Word[] {
+  let out = words;
+  for (const sp of spellings) {
+    const said = sp.spoken.split(/\s+/).map(bare).filter(Boolean);
+    const shown = sp.shown.split(/\s+/).filter(Boolean);
+    if (!said.length || !shown.length) continue;
+    const next: Word[] = [];
+    for (let i = 0; i < out.length; ) {
+      const hit = said.every((w, j) => out[i + j] && bare(out[i + j].text) === w);
+      if (!hit) {
+        next.push(out[i++]);
+        continue;
+      }
+      const first = out[i];
+      const last = out[i + said.length - 1];
+      const tail = last.text.match(/[^\p{L}\p{N}]+$/u)?.[0] ?? "";
+      const span = last.startSec + last.durSec - first.startSec;
+      shown.forEach((t, k) =>
+        next.push({ text: k === shown.length - 1 ? t + tail : t, startSec: first.startSec + (span * k) / shown.length, durSec: span / shown.length })
+      );
+      i += said.length;
+    }
+    out = next;
+  }
+  return out;
+}
+
+/** The caption words of a spoken line: aligned to the spoken source text, then respelled. */
+function captionWords(words: Word[], lineText?: string): Word[] {
+  return lineText ? respell(alignToSource(words, spokenForm(lineText)), spellingsIn(lineText)) : words;
+}
+
 /** One line per beat: consecutive frames that repeat the same voiceover. */
 export function planVoiceover(frames: VoFrame[]): VoLine[] {
   const lines: VoLine[] = [];
@@ -115,7 +161,7 @@ export function alignToSource(words: Word[], lineText: string): Word[] {
 /** Subtitle cues of a few words each, breaking at punctuation, timed from the TTS word boundaries. */
 export function subtitleCues(words: Word[], placement: Placement, maxChars = 32, lineText?: string): SubtitleCue[] {
   const at = (t: number) => placement.startSec + t / placement.tempo;
-  const src = lineText ? alignToSource(words, lineText) : words;
+  const src = captionWords(words, lineText);
   const groups: Word[][] = [];
   let cur: Word[] = [];
   for (const w of src) {
@@ -222,7 +268,7 @@ export interface TimedWord {
 
 /** Each script word on the master's timeline (placement start + tempo applied). */
 export function timedWords(words: Word[], placement: Placement, lineText?: string): TimedWord[] {
-  const src = lineText ? alignToSource(words, lineText) : words;
+  const src = captionWords(words, lineText);
   return src.map((w) => ({
     text: w.text,
     startSec: placement.startSec + w.startSec / placement.tempo,

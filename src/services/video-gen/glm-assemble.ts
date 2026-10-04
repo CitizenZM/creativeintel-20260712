@@ -19,7 +19,7 @@ import ffmpegPath from "ffmpeg-static";
 import type { LibtvJob } from "@/generated/prisma/client";
 import { uploadBuffer } from "@/services/storage";
 import { pMap } from "@/lib/parallel";
-import { DEFAULT_VOICE, placeLines, planVoiceover, subtitleCues, synthesize, toSrt, type SubtitleCue } from "./voiceover";
+import { DEFAULT_VOICE, placeLines, planVoiceover, spokenForm, subtitleCues, synthesize, toSrt, type SubtitleCue } from "./voiceover";
 import type { QcReport } from "./edit/qc";
 
 const run = promisify(execFile);
@@ -482,7 +482,7 @@ export async function speakVoiceover(input: {
   const spoken = await pMap(
     lines,
     async (line, i) => {
-      const { audio, words } = await synthesize(line.text, voice);
+      const { audio, words } = await synthesize(spokenForm(line.text), voice);
       const file = path.join(input.dir, `vo${i}.mp3`);
       await writeFile(file, audio);
       return { file, words, duration: (await durationOf(file)) || line.endSec - line.startSec };
