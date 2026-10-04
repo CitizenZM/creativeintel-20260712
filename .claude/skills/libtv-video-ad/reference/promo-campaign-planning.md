@@ -16,3 +16,17 @@ Gallery Wall (design), Brightest Room (day→night one-take).
 
 Event timing 2026: Black Friday 11/27, Cyber Monday 11/30. Thanksgiving-day viewing is a real BF scene; use
 generic sport, never league marks.
+
+## Review lessons (Barron, 2026-10-04 — v2 scripts in `reference/examples/tcl-bfcm/scripts_v2.py`)
+- **The first 3 s must be the surprise, not the logistics.** "Installers ring the doorbell" bored; "a TV-sized gift
+  with a gold bow → installed in 1 s → a kid tears the paper and the screen lights up" hooks. Holiday = gift reveal.
+- **1-second install** = a natural-speed 5 s Kling clip, time-remapped 4–5× with motion blur, the last frames landing
+  on the click at 2.0 s. Fine print: "Installation sped up for dramatization."
+- **Every proof gets a zoom-in highlight**: a loupe (~32 % of width, 1.6–1.8×, thin white ring + soft shadow) popping on
+  the beat with a 1–4 word spec label; one per shot, clear of faces and safe zones.
+- **One split-screen comparison per ad** (top: generic old/glossy product, bottom: ours; same framing and light;
+  labels + "Simulated"). Never name a competitor.
+- **Measurement callouts use the store's own numbers** (QM8L 65" body 2.0", QM7L 65" 2.2", NXTPAPER 14 6.95 mm).
+- **Life scenes sell the season**: Christmas morning with kids, game day with friends, date night by candlelight,
+  New Year's Eve fireworks (true black). No league marks, landmarks or licensed characters.
+- **WAS price** must be the live compare-at price when the ad ships (FTC former-price rule).
