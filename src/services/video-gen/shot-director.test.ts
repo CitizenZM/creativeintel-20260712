@@ -184,3 +184,12 @@ describe("frameCopy (director plan over the storyboard)", () => {
     expect(frameCopy(undefined, "old text", "old line")).toEqual({ text: "old text", voiceover: "old line" });
   });
 });
+
+describe("CTA line", () => {
+  it("keeps the storyboard's call to action when the plan leaves the end card silent", () => {
+    const frames = [frame(1, { segment: "BODY" }), frame(2, { segment: "CTA", voiceover: "Shop TCL today." }), frame(3, { segment: "CTA", voiceover: "Shop TCL today." })];
+    const ad = completeShots(frames, { shots: [llmShot(1), llmShot(2, { vo: null }), llmShot(3, { vo: null })] });
+    expect(ad.shots.get(2)!.voiceover).toBe("Shop TCL today.");
+    expect(ad.shots.get(3)!.voiceover).toBeNull();
+  });
+});

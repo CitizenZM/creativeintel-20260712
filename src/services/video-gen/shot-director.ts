@@ -226,6 +226,13 @@ export function completeShots(frames: GridFrame[], raw: z.infer<typeof outSchema
       sellingPoint: typeof s.sp === "number" ? s.sp : null,
     });
   });
+  // The ad must end on a spoken call to action: keep the storyboard's CTA line if the plan has none.
+  const ctas = frames.filter((f) => String(f.segment).toUpperCase() === "CTA");
+  if (usedLlm && ctas.length && ctas.every((f) => !shots.get(f.frameNumber)?.voiceover)) {
+    const line = ctas.map((f) => cut(f.voiceover, 160)).find(Boolean);
+    const first = shots.get(ctas[0].frameNumber);
+    if (line && first) first.voiceover = line;
+  }
   fitVoiceover(frames, shots);
   return {
     shots,
