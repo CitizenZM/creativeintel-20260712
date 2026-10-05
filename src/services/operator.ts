@@ -28,7 +28,8 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     action: z.literal("upload-asset"),
     projectId: z.string().min(1),
     filename: z.string().min(1).max(120),
-    contentType: z.enum(["image/jpeg", "image/png"]),
+    // video/mp4: a clip rendered from official product photos that replaces a generated clip.
+    contentType: z.enum(["image/jpeg", "image/png", "video/mp4"]),
     base64: z.string().min(10).max(5_000_000),
   }),
   /**
