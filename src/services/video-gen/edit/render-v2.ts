@@ -150,20 +150,17 @@ function shotBaseFilter(shot: Shot, canvas: Canvas): string {
     ].join(",");
   }
   // Stills: fit inside the canvas over a blurred fill, then move.
-  const z0 = shot.zoom;
-  const zoomExpr =
-    shot.motion === "pull"
-      ? `${z0 + 0.09}-0.09*min(t/${f3(dur)},1)`
-      : shot.motion === "drift"
-        ? `${z0 + 0.05}`
-        : `${z0}+0.09*min(t/${f3(dur)},1)`;
-  const xExpr = shot.motion === "drift" ? `(iw-${w})/2+(iw-${w})/2*0.8*(t/${f3(dur)}-0.5)` : `(iw-${w})/2`;
+  // Smooth 2.5D motion: zoompan on a 4x upscale, so the move is sub-pixel (integer-step resizes jittered).
+  const z0 = Math.max(1, shot.zoom);
+  const p = `min(on/${FPS}/${f3(dur)},1)`;
+  const zoomExpr = shot.motion === "pull" ? `${z0 + 0.07}-0.07*${p}` : shot.motion === "drift" ? `${z0 + 0.05}` : `${z0}+0.07*${p}`;
+  const xExpr = shot.motion === "drift" ? `(iw-iw/zoom)/2+(iw-iw/zoom)/2*0.8*(${p}-0.5)` : `(iw-iw/zoom)/2`;
   return [
     `[0:v]split=2[bg][fg]`,
     `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=40:2[bgb]`,
     `[fg]scale=${w}:${h}:force_original_aspect_ratio=decrease[fgs]`,
-    `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,fps=${FPS},setsar=1[fit]`,
-    `[fit]scale=w='2*trunc(${w}*(${zoomExpr})/2)':h='2*trunc(${h}*(${zoomExpr})/2)':eval=frame,crop=${w}:${h}:x='${xExpr}':y='(ih-${h})*${shot.anchorY}',format=yuv420p[v]`,
+    `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,fps=${FPS},setsar=1,scale=${w * 4}:${h * 4}:flags=bicubic[fit]`,
+    `[fit]zoompan=z='${zoomExpr}':x='${xExpr}':y='(ih-ih/zoom)*${shot.anchorY}':d=1:s=${w}x${h}:fps=${FPS},setsar=1,format=yuv420p[v]`,
   ].join(";");
 }
 
@@ -172,27 +169,14 @@ function shotBaseFilter(shot: Shot, canvas: Canvas): string {
  * the already-cut picture (a transition never swaps content — the cut does).
  */
 export function fxFilter(plan: EditPlan, canvas: Canvas): string {
-  const { w, h } = canvas;
-  const P = f3(plan.grid.period);
-  const punches = plan.boundaries.filter((b) => b.transition === "zoom").map((b) => `0.06*gte(t,${f3(b.atSec)})*exp(-(t-${f3(b.atSec)})*12)`);
-  const D = f3(plan.durationSec);
-  // Opening: a zoom-through from 1.28× that settles in ~0.3 s; ending: a slow push over the last 0.8 s.
-  const intro = `0.28*exp(-t*9)`;
-  const outro = `0.06*max(0,(t-${D}+0.8)/0.8)`;
-  const scaleExpr = [`0.022*exp(-mod(t,${P})*18)`, intro, outro, ...punches].join("+");
-  // Flashes decay from the beat frame (largest change exactly on the cut).
-  const flashes = plan.boundaries.filter((b) => b.transition === "flash").map((b) => `0.5*gte(t,${f3(b.atSec - 0.004)})*exp(-(t-${f3(b.atSec)})*28)`);
-  const parts = [
-    `eq=brightness='${[`0.045*exp(-mod(t,${P})*22)`, `-0.55*exp(-t*16)`, ...flashes].join("+")}':eval=frame`,
-    `scale=w='2*trunc(${w}*(1+${scaleExpr})/2)':h='2*trunc(${h}*(1+${scaleExpr})/2)':eval=frame`,
-    `crop=${w}:${h}`,
-  ];
+  // No scale envelopes at all: per-beat zoom pulses, zoom-transition punches and the zoom-through
+  // opener made the whole picture shake (Barron, 2026-10-04). What stays: a fast fade up from dark on
+  // the first frames, the drop flash, and a three-frame motion blur into each whip cut.
+  void canvas;
+  const flashes = plan.boundaries.filter((b) => b.transition === "flash").map((b) => `0.35*gte(t,${f3(b.atSec - 0.004)})*exp(-(t-${f3(b.atSec)})*28)`);
+  const parts = [`eq=brightness='${[`-0.55*exp(-t*16)`, ...flashes].join("+")}':eval=frame`];
   const fr = 1 / FPS;
-  // The opening frames arrive with motion blur that clears as the zoom settles.
-  [24, 14, 6].forEach((size, k) => parts.push(`avgblur=sizeX=${size}:sizeY=${Math.round(size / 3)}:enable='between(t,${f3(k * fr - 0.004)},${f3((k + 1) * fr - 0.01)})'`));
   for (const b of plan.boundaries) {
-    // Whip: motion blur ramps up over the three outgoing frames and is gone on
-    // the beat frame, which arrives sharp with the new shot.
     if (b.transition === "whip") {
       [8, 18, 32].forEach((size, k) => {
         const t0 = b.atSec - (3 - k) * fr;
