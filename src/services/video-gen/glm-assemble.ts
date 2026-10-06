@@ -293,6 +293,7 @@ export async function assembleGlmMaster(input: {
 
     // Edit engine v2 (beat-cut edit, music, SFX, kinetic captions, QC); the
     // v1 hard-cut assembly below is its Plan B. EDIT_ENGINE=v1 forces v1.
+    let v2Error: string | null = null;
     if (process.env.EDIT_ENGINE !== "v1") {
       try {
         const { renderEditV2 } = await import("./edit/render-v2");
@@ -314,7 +315,10 @@ export async function assembleGlmMaster(input: {
         const url = (x: { provider: string; url: string } | null) => (x && x.provider !== "inline" ? x.url : null);
         return { masterUrl: m.url, voiceoverUrl: url(vo), subtitlesUrl: url(srt), previewUrl: url(p), contactSheetUrl: url(c), qcReport: { ...v2.qc, hookStyle } };
       } catch (err) {
-        console.warn(`[assemble] edit engine v2 failed for run ${input.runId}, falling back to v1:`, err instanceof Error ? err.message.slice(0, 400) : err);
+        // Keep the real cause: the ffmpeg command line fills the message, the reason is in stderr / the signal.
+        const e = err as { message?: string; stderr?: string; signal?: string | null; killed?: boolean; code?: number | string };
+        v2Error = `signal=${e.signal ?? "-"} killed=${e.killed ?? "-"} code=${e.code ?? "-"} stderr=${String(e.stderr ?? "").slice(-900)} msg=${String(e.message ?? err).slice(0, 300)}`;
+        console.warn(`[assemble] edit engine v2 failed for run ${input.runId}, falling back to v1: ${v2Error}`);
       }
     }
 
@@ -380,7 +384,8 @@ export async function assembleGlmMaster(input: {
       folder: "glm-masters",
     });
     if (uploaded.provider === "inline") throw new Error("No asset storage configured for the master video");
-    return { masterUrl: uploaded.url, voiceoverUrl, subtitlesUrl };
+    // A v1 fallback must be visible on the run, never pass as an edit-v2 master.
+    return { masterUrl: uploaded.url, voiceoverUrl, subtitlesUrl, ...(v2Error ? { qcReport: { engine: "v1-fallback", v2Error, passed: 0, total: 1, checks: [] } } : {}) };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
