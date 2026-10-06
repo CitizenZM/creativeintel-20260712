@@ -21,7 +21,9 @@ export interface QcCheck {
 }
 
 export interface QcReport {
-  engine: "edit-v2";
+  /** "v1-fallback": edit-v2 threw and the hard-cut v1 assembly shipped instead (see v2Error). */
+  engine: "edit-v2" | "v1-fallback";
+  v2Error?: string;
   durationSec: number;
   passed: number;
   total: number;
