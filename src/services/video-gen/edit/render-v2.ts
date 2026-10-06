@@ -150,7 +150,7 @@ function shotBaseFilter(shot: Shot, canvas: Canvas): string {
     ].join(",");
   }
   // Stills: fit inside the canvas over a blurred fill, then move.
-  // Smooth 2.5D motion: zoompan on a 4x upscale, so the move is sub-pixel (integer-step resizes jittered).
+  // Smooth 2.5D motion: zoompan on a 2x upscale, so the move is sub-pixel (integer-step resizes jittered).
   const z0 = Math.max(1, shot.zoom);
   const p = `min(on/${FPS}/${f3(dur)},1)`;
   const zoomExpr = shot.motion === "pull" ? `${z0 + 0.07}-0.07*${p}` : shot.motion === "drift" ? `${z0 + 0.05}` : `${z0}+0.07*${p}`;
@@ -159,7 +159,7 @@ function shotBaseFilter(shot: Shot, canvas: Canvas): string {
     `[0:v]split=2[bg][fg]`,
     `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=40:2[bgb]`,
     `[fg]scale=${w}:${h}:force_original_aspect_ratio=decrease[fgs]`,
-    `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,fps=${FPS},setsar=1,scale=${w * 4}:${h * 4}:flags=bicubic[fit]`,
+    `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,fps=${FPS},setsar=1,scale=${w * 2}:${h * 2}:flags=bicubic[fit]`,
     `[fit]zoompan=z='${zoomExpr}':x='${xExpr}':y='(ih-ih/zoom)*${shot.anchorY}':d=1:s=${w}x${h}:fps=${FPS},setsar=1,format=yuv420p[v]`,
   ].join(";");
 }
