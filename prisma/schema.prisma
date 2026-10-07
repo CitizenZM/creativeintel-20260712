@@ -238,6 +238,13 @@ model Project {
   // Creative Agent (services/creative/creative-agent.ts): the last 10 states before each chat edit
   // [{at, message, summary, plan?, storyboard?: {id, frames}}], newest last — popped by undo.
   creativeEditHistory Json?
+  // Media-plan strategy agent (services/strategy/media-plan.ts): cross-platform budget allocation,
+  // forecasts, weekly pacing, creative requirements, measurement plan and scenarios.
+  mediaPlan         Json?
+  mediaPlanAt       DateTime?
+  // Scheduled report delivery (services/reports/delivery.ts): {enabled, channel, target, schedule}.
+  // Disabled by default; sending also needs REPORT_DELIVERY_SEND=on.
+  reportDelivery    Json?
 }
 
 model Brand {
@@ -1286,6 +1293,25 @@ model CatalogRun {
   results   Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([projectId, createdAt])
+}
+
+/// Weekly digest delivery log (services/reports/delivery.ts): one row per built digest. Dry runs keep
+/// the payload without sending; a send records the platform's response and its read-back check.
+model ReportDelivery {
+  id         String   @id @default(cuid())
+  projectId  String
+  channel    String // feishu-dm | email | webhook
+  target     String?
+  status     String // dry-run | sent | failed | refused | skipped
+  dryRun     Boolean  @default(true)
+  reason     String?
+  periodFrom DateTime
+  periodTo   DateTime
+  payload    Json // {subject, markdown, html, feishuCard}
+  response   Json?
+  createdAt  DateTime @default(now())
 
   @@index([projectId, createdAt])
 }
