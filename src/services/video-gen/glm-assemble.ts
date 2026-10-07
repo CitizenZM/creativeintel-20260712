@@ -29,6 +29,8 @@ export interface AssembleFrame {
   frameNumber: number;
   startSec: number;
   endSec: number;
+  /** End-card template for the CTA frame (creative library id E01–E12 + its live facts). */
+  endCard?: { id: string; data: import("./edit/endcard-render").EndCardData } | null;
   /** The storyboard's on-screen text for this frame, burned in as a caption. */
   text?: string | null;
   /** The storyboard's voiceover line for this frame (repeated across its beat). */

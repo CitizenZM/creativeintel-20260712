@@ -9,7 +9,8 @@
  *   offer card       black on yellow, on the end card
  *   CTA button       a pill that lands on a beat with a click
  *
- * All text sits inside the platform safe zone (top 14 % / bottom 20 % clear).
+ * All readable text sits inside the strict safe box on 9:16 (y 288–1220: TikTok, Reels and Shorts reserve the
+ * bottom ~35 % and the top ~15 %); see services/creative/library.ts SAFE_BOX.
  */
 import { ensureFontconfig, pangoEscape } from "../glm-assemble";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
@@ -24,7 +25,7 @@ async function sharpLib() {
   return (await import("sharp")).default;
 }
 
-async function renderMarkup(markup: string, opts: { family: string; fontFile: string; size: number; width: number }): Promise<Buffer> {
+export async function renderMarkup(markup: string, opts: { family: string; fontFile: string; size: number; width: number }): Promise<Buffer> {
   await ensureFontconfig(opts.fontFile);
   const sharp = await sharpLib();
   return sharp({
@@ -44,7 +45,7 @@ async function renderMarkup(markup: string, opts: { family: string; fontFile: st
 }
 
 /** Text with a soft dark shadow underneath (no box), for captions over footage. */
-async function shadowed(markup: string, plainMarkup: string, opts: { family: string; fontFile: string; size: number; width: number }): Promise<Buffer> {
+export async function shadowed(markup: string, plainMarkup: string, opts: { family: string; fontFile: string; size: number; width: number }): Promise<Buffer> {
   const sharp = await sharpLib();
   const fg = await renderMarkup(markup, opts);
   const sh = await renderMarkup(plainMarkup, opts);
@@ -61,7 +62,7 @@ async function shadowed(markup: string, plainMarkup: string, opts: { family: str
     .toBuffer();
 }
 
-type Look = Pick<BrandStyle, "highlight" | "button" | "buttonText" | "offerBg" | "offerText" | "headline" | "body">;
+export type Look = Pick<BrandStyle, "highlight" | "button" | "buttonText" | "offerBg" | "offerText" | "headline" | "body">;
 
 /** One state of a kinetic caption: the group's words, word `active` highlighted. */
 export function kineticCaptionPng(words: string[], active: number, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
@@ -84,7 +85,7 @@ export function hookHeadlinePng(text: string, canvas: Canvas, look: Look = DEFAU
 }
 
 /** A pill: text on a rounded rectangle. */
-async function pill(text: string, canvas: Canvas, style: { size: number; fg: string; bg: string; family: string; fontFile: string; widthPct: number }): Promise<Buffer> {
+export async function pill(text: string, canvas: Canvas, style: { size: number; fg: string; bg: string; family: string; fontFile: string; widthPct: number }): Promise<Buffer> {
   const sharp = await sharpLib();
   const fg = await renderMarkup(`<span foreground="${style.fg}">${pangoEscape(text)}</span>`, {
     family: style.family,
