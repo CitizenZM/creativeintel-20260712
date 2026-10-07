@@ -384,6 +384,8 @@ export interface TimedWord {
   text: string;
   startSec: number;
   endSec: number;
+  /** Which voiceover line the word belongs to (captions never merge across lines). */
+  line?: number;
 }
 
 /** Each script word on the master's timeline (placement start + tempo applied). */
@@ -418,5 +420,31 @@ export function kineticGroups(words: TimedWord[], maxWords = 3, maxChars = 18): 
     }
   }
   if (cur.length) groups.push(cur);
-  return groups;
+  return mergeFragments(groups);
+}
+
+/** A lone word closed by a comma or a period ("SUN.", "COMPLETELY,") — a question or exclamation is a deliberate punch. */
+const isFragment = (g: TimedWord[]) => g.length === 1 && /[.,;:…、。，；：]['"’”)]*$/.test(g[0].text);
+const sameLine = (a: TimedWord, b: TimedWord) => a.line === b.line;
+
+/**
+ * Never leave a one-word fragment alone unless its line is that one word: it joins the chunk
+ * before it on the same line, or — when it opens its line — the chunk after it.
+ */
+function mergeFragments(groups: TimedWord[][]): TimedWord[][] {
+  const out = groups.map((g) => [...g]);
+  for (let i = 0; i < out.length; i++) {
+    if (!isFragment(out[i])) continue;
+    const w = out[i][0];
+    const prev = out[i - 1];
+    const next = out[i + 1];
+    if (prev && sameLine(prev[prev.length - 1], w)) {
+      prev.push(w);
+      out.splice(i--, 1);
+    } else if (next && sameLine(next[0], w)) {
+      next.unshift(w);
+      out.splice(i--, 1);
+    }
+  }
+  return out;
 }

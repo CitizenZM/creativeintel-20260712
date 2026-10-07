@@ -57,6 +57,12 @@ export interface AssembleFrame {
   /** VO delivery of this beat (voice-styles.ts): purpose style + platform energy. */
   voiceStyle?: import("./voice-styles").VoiceStyle | null;
   voiceEnergy?: import("./voice-styles").VoiceEnergy | null;
+  /** Product box of this frame's start / end keyframe (consistency check): reframe + CTA hero (attachProductBoxes). */
+  productBox?: import("./edit/edit-plan").ProductBox | null;
+  /** CTA frame: the official packshot its keyframe was edited from (the CTA hero still). */
+  packshotUrl?: string | null;
+  /** Storyboard-level music bed (music-moods MoodId), carried on the first frame. */
+  musicMood?: string | null;
 }
 
 export const CAPTION_FONT = path.join(process.cwd(), "assets/fonts/Anton-Regular.ttf");
@@ -224,9 +230,58 @@ export interface SegmentCompare {
   labelOther: string;
 }
 
+type ProductBox = import("./edit/edit-plan").ProductBox;
+type BBox = import("./edit/edit-plan").BBox;
+
 export type Segment =
-  | { kind: "clip"; url: string; from: number; length: number; frameNumber: number; text?: string; compare?: SegmentCompare; speed?: number; zoomHit?: { x: number; y: number } | null; nativeAudio?: boolean }
-  | { kind: "still"; url: string; length: number; frameNumber: number; text?: string; compare?: SegmentCompare; zoomHit?: { x: number; y: number } | null };
+  | { kind: "clip"; url: string; from: number; length: number; frameNumber: number; text?: string; compare?: SegmentCompare; speed?: number; zoomHit?: { x: number; y: number } | null; nativeAudio?: boolean; productBox?: ProductBox | null }
+  | { kind: "still"; url: string; length: number; frameNumber: number; text?: string; compare?: SegmentCompare; zoomHit?: { x: number; y: number } | null; productBox?: ProductBox | null };
+
+type BoxJob = Pick<LibtvJob, "kind" | "resultUrl" | "settings" | "nodeName"> & Partial<Pick<LibtvJob, "leftRefs" | "sourceUrl" | "status">>;
+
+const asBox = (v: unknown): BBox | null =>
+  Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === "number" && Number.isFinite(n)) ? (v as BBox) : null;
+
+/**
+ * Each frame's product box from its keyframes' consistency records (start keyframe K<n>, end
+ * keyframe K<n>E), and the official packshot for the CTA frame. A frame whose keyframes were never
+ * scored keeps productBox null (the edit then frames it as before). Pure.
+ */
+export function attachProductBoxes<F extends AssembleFrame>(frames: F[], jobs: BoxJob[]): F[] {
+  const settingsOf = (j: BoxJob) => (j.settings ?? {}) as { frameNumber?: number | null; endOf?: number; comparisonOf?: number; castSheet?: number; consistency?: { productBox?: unknown; productPresent?: boolean | null } };
+  const images = jobs.filter((j) => j.kind === "image");
+  const startOf = (n: number) =>
+    images.find((j) => j.nodeName === `K${n}`) ?? images.find((j) => settingsOf(j).frameNumber === n && !settingsOf(j).endOf && !settingsOf(j).comparisonOf && !settingsOf(j).castSheet);
+  const endOf = (n: number) => images.find((j) => settingsOf(j).endOf === n);
+  const urlOfNode = (name: string) => {
+    const j = jobs.find((x) => x.nodeName === name);
+    return j ? (j.resultUrl ?? j.sourceUrl ?? null) : null;
+  };
+  return frames.map((f) => {
+    const recs = [startOf(f.frameNumber), endOf(f.frameNumber)].map((j) => (j ? settingsOf(j).consistency : undefined));
+    const productBox: ProductBox | null = recs.some((r) => r)
+      ? {
+          start: asBox(recs[0]?.productBox),
+          end: asBox(recs[1]?.productBox),
+          present: recs.some((r) => r?.productPresent === true) ? true : recs.some((r) => r?.productPresent === false) ? false : null,
+        }
+      : null;
+    const isCta = (f.segment ?? "").toUpperCase() === "CTA" || !!f.endCard?.id;
+    let packshotUrl: string | null = null;
+    if (isCta) {
+      const refs = (startOf(f.frameNumber)?.leftRefs as string[] | null | undefined) ?? [];
+      const ref = refs.find((r) => r !== "CAST" && !/^K\d+/.test(r));
+      packshotUrl = (ref ? urlOfNode(ref) : null) ?? urlOfNode("PROD-1");
+    }
+    return { ...f, productBox, ...(isCta ? { packshotUrl } : {}) };
+  });
+}
+
+/** The product box's centre (start keyframe, else end), for zoom hits that must land on the product. */
+function boxCentre(b: ProductBox | null | undefined): { x: number; y: number } | null {
+  const box = b?.present === false ? null : (b?.start ?? b?.end ?? null);
+  return box ? { x: Math.round(((box[0] + box[2]) / 2) * 1000) / 1000, y: Math.round(((box[1] + box[3]) / 2) * 1000) / 1000 } : null;
+}
 
 /** The comparison pairing for a frame, when its keyframe was split (comparison.ts). */
 function compareFor(frameNumber: number, jobs: Pick<LibtvJob, "kind" | "status" | "resultUrl" | "settings" | "nodeName">[]): SegmentCompare | undefined {
@@ -247,6 +302,8 @@ export function planSegments(frames: AssembleFrame[], jobs: Pick<LibtvJob, "kind
   const segments: Segment[] = [];
   for (const f of frames) {
     const length = Math.max(0.5, (f.endSec ?? 0) - (f.startSec ?? 0) || 2);
+    // Every zoom lands on the product: the keyframe's product box centre when the check found one.
+    const zoomHit = f.zoomHit ? (boxCentre(f.productBox) ?? f.zoomHit) : null;
     const clip = jobs.find((j) => {
       const s = (j.settings ?? {}) as Settings;
       return j.kind === "video" && j.resultUrl && s.coversFrames?.includes(f.frameNumber);
@@ -259,17 +316,18 @@ export function planSegments(frames: AssembleFrame[], jobs: Pick<LibtvJob, "kind
       // A sped-up shot plays `speed` × its length of source in its frame's time. An end-anchored clip carries
       // its own speed: the whole clip (start keyframe → end keyframe) fits the frame, so it ends on its anchor.
       const anchored = (s as { anchorEnd?: number; speed?: number }).anchorEnd ? (s as { speed?: number }).speed : undefined;
-      // A talking head plays at natural speed with its own audio (a remap would warp the voice).
+      // A talking head plays at natural speed with its own audio (a remap would warp the voice), and is
+      // never reframed onto the product (that would crop the presenter's face).
       const native = !!f.nativeAudio;
       const speed = native ? 1 : Math.max(1, anchored ?? f.speed ?? 1);
-      segments.push({ kind: "clip", url: clip.resultUrl!, from, length: speed > 1 ? length : len, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs), speed, zoomHit: f.zoomHit ?? null, ...(native ? { nativeAudio: true } : {}) });
+      segments.push({ kind: "clip", url: clip.resultUrl!, from, length: speed > 1 ? length : len, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs), speed, zoomHit: native ? (f.zoomHit ?? null) : zoomHit, productBox: native ? null : (f.productBox ?? null), ...(native ? { nativeAudio: true } : {}) });
       continue;
     }
     const still = jobs.find((j) => {
       const s = (j.settings ?? {}) as Settings;
       return j.kind === "image" && j.resultUrl && (s.frameNumber === f.frameNumber || s.coversFrames?.includes(f.frameNumber));
     });
-    if (still) segments.push({ kind: "still", url: still.resultUrl!, length, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs), zoomHit: f.zoomHit ?? null });
+    if (still) segments.push({ kind: "still", url: still.resultUrl!, length, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs), zoomHit, productBox: f.productBox ?? null });
   }
   return segments;
 }
@@ -298,6 +356,7 @@ export async function assembleGlmMaster(input: {
   platform?: import("@/services/creative/types").PlatformId | null;
 }): Promise<AssembledMaster> {
   if (!ffmpegPath) throw new Error("ffmpeg is not available on this server");
+  input = { ...input, frames: attachProductBoxes(input.frames, input.jobs) };
   const segments = planSegments(input.frames, input.jobs);
   if (!segments.length) throw new Error("Nothing to assemble — no finished clips");
   // A presenter run's voiceover speaks in the presenter's voice.
@@ -439,7 +498,7 @@ export async function renderFromRun(input: {
   cutdownSec?: number;
   voice?: string;
   /** Batch Mode overrides: music bed and CTA button copy. */
-  musicMood?: "pop" | "holiday";
+  musicMood?: import("./edit/music-moods").MoodId;
   ctaText?: string;
   tag: string;
   /** Overrides on the Brand Kit look (localized versions: caption fonts with the script's glyphs, translated CTA). */
@@ -450,7 +509,8 @@ export async function renderFromRun(input: {
   fixes?: import("./edit/render-v2").EditFixes;
 }): Promise<{ hookText: string | null; masterUrl: string; previewUrl: string | null; durationSec: number; qc: QcReport; srt?: string | null; covers?: import("./edit/qc").CoverSet }> {
   const { cutdownFrames } = await import("./edit/cutdown");
-  const frames = input.cutdownSec ? cutdownFrames(input.frames, input.cutdownSec) : input.frames;
+  const boxed = attachProductBoxes(input.frames, input.jobs);
+  const frames = input.cutdownSec ? cutdownFrames(boxed, input.cutdownSec) : boxed;
   if (!input.voice) input = { ...input, voice: presenterVoice(input.frames) };
   const segments = planSegments(frames, input.jobs);
   if (!segments.length) throw new Error("Nothing to assemble — no finished clips");

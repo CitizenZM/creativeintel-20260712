@@ -51,3 +51,46 @@ export function beatGridFromTimes(times: number[], durationSec: number): BeatGri
   const period = gaps[Math.floor(gaps.length / 2)];
   return { bpm: Math.round((60 / period) * 10) / 10, period, beats, downbeats: beats.filter((_, i) => i % 4 === 0) };
 }
+
+/** A cut moves to the bed's beat only when the beat is this close (a bigger shift breaks voice/picture sync). */
+export const CUT_SNAP_SEC = 0.12;
+
+/**
+ * Where a planned cut lands: the nearest beat when it is within ±`toleranceSec`, else the cut's own
+ * frame. When a voiceover line starts at the cut (`voStart`), the cut may only move earlier — the
+ * picture may lead the voice, never trail it (a later cut would start the line over the last shot).
+ */
+export function snapCut(grid: BeatGrid, t: number, opts: { toleranceSec?: number; voStart?: boolean } = {}): { atSec: number; onBeat: boolean } {
+  const tol = opts.toleranceSec ?? CUT_SNAP_SEC;
+  let best: number | null = null;
+  for (const b of grid.beats) {
+    const d = b - t;
+    if (Math.abs(d) > tol + 1e-9) continue;
+    if (opts.voStart && d > 1e-6) continue;
+    if (best === null || Math.abs(d) < Math.abs(best - t)) best = b;
+  }
+  return best === null ? { atSec: round3(snapToFrame(t)), onBeat: false } : { atSec: round3(snapToFrame(best)), onBeat: true };
+}
+
+/**
+ * The tempo (0.5 BPM steps inside the mood's range) that puts the most planned cuts within
+ * ±CUT_SNAP_SEC of a beat; ties go to the smallest total offset, then to the tempo nearest the nominal.
+ */
+export function fitTempo(cuts: number[], range: { bpm: number; min: number; max: number }): number {
+  if (!cuts.length || range.max <= range.min) return range.bpm;
+  let best = { bpm: range.bpm, hits: -1, err: Infinity };
+  for (let bpm = range.min; bpm <= range.max + 1e-9; bpm += 0.5) {
+    const p = 60 / bpm;
+    let hits = 0;
+    let err = 0;
+    for (const c of cuts) {
+      const off = Math.abs(c - Math.round(c / p) * p);
+      if (off <= CUT_SNAP_SEC + 1e-9) hits++;
+      err += off;
+    }
+    const near = (x: number) => Math.abs(x - range.bpm);
+    const better = hits > best.hits || (hits === best.hits && (err < best.err - 0.005 || (Math.abs(err - best.err) <= 0.005 && near(bpm) < near(best.bpm))));
+    if (better) best = { bpm, hits, err };
+  }
+  return best.bpm;
+}

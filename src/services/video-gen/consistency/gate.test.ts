@@ -21,6 +21,32 @@ function fakeScore(score: number, pass: boolean, defects: string[] = []): Consis
   return { score, pass, reviewed: true, shotType: "product", product: null, cast: [], defects, reasons: pass ? [] : [`score ${score} < 0.72`], majorDefects: 0, sceneConsistent: null };
 }
 
+describe("consistencyRecord product box", () => {
+  const withBox = (score: number, pass: boolean, bbox: [number, number, number, number] | null, present = true): ConsistencyScore => ({
+    ...fakeScore(score, pass),
+    product: { expected: true, present, bbox, view: "front", visionScore: score, pixel: null, score },
+  });
+  it("records the kept keyframe's product box (the edit reframes and judges the CTA hero from it)", () => {
+    const d = decideKeyframe("u0", withBox(0.9, true, [0.6, 0.6, 0.9, 0.9]), { attempts: 0 });
+    if (d.action !== "accept") throw new Error("expected accept");
+    expect(consistencyRecord(withBox(0.9, true, [0.6, 0.6, 0.9, 0.9]), d, 0)).toMatchObject({ productBox: [0.6, 0.6, 0.9, 0.9], productPresent: true });
+  });
+  it("takes the box of an earlier attempt when that attempt is the one kept", () => {
+    const prev = [{ url: "u0", score: 0.7, pass: false, defects: [], bbox: [0.2, 0.2, 0.8, 0.8] as [number, number, number, number], present: true }];
+    const cur = withBox(0.5, false, [0.7, 0.7, 0.9, 0.9]);
+    const d = decideKeyframe("u1", cur, { attempts: 2, previous: prev }, { maxRerolls: 2 });
+    if (d.action !== "accept") throw new Error("expected accept");
+    expect(d.url).toBe("u0");
+    expect(consistencyRecord(cur, d, 2).productBox).toEqual([0.2, 0.2, 0.8, 0.8]);
+  });
+  it("records an absent product as such", () => {
+    const r = withBox(0.9, true, null, false);
+    const d = decideKeyframe("u0", r, { attempts: 0 });
+    if (d.action !== "accept") throw new Error("expected accept");
+    expect(consistencyRecord(r, d, 0)).toMatchObject({ productBox: null, productPresent: false });
+  });
+});
+
 describe("decideKeyframe", () => {
   it("accepts a pass, re-rolls a fail with corrections, keeps the best after the last re-roll", () => {
     expect(decideKeyframe("u0", fakeScore(0.9, true), { attempts: 0 })).toMatchObject({ action: "accept", url: "u0", bestOf: false });

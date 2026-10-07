@@ -43,4 +43,11 @@ describe("scoreQc", () => {
       expect.arrayContaining(["first_cut_s", "cuts_per_15s", "avg_shot_s", "longest_static_s", "beat_max_ms", "end_card_s", "true_peak_dbfs"])
     );
   });
+  it("judges beat timing only on cuts the plan put on the beat (a cut kept on its frame for the voiceover is not an error)", () => {
+    const off = { ...base, cutsSec: [1.25, 2.5, 3.4, 3.75] };
+    expect(scoreQc(off).checks.find((c) => c.key === "beat_max_ms")!.pass).toBe(false);
+    const r = scoreQc({ ...off, offBeatCuts: [3.4] });
+    expect(r.checks.find((c) => c.key === "beat_max_ms")!.pass).toBe(true);
+    expect(r.checks.find((c) => c.key === "beat_bias_ms")!.pass).toBe(true);
+  });
 });

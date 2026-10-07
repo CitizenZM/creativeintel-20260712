@@ -68,3 +68,53 @@ describe("comparison labels sit inside the safe box", () => {
     expect(f).toContain(`y=H*${slot.oursTop},format=yuv420p[v]`);
   }, 60_000);
 });
+
+import { shotFilter, shotReframe } from "./render-v2";
+import type { Shot } from "./edit-plan";
+
+describe("product reframe in the shot filter", () => {
+  const canvas = { w: 1080, h: 1920 };
+  const shot = (extra: Partial<Shot> = {}): Shot => ({
+    index: 0, kind: "clip", url: "u", srcFrom: 0.5, startSec: 0, endSec: 1, frames: 30, zoom: 1.2, anchorY: 0.4, motion: "none", frameNumber: 1, segment: "BODY", speed: 1, ...extra,
+  });
+
+  it("without a product box the punch-in stays centred as before", () => {
+    const f = shotFilter(shot(), canvas);
+    expect(f).toContain("crop=1080:1920:(iw-1080)/2:(ih-1920)*0.4");
+    expect(shotReframe(shot(), canvas)).toBeNull();
+  });
+
+  it("centres the crop on the product and moves it from the start box to the end box over the frame's source window", () => {
+    const s = shot({ productBox: { start: [0.6, 0.6, 0.9, 0.88], end: [0.55, 0.5, 0.85, 0.8], present: true }, frameSrc: { from: 0, span: 2 } });
+    const r = shotReframe(s, canvas)!;
+    expect(r.zoom).toBeGreaterThan(1.2);
+    const f = shotFilter(s, canvas);
+    expect(f).toContain(`scale=${Math.round((1080 * r.zoom) / 2) * 2}:`);
+    expect(f).toMatch(/crop=1080:1920:x='min\(max\(\([\d.]+\+-?[\d.]+\*clip\(\(0\.500\+t\*1\.000\)\/2\.000,0,1\)\)\*iw-1080\/2,0\),iw-1080\)'/);
+  });
+
+  it("lands a zoom hit on the product where the reframe put it", () => {
+    const s = shot({ productBox: { start: [0.6, 0.6, 0.9, 0.88], present: true }, zoomHit: { x: 0.75, y: 0.74 } });
+    const f = shotFilter(s, canvas);
+    const r = shotReframe(s, canvas)!;
+    expect(f).toContain(`zoompan=z=`);
+    expect(f).toContain(`x='min(max(${Math.min(1, Math.max(0, r.from.out.x))}*iw-iw/zoom/2`);
+  });
+
+  it("ignores a box the check marked absent", () => {
+    expect(shotReframe(shot({ productBox: { start: [0.1, 0.1, 0.3, 0.3], present: false } }), canvas)).toBeNull();
+  });
+});
+
+import { zoomHitFilter } from "./render-v2";
+
+describe("zoomHitFilter", () => {
+  it("pushes in toward its target with zoompan (scale(eval=frame)+crop always cropped the top-left corner)", () => {
+    const f = zoomHitFilter("[zh]", { x: 0.57, y: 0.5 }, { w: 1080, h: 1920 });
+    expect(f).toMatch(/^\[zh\]zoompan=z='\(1\+0\.6\*/);
+    expect(f).toContain("x='min(max(0.57*iw-iw/zoom/2,0),iw-iw/zoom)'");
+    expect(f).toContain("y='min(max(0.5*ih-ih/zoom/2,0),ih-ih/zoom)'");
+    expect(f).toContain("s=1080x1920");
+    expect(f).not.toContain("eval=frame");
+  });
+});

@@ -12,6 +12,7 @@
  * new hook clip (1 keyframe + 1 short clip): those variants are flagged `needsGeneration` and are never
  * rendered automatically. Pure — no I/O.
  */
+import { MOOD_IDS, moodFromText as moodFromMoodText, type MoodId } from "@/services/video-gen/edit/music-moods";
 import type { CampaignPlan, PlatformPlan } from "./campaign-plan.types";
 import { findVideoModel, engineFor, imageCredits, videoCredits } from "@/services/video-gen/libtv-pricing";
 
@@ -21,7 +22,7 @@ export type BatchAspect = "9:16" | "4:5" | "1:1" | "16:9";
 export const BATCH_ASPECTS: BatchAspect[] = ["9:16", "4:5", "1:1", "16:9"];
 export const BATCH_DURATIONS = [6, 10, 15, 30] as const;
 /** Moods the edit engine's music bed can synthesise ("auto" = the engine's own pick from the copy). */
-export const MUSIC_MOODS = ["auto", "pop", "holiday"] as const;
+export const MUSIC_MOODS = ["auto", ...MOOD_IDS] as const;
 export type MusicMood = (typeof MUSIC_MOODS)[number];
 /** Hook re-edit styles of the same clips (video-gen/variants.ts): question, contrast, product blast. */
 export const RESTYLE_HOOKS = ["q", "c", "p"] as const;
@@ -298,11 +299,11 @@ export function batchAdName(p: { brand?: string | null; title?: string | null; d
 const isHookId = (h: string) => /^H\d{2}$/i.test(h);
 
 export function moodFromText(text: string | null | undefined): MusicMood {
-  const t = (text ?? "").toLowerCase();
+  const t = (text ?? "").toLowerCase().trim();
   if ((MUSIC_MOODS as readonly string[]).includes(t)) return t as MusicMood;
+  // Seasonal wording wins (a "holiday pop" bed is the holiday bed); else the first mood the text names.
   if (/holiday|christmas|xmas|festive|gift|winter|black friday|cyber/.test(t)) return "holiday";
-  if (/pop|upbeat|energetic|hype|bright|trend/.test(t)) return "pop";
-  return "auto";
+  return moodFromMoodText(t) ?? "auto";
 }
 
 const uniq = <T,>(xs: T[]) => [...new Set(xs)];
@@ -482,7 +483,7 @@ export interface VariantRenderParams<F> {
   outputAspect?: string;
   cutdownSec?: number;
   voice: string;
-  musicMood?: "pop" | "holiday";
+  musicMood?: MoodId;
   ctaText: string;
   frames: F[];
 }
