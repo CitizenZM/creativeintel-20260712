@@ -213,3 +213,21 @@ describe("localize translation under the spend guard", () => {
     expect(typeof defaultLocalizeLlm).toBe("function");
   });
 });
+
+describe("localized talking-head frames", () => {
+  it("translates the talk line, lets TTS speak it in the locale's voice and captions it from the translation", async () => {
+    const talk: AssembleFrame[] = [
+      { frameNumber: 1, startSec: 0, endSec: 3, text: null, voiceover: "Okay wait, look at this.", segment: "HOOK", nativeAudio: true, talkLine: "Okay wait, look at this.", ttsVoice: "en-US-AndrewNeural" },
+      { frameNumber: 2, startSec: 3, endSec: 6, text: null, voiceover: "It reads like real paper.", segment: "BODY" },
+    ];
+    const es: Record<string, string> = { "Okay wait, look at this.": "Espera, mira esto.", "It reads like real paper.": "Se lee como papel real." };
+    const out = await localizeFrames(talk, "es-US", { llm: fakeLlm((it) => es[it.text] ?? it.text) });
+    const f = out.frames[0];
+    expect(f.nativeAudio).toBe(false); // the clip's English audio is not kept
+    expect(f.talkLine).toBe("Espera, mira esto.");
+    expect(f.voiceover).toBe("Espera, mira esto.");
+    expect(f.ttsVoice ?? null).toBeNull(); // the persona's English voice gives way to the locale voice
+    expect(out.frames[1]).toMatchObject({ voiceover: "Se lee como papel real." });
+    expect(out.frames[1].nativeAudio).toBeUndefined();
+  });
+});
