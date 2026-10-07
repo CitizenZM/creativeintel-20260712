@@ -5,6 +5,7 @@
  * never rejects into a caller — a missing table or a DB hiccup costs one
  * console warning, not an AI call.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { monthStartUtc, summarizeUsage, type UsageGroup, type UsageSummary } from "./usage-core";
 
 export interface AiUsageEntry {
@@ -22,7 +23,15 @@ export interface AiUsageEntry {
 
 let _warned = false;
 
+/** Calls logged inside captureAiUsage(fn) are also handed to that caller (the spend guard reconciles with them). */
+const _sink = new AsyncLocalStorage<AiUsageEntry[]>();
+
+export function captureAiUsage<T>(entries: AiUsageEntry[], fn: () => Promise<T>): Promise<T> {
+  return _sink.run(entries, fn);
+}
+
 export function logAiUsage(entry: AiUsageEntry): void {
+  _sink.getStore()?.push(entry);
   if (process.env.VITEST) return;
   try {
     void (async () => {

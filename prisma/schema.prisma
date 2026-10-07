@@ -226,6 +226,10 @@ model Project {
   perfElementMaps   PerfElementMap[] // Performance Agent: ad name → creative elements
   testPlan          Json? // test-plan strategist: structure, phases, kill/scale rules, round-1 variants (services/creative/test-plan.ts)
   testPlanAt        DateTime?
+  // Spend guard (services/ops/budget-guard.ts): the owner-approved cap for paid model calls, and the
+  // running total of the SpendEntry ledger (open reservations at their estimate).
+  budgetUsd         Float?
+  spentUsd          Float?
 }
 
 model Brand {
@@ -745,6 +749,8 @@ model LibtvRun {
   updatedAt        DateTime  @updatedAt
 
   jobs LibtvJob[]
+  // Spend guard: the USD this run may spend on paid calls (images, clips, QC, LLM); null = no run cap.
+  approvedBudgetUsd Float?
 
   @@index([projectId, status])
   @@index([status])
@@ -1195,4 +1201,22 @@ model AdStructure {
   createdAt      DateTime @default(now())
 
   @@index([category])
+}
+
+/// Spend ledger: one row per paid model call, reserved at its estimate before the call
+/// (services/ops/budget-guard.ts) and reconciled with the provider's reported cost after it.
+model SpendEntry {
+  id        String   @id @default(cuid())
+  projectId String
+  runId     String?
+  jobId     String?
+  kind      String // image | video | vision_qc | llm | tts
+  model     String
+  estUsd    Float
+  actualUsd Float? // null until reconciled (counts at estUsd)
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([runId])
+  @@index([jobId])
 }

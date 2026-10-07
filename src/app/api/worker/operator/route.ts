@@ -25,6 +25,7 @@
  * POST { action: "test-plan", projectId, totalBudget, days, goal?, platforms?, baseline?, targetCpa?, targetLift? } — testing plan → Project.testPlan
  * POST { action: "clone-ad", projectId, teardownId | structureId, platform?, goal? } — Ad Cloner → Project.campaignPlan
  * POST { action: "localize-run", projectId, runId, locales[], gender?, force? } — localized versions → qcReport.locales
+ * POST { action: "estimate-run" | "set-budget" | "spend-report" | "campaign-report", projectId, … } — cost forecast, budget, ledger, client report
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -65,6 +66,8 @@ function summarize(run: NonNullable<Awaited<ReturnType<typeof getRunWithJobs>>>)
     error: r.error ?? null,
   };
 }
+
+const opsReply = (r: { status: number; body: Record<string, unknown> }) => NextResponse.json(r.body, { status: r.status });
 
 export async function GET(request: Request) {
   if (!hasWorkerToken(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -413,6 +416,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
     }
   }
+  if (input.action === "estimate-run") return opsReply(await (await import("@/services/ops/operator-ops")).estimateRunAction(input));
+  if (input.action === "set-budget") return opsReply(await (await import("@/services/ops/operator-ops")).setBudgetAction(input));
+  if (input.action === "spend-report") return opsReply(await (await import("@/services/ops/operator-ops")).spendReportAction(input));
+  if (input.action === "campaign-report") return opsReply(await (await import("@/services/ops/operator-ops")).campaignReportAction(input));
 
   if (input.action === "clone-ad") {
     const { cloneAdIntoProject } = await import("@/services/creative/ad-cloner.store");

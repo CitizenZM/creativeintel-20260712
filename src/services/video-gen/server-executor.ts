@@ -23,6 +23,8 @@ import { applyCorrections, correctionsFor } from "./consistency/corrections";
 import { consistencyRecord, decideKeyframe, type KeyframeCandidate } from "./consistency/gate";
 import { isShotType } from "./consistency/thresholds";
 import { finishDirectedMotion, finishDirectedStill } from "./shot-director";
+import { guardJobCall, guardQc, settleClipOnPoll } from "@/services/ops/spend";
+import { isBudgetExceeded } from "@/services/ops/budget-guard";
 
 export type TickResult = "idle" | "running" | "done" | "failed";
 
@@ -244,7 +246,9 @@ export async function tickRun(
     const urls = (names: string[]) => names.map((r) => urlOf(r)).filter((u): u is string => !!u);
     // Loaded on demand: the scorer pulls in sharp and the vision client.
     const { scoreFrame } = await import("./consistency/score");
-    const result = await scoreFrame(
+    const refCount = refNames.length;
+    // The vision rubric is a paid call: under the spend guard; over budget the keyframe is kept unscored.
+    const result = await guardQc(run, j, refCount, () => scoreFrame(
       url,
       {
         cast: urls(refNames.filter((r) => r === "CAST")).map((image) => ({ image })),
@@ -257,7 +261,8 @@ export async function tickRun(
         shotType: isShotType(s.qcShotType) ? s.qcShotType : undefined,
         productSpec: s.productSpec,
       }
-    );
+    ));
+    if (!result) return url;
     const attempts = s.qcAttempts ?? 0;
     const d = decideKeyframe(url, result, { attempts, previous: s.qcCandidates }, { productSpec: s.productSpec });
     if (d.action === "reroll") {
@@ -329,7 +334,7 @@ export async function tickRun(
         const stillPrompt = settings.directed ? finishDirectedStill(j.prompt) : cleanFramePrompt(j.prompt);
         // A re-roll carries the previous attempt's QC defects as explicit corrections.
         const corrections = (j.settings as { qcCorrections?: string[] } | null)?.qcCorrections;
-        const out = await adapter.generateImage(applyCorrections(withNoText(stillPrompt, "image"), corrections), ctxFor(j));
+        const out = await guardJobCall("image", run, j, () => adapter.generateImage(applyCorrections(withNoText(stillPrompt, "image"), corrections), ctxFor(j)));
         if ("url" in out) {
           // AI keyframe QC: send a visibly broken keyframe back once before a clip is made from it.
           const s = (j.settings ?? {}) as { qcAttempts?: number; castSheet?: unknown };
@@ -344,7 +349,7 @@ export async function tickRun(
             }
             const label = (r: string) => (r === "CAST" ? "casting sheet" : /^K\d+$/.test(r) ? "start frame of this shot" : "official product photo");
             const refImages = refNames.map((r) => ({ label: label(r), url: urlOf(r) })).filter((x): x is { label: string; url: string } => !!x.url);
-            const verdict = await reviewKeyframe(out.url, j.prompt, refImages.length ? { images: refImages } : undefined);
+            const verdict = await guardQc(run, j, refImages.length, () => reviewKeyframe(out.url, j.prompt, refImages.length ? { images: refImages } : undefined));
             const attempts = s.qcAttempts ?? 0;
             if (shouldReroll(verdict, attempts, refImages.length ? Math.max(2, MAX_KEYFRAME_REROLLS) : MAX_KEYFRAME_REROLLS)) {
               await prisma.libtvJob.update({
@@ -363,7 +368,10 @@ export async function tickRun(
           await jobDone({ jobId: j.id, resultUrl: out.url, creditsSpent: 0 });
         } else await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: out.taskId } });
       } catch (err) {
-        await jobFailed(j.id, errorText(err));
+        // No budget for a QC reroll: keep the keyframe QC rejected rather than fail the run or overspend.
+        const rejected = (j.settings as { qcRejectedUrl?: string } | null)?.qcRejectedUrl;
+        if (isBudgetExceeded(err) && rejected) await jobDone({ jobId: j.id, resultUrl: rejected, creditsSpent: 0 });
+        else await jobFailed(j.id, errorText(err));
       }
     })
   );
@@ -373,7 +381,7 @@ export async function tickRun(
   const videos = fresh.filter((x) => x.kind === "video");
   for (const j of videos.filter((x) => x.status === "running" && x.nodeId)) {
     try {
-      await applyTaskResult(adapter, j, await adapter.pollVideo(j.nodeId!, ctxFor(j)));
+      await applyTaskResult(adapter, j, await settleClipOnPoll(run, j, () => adapter.pollVideo(j.nodeId!, ctxFor(j))));
     } catch (err) {
       console.warn(`[${adapter.engine}] poll ${j.nodeName} failed:`, errorText(err));
     }
@@ -411,7 +419,7 @@ export async function tickRun(
       const clipPrompt = directed ? finishDirectedMotion(j.prompt) : motionSafePrompt(cleanFramePrompt(j.prompt));
       // A drift re-generation takes a new seed (the same seed would reproduce the drifted take).
       const seed = vs.seed !== undefined ? vs.seed + 101 * (vs.driftRegens ?? 0) : undefined;
-      const taskId = await adapter.submitVideo({ prompt: withNoText(clipPrompt, "video"), imageUrl, lastImageUrl, seed }, ctxFor(j));
+      const taskId = await guardJobCall("video", run, j, () => adapter.submitVideo({ prompt: withNoText(clipPrompt, "video"), imageUrl, lastImageUrl, seed }, ctxFor(j)));
       await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: taskId } });
       inFlight++;
     } catch (err) {

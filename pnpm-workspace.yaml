@@ -7,3 +7,5 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
   ffmpeg-static: true
+minimumReleaseAgeExclude:
+  - docx@9.9.0

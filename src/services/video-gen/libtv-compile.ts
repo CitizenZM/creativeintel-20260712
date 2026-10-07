@@ -550,7 +550,8 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
     // Comparison shots are generated as two clean images and stacked in the edit
     // (asking one image for a split screen returns a collage).
     if (directed) {
-      const ad = await directAd({
+      const { guardLlm } = await import("@/services/ops/spend");
+      const ad = await guardLlm({ projectId }, { inTokens: 8000, outTokens: 4000 }, async () => directAd({
         frames: normalized,
         brand: project.brandName,
         product: project.productName || project.brandName,
@@ -570,7 +571,7 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
         scale,
         aspectRatio,
         clipSeconds: clipDurationSec,
-      });
+      }));
       // Action shots (big body movement) render on Kling, which handles human motion best; the rest stay on the run's model.
       const actionName = executor === "openrouter" && videoModel !== ACTION_VIDEO_MODEL ? ACTION_VIDEO_MODEL : null;
       const actionVideo = actionName

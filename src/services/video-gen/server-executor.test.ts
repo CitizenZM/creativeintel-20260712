@@ -497,3 +497,59 @@ describe("clip drift results", () => {
     expect(queue.jobDone).toHaveBeenCalledWith(expect.objectContaining({ jobId: "v1", resultUrl: "https://cdn/V1-b.mp4", creditsSpent: 40 }));
   });
 });
+
+describe("spend guard at the paid call sites", () => {
+  const SEEDREAM = { openrouterModel: "bytedance-seed/seedream-5-0-flash" };
+  async function paidRun(budgetUsd: number, k1Settings: Record<string, unknown> = {}) {
+    const { MemorySpendLedger, setSpendLedger } = await import("@/services/ops/budget-guard");
+    const ledger = new MemorySpendLedger();
+    setSpendLedger(ledger);
+    await ledger.setBudget({ projectId: "p1", runId: "run1" }, budgetUsd);
+    seed("openrouter");
+    Object.assign(store.runs.get("run1")!, { projectId: "p1" });
+    store.jobs.find((j) => j.id === "k1")!.settings = { coversFrames: [1, 2], ...SEEDREAM, ...k1Settings };
+    store.jobs.find((j) => j.id === "v1")!.settings = { coversFrames: [1, 2], duration: 4, openrouterModel: "google/veo-3.1-lite" };
+    return ledger;
+  }
+  afterEach(async () => (await import("@/services/ops/budget-guard")).setSpendLedger(null));
+
+  it("refuses a clip past the run's approved budget without calling the provider", async () => {
+    const ledger = await paidRun(0.05);
+    const adapter = fakeAdapter({ engine: "openrouter" });
+    await tickRun(adapter, "run1");
+    await tickRun(adapter, "run1");
+    expect(adapter.generateImage).toHaveBeenCalledTimes(1);
+    expect(adapter.submitVideo).not.toHaveBeenCalled();
+    expect(store.jobs.find((j) => j.id === "v1")!.error).toMatch(/Budget exceeded.*run run1.*\$0\.05/);
+    const entries = await ledger.entries({ projectId: "p1" });
+    expect(entries.map((e) => [e.kind, e.estUsd])).toEqual([["image", 0.018]]);
+  });
+
+  it("reserves a clip at submit and reconciles it with the cost its poll reports", async () => {
+    const ledger = await paidRun(1);
+    const { logAiUsage } = await import("@/services/ai/usage");
+    const adapter = fakeAdapter({
+      engine: "openrouter",
+      pollVideo: vi.fn(async (): Promise<TaskResult> => {
+        logAiUsage({ provider: "openrouter", model: "google/veo-3.1-lite", capability: "video", videoSeconds: 4, costUsd: 0.119 });
+        return { status: "SUCCESS", url: "https://cdn/V1.mp4" };
+      }),
+    });
+    await tickRun(adapter, "run1");
+    expect(adapter.submitVideo).toHaveBeenCalledTimes(1);
+    expect((await ledger.openEntryForJob("v1", "video"))?.estUsd).toBe(0.12);
+    await tickRun(adapter, "run1");
+    expect(statusOf("v1")).toBe("completed");
+    const clip = (await ledger.entries({ projectId: "p1" })).find((e) => e.kind === "video")!;
+    expect(clip.actualUsd).toBe(0.119);
+  });
+
+  it("keeps the QC-rejected keyframe when there is no budget left for the reroll", async () => {
+    await paidRun(0.01, { qcAttempts: 1, qcRejectedUrl: "https://cdn/K1-rejected.png" });
+    const adapter = fakeAdapter({ engine: "openrouter" });
+    await tickRun(adapter, "run1");
+    expect(adapter.generateImage).not.toHaveBeenCalled();
+    expect(statusOf("k1")).toBe("completed");
+    expect(store.jobs.find((j) => j.id === "k1")!.resultUrl).toBe("https://cdn/K1-rejected.png");
+  });
+});

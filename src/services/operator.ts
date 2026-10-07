@@ -177,6 +177,14 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     maxVariants: z.number().int().min(2).max(20).optional(),
     narrative: z.boolean().optional(),
   }),
+  /** Line-item cost forecast (low / expected / high, QC rerolls included) of a compiled run or a storyboard — before approving spend. */
+  z.object({ action: z.literal("estimate-run"), projectId: z.string().min(1), runId: z.string().min(1).optional(), storyboardId: z.string().min(1).optional(), imageModel: z.string().min(1).optional(), videoModel: z.string().min(1).optional(), clipDurationSec: z.number().int().positive().max(20).optional() }),
+  /** Owner-approved USD cap for the project, or one run (runId); null removes it. Paid calls past it are refused before the provider is called. */
+  z.object({ action: z.literal("set-budget"), projectId: z.string().min(1), runId: z.string().min(1).optional(), usd: z.number().nonnegative().max(10_000).nullable() }),
+  /** Spend ledger totals by kind / model / run (since an ISO date). */
+  z.object({ action: z.literal("spend-report"), projectId: z.string().min(1), since: z.string().min(4).optional() }),
+  /** Client report (HTML + DOCX), uploaded; returns both URLs. narrative "template" skips the LLM summary. */
+  z.object({ action: z.literal("campaign-report"), projectId: z.string().min(1), narrative: z.enum(["llm", "template"]).optional() }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;
