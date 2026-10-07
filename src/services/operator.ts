@@ -217,6 +217,12 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("ops-recover"), dryRun: z.boolean().default(true) }),
   /** Packshot repair of a server run's keyframe (local composite, no spend): returns the repaired image; apply swaps it in as the job's result. */
   z.object({ action: z.literal("repair-keyframe"), projectId: z.string().min(1), runId: z.string().min(1), node: z.string().regex(/^K\d+E?$/), bbox: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]).optional(), packshotUrl: z.string().url().optional(), reason: z.string().max(200).optional(), apply: z.boolean().optional() }),
+  /** Catalog ads: import a product feed (Shopify products.json, Google Merchant XML/TSV, Meta CSV, generic CSV) → CatalogRun. Free. */
+  z.object({ action: z.literal("catalog-import"), projectId: z.string().min(1), feedUrl: z.string().url().optional(), feedText: z.string().min(1).max(15_000_000).optional(), format: z.enum(["shopify", "google-xml", "google-tsv", "meta-csv", "generic-csv"]).optional(), currency: z.string().length(3).optional() }),
+  /** Plan a CatalogRun: image (free) | video-template (one paid first render per category) | video-full (estimate only, never compiles). */
+  z.object({ action: z.literal("catalog-plan"), projectId: z.string().min(1), catalogRunId: z.string().min(1), mode: z.enum(["image", "video-template", "video-full"]), platforms: z.array(z.string().min(1)).max(12).optional(), goal: z.string().max(80).optional(), promo: z.object({ pct: z.number().nullable().optional(), code: z.string().max(40).nullable().optional(), deadline: z.string().nullable().optional(), label: z.string().max(40).nullable().optional() }).optional(), maxSkus: z.number().int().min(1).max(500).optional(), templates: z.array(z.string()).max(12).optional(), formats: z.array(z.string()).max(12).optional() }),
+  /** Render the next image-mode SKUs locally (sharp + pango, $0) and upload them; call again to continue. */
+  z.object({ action: z.literal("catalog-render-images"), projectId: z.string().min(1), catalogRunId: z.string().min(1), limit: z.number().int().min(1).max(20).optional(), formats: z.array(z.string()).max(12).optional() }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;

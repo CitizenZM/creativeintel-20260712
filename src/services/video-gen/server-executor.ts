@@ -527,7 +527,7 @@ export async function storyboardFrames(storyboardId: string | null, directorPlan
   const sb = await prisma.storyboard.findUnique({ where: { id: storyboardId }, select: { frames: true, frameSeconds: true } });
   const frameSeconds = sb?.frameSeconds || 2;
   const frames = Array.isArray(sb?.frames)
-    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null; segment?: string | null; imagePrompt?: string | null; scene?: string | null; locked?: { speed?: number; zoomHit?: { x: number; y: number }; fine?: string; endCard?: { id: string; data?: Record<string, unknown> }; screenPlate?: import("./edit/screen-plate").ScreenPlate; talk?: { line?: string; persona?: string }; captionStyle?: "native" | "kinetic"; engine?: string } }[])
+    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null; segment?: string | null; imagePrompt?: string | null; scene?: string | null; locked?: { speed?: number; zoomHit?: { x: number; y: number }; fine?: string; endCard?: { id: string; data?: Record<string, unknown> }; screenPlate?: import("./edit/screen-plate").ScreenPlate; talk?: { line?: string; persona?: string }; captionStyle?: "native" | "kinetic"; engine?: string }; voiceStyle?: import("./voice-styles").VoiceStyle | null; voiceEnergy?: import("./voice-styles").VoiceEnergy | null }[])
     : [];
   const plan = (directorPlan as { frames?: Record<string, { vo?: string | null; txt?: string | null }> } | null)?.frames ?? {};
   return frames.map((f, i) => {
@@ -550,6 +550,8 @@ export async function storyboardFrames(storyboardId: string | null, directorPlan
       ...(isTalkFrame(f.locked as never) && f.locked?.talk?.line
         ? { nativeAudio: true, talkLine: f.locked.talk.line, voiceover: f.locked.talk.line, ttsVoice: personaById(f.locked.talk.persona ?? "")?.voice.edge ?? null }
         : {}),
+      ...(f.voiceStyle ? { voiceStyle: f.voiceStyle } : {}),
+      ...(f.voiceEnergy ? { voiceEnergy: f.voiceEnergy } : {}),
     };
   });
 }

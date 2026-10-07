@@ -58,6 +58,14 @@ describe("scaffoldLockedFrames", () => {
     expect(frames[1].voiceover).toBe("Twenty percent off this Black Friday.");
   });
 
+  it("gives each spoken beat a VO delivery style from its purpose, shifted for the platform (TikTok: more energy)", () => {
+    expect(frames.map((f) => f.voiceStyle ?? null)).toEqual(["excited", "excited", "cheerful", "cheerful", null, null]);
+    expect(frames.filter((f) => f.voiceover).every((f) => f.voiceEnergy === 1)).toBe(true);
+    const yt = scaffoldLockedFrames({ plan: { ...plan, platform: "youtube_instream_skippable" } as PlatformPlan, productName: "NXTPAPER 14" });
+    expect(yt[0]).toMatchObject({ voiceStyle: "cheerful", voiceEnergy: -1 });
+    expect(yt[2].voiceStyle).toBe("friendly");
+  });
+
   it("falls back to usable prompts without a model", () => {
     expect(frames[2].imagePrompt).toMatch(/matte screen/);
     expect(frames[2].imagePrompt).toMatch(/NXTPAPER 14 from image 1/);
