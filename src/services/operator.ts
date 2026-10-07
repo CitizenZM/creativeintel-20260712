@@ -53,6 +53,33 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   /** Tick an approved server run now instead of waiting for the 5-minute cron (no new spend beyond what was approved). */
   z.object({ action: z.literal("drive-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({ action: z.literal("director-review"), projectId: z.string().min(1), runId: z.string().min(1) }),
+  /** Extract the sp-1 product brief (selling points → proof visuals, keywords, objections, compliance) and store it on the project. */
+  z.object({
+    action: z.literal("product-brief"),
+    projectId: z.string().min(1),
+    reviews: z.array(z.object({ stars: z.number(), text: z.string() })).max(300).optional(),
+    qa: z.array(z.object({ q: z.string(), a: z.string() })).max(50).optional(),
+    specs: z.record(z.string(), z.string()).optional(),
+    price: z.number().nullable().optional(),
+    listPrice: z.number().nullable().optional(),
+    rating: z.number().nullable().optional(),
+    reviewCount: z.number().nullable().optional(),
+    keywordData: z.record(z.string(), z.array(z.string())).optional(),
+    platforms: z.array(z.string()).max(12).optional(),
+    durationSec: z.number().int().min(6).max(60).optional(),
+  }),
+  /** Pick 3 diverse opening hooks + an end card for category × platform × goal (category defaults to the stored brief). */
+  z.object({
+    action: z.literal("select-creative"),
+    projectId: z.string().min(1).optional(),
+    category: z.string().optional(),
+    platform: z.string().min(1),
+    goal: z.enum(["cold", "retarget", "promo", "awareness", "app_install", "lead"]),
+    promo: z.object({ pct: z.number().nullable().optional(), price: z.number().nullable().optional(), comparePrice: z.number().nullable().optional(), priceCheckedAt: z.string().nullable().optional(), code: z.string().nullable().optional(), deadline: z.string().nullable().optional() }).optional(),
+    assets: z.object({ creatorFootage: z.boolean().optional(), realTestFootage: z.boolean().optional(), rating: z.object({ value: z.number(), count: z.number() }).nullable().optional(), multiSku: z.boolean().optional() }).optional(),
+    runDate: z.string().optional(),
+    ctv: z.boolean().optional(),
+  }),
   z.object({ action: z.literal("save-structure"), projectId: z.string().min(1), teardownId: z.string().min(1) }),
   z.object({ action: z.literal("choose-structure"), projectId: z.string().min(1), structureId: z.string().min(1).nullable() }),
   z.object({

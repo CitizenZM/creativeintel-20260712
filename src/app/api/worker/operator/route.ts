@@ -224,6 +224,60 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, structureId: input.structureId });
   }
 
+  if (input.action === "product-brief") {
+    const project = await prisma.project.findUnique({
+      where: { id: input.projectId },
+      select: { id: true, brandName: true, productName: true, productUrl: true, productPageTitle: true, productPageText: true },
+    });
+    if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    const title = project.productPageTitle || project.productName || "";
+    if (!title && !project.productPageText) return NextResponse.json({ error: "No product page on this project — set productUrl first" }, { status: 409 });
+    try {
+      const { extractProductBrief } = await import("@/services/creative/product-brief");
+      const text = project.productPageText ?? "";
+      const brief = await extractProductBrief({
+        url: project.productUrl,
+        title,
+        brand: project.brandName,
+        bullets: text.split(/\n+/).map((l) => l.trim()).filter((l) => l.length > 12 && l.length < 300).slice(0, 20),
+        description: text,
+        specs: input.specs,
+        price: input.price ?? null,
+        listPrice: input.listPrice ?? null,
+        rating: input.rating ?? null,
+        reviewCount: input.reviewCount ?? null,
+        reviews: input.reviews,
+        qa: input.qa,
+        keywordData: input.keywordData,
+        platforms: input.platforms,
+        durationSec: input.durationSec,
+      });
+      await prisma.project.update({ where: { id: project.id }, data: { productBrief: brief as object, productBriefAt: new Date() } });
+      return NextResponse.json({ ok: true, brief });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    }
+  }
+
+  if (input.action === "select-creative") {
+    const { selectCreative, platformProfile } = await import("@/services/creative/library");
+    const { TO_CREATIVE_CATEGORY } = await import("@/services/creative/product-brief");
+    let category = input.category;
+    if (!category && input.projectId) {
+      const p = await prisma.project.findUnique({ where: { id: input.projectId }, select: { productBrief: true } });
+      const sp = (p?.productBrief as { category?: string } | null)?.category;
+      if (sp) category = TO_CREATIVE_CATEGORY[sp as keyof typeof TO_CREATIVE_CATEGORY];
+    }
+    if (!category) return NextResponse.json({ error: "category required (or a stored product brief)" }, { status: 400 });
+    try {
+      platformProfile(input.platform as never);
+      const choice = selectCreative({ ...input, category: category as never, platform: input.platform as never });
+      return NextResponse.json({ ok: true, category, choice });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
+    }
+  }
+
   if (input.action === "director-review") {
     const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId }, select: { id: true } });
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });

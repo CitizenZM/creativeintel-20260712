@@ -183,6 +183,8 @@ model Project {
   productPageTitle  String? // scraped from productUrl
   productPageImages Json? // [{url, alt, width?, height?}] real images from productUrl
   productPageText   String? @db.Text // scraped product description from productUrl
+  productBrief      Json? // sp-1 product brief: ranked filmable selling points, keywords, objections, compliance (services/creative/product-brief.ts)
+  productBriefAt    DateTime?
   userProductImages Json? // [{url, caption, uploadedAt}] user-uploaded reference photos
   // Set once a person has checked the product details (scraped details start
   // unconfirmed; every script and render is held to them).
