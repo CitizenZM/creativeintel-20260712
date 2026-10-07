@@ -77,3 +77,10 @@ describe("inGiftingWindow", () => {
     expect(inGiftingWindow("2026-06-01")).toBe(false);
   });
 });
+
+describe("goal fit", () => {
+  it("never opens an awareness ad with a price slam, even during a sale", () => {
+    const c = selectCreative({ category: "electronics", platform: "youtube_instream_skippable", goal: "awareness", runDate: "2026-11-27T12:00:00Z", promo: { pct: 25 } });
+    expect(c.hooks.map((h) => h.hook.id)).not.toContain("H16");
+  });
+});
