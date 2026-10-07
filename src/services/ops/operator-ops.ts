@@ -21,10 +21,17 @@ async function qcOptions() {
   return { enabled: process.env.KEYFRAME_QC !== "off", maxRerolls: MAX_KEYFRAME_REROLLS, model: qcEstimateModel() };
 }
 
+/** After a clip renders: the drift check (its vision calls), drift re-generations and billed retries. */
+async function clipOptions() {
+  const { clipDriftMode } = await import("@/services/video-gen/keyframe-qc");
+  return { driftMode: clipDriftMode(), autoRegen: process.env.AUTO_REGEN_ON_DRIFT === "on", maxRegens: 1, driftRate: 0.2, retryRate: 0.05, retryHighRate: 0.25 };
+}
+
 export async function estimateRunAction(input: { projectId: string; runId?: string; storyboardId?: string; imageModel?: string; videoModel?: string; clipDurationSec?: number }): Promise<Result> {
   if (!input.runId && !input.storyboardId) return err(400, "runId or storyboardId required");
   const prices = await loadPriceTable();
   const qc = await qcOptions();
+  const clips = await clipOptions();
   let forecast: RunCostForecast;
   let remaining: RunCostForecast | null = null;
   let runInfo: Record<string, unknown> = {};
@@ -32,7 +39,7 @@ export async function estimateRunAction(input: { projectId: string; runId?: stri
     const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId }, include: { jobs: true } });
     if (!run) return err(404, "Run not found");
     const frames = run.jobs.filter((j) => j.kind === "video").length;
-    const opts = { prices, qc, llm: [directorReviewCall(Math.max(1, frames))] };
+    const opts = { prices, qc, clips, llm: [directorReviewCall(Math.max(1, frames))] };
     const src = { executor: run.executor, clipDurationSec: run.clipDurationSec, jobs: run.jobs };
     forecast = estimateRunCost(src, opts);
     if (run.status !== "draft" && run.status !== "awaiting_approval") remaining = estimateRunCost(src, { ...opts, remainingOnly: true });
@@ -44,7 +51,7 @@ export async function estimateRunAction(input: { projectId: string; runId?: stri
     if (!sb) return err(404, "Storyboard not found");
     const frames = (Array.isArray(sb.frames) ? sb.frames : []) as Record<string, unknown>[];
     const { isLockedStoryboard } = await import("@/services/video-gen/locked-script");
-    const opts = { prices, qc, llm: [directorReviewCall(frames.length)] };
+    const opts = { prices, qc, clips, llm: [directorReviewCall(frames.length)] };
     forecast = isLockedStoryboard(sb.style)
       ? estimateRunCost({ lockedFrames: frames as never, imageModel: input.imageModel }, opts)
       : estimateRunCost(storyboardJobs({ frames: frames as never, frameSeconds: sb.frameSeconds, imageModel: input.imageModel, videoModel: input.videoModel, clipDurationSec: input.clipDurationSec }), opts);
