@@ -21,6 +21,9 @@
  *            default: inferred from the prompt)
  *   productSpec facts the product must show, fed into the QC rubric and re-roll corrections
  *            (e.g. "6.6 mm thick side profile, hair-thin bezel")
+ *   screenPlate  real screen content composited by the edit onto the TV/tablet screen of this clip
+ *            (contents + switch times, and the screen corners: track | firstLast | detect) — see
+ *            edit/screen-plate.ts; the video prompt keeps the screen flat green (#00FF00) or black
  * No director rewrite, no comparison LLM split, no cast-lock heuristics.
  */
 import type { CompiledJobDraft } from "./libtv-compile";
@@ -47,6 +50,8 @@ export interface LockedBlock {
   productSpec?: string;
   /** CTA frame: end-card template (creative library E01–E12) and its live facts (pct, code, price…). */
   endCard?: { id: string; data?: Record<string, unknown> };
+  /** Screen-plate compositing for this clip (edit/screen-plate.ts). */
+  screenPlate?: import("./edit/screen-plate").ScreenPlate;
 }
 
 export interface LockedFrame {

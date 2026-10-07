@@ -27,6 +27,7 @@ import { bestWindow, motionScores } from "./motion";
 import { detectBeats, trackWindowStart } from "./beat-detect";
 import { measureCuts, measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
+import { applyScreenPlates } from "./screen-plate";
 import { claimChipPng, comparisonLabelPng, ctaButtonPng, domainPng, finePrintPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
 import { endCardLayers, endCardSlots, layerFilter, layerInputArgs, RENDERABLE_END_CARDS, type EndCardTemplate, type LayerAnim } from "./endcard-render";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
@@ -296,6 +297,10 @@ export async function renderEditV2(input: {
     beats: track?.beats,
   });
   const total = plan.durationSec;
+
+  // 1a. Screen plates: real screen content composited onto the device screen of the source clips
+  // first, so reframing, speed ramps, text and the end card all sit on top of it.
+  if (input.frames.some((f) => f.screenPlate)) await applyScreenPlates({ dir, frames: input.frames, segments: input.segments, sources: input.sources });
 
   // 1b. Smart segments: each hook shot from a clip takes that clip's most dynamic window.
   const motionCache = new Map<string, Awaited<ReturnType<typeof motionScores>>>();

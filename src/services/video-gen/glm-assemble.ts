@@ -45,6 +45,8 @@ export interface AssembleFrame {
   zoomHit?: { x: number; y: number } | null;
   /** Locked scripts: legal fine print shown under this frame (end card). */
   fine?: string | null;
+  /** Locked scripts: real content composited onto the device screen in this frame's clip (edit/screen-plate.ts). */
+  screenPlate?: import("./edit/screen-plate").ScreenPlate | null;
 }
 
 export const CAPTION_FONT = path.join(process.cwd(), "assets/fonts/Anton-Regular.ttf");
