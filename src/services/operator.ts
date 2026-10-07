@@ -189,6 +189,10 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("image-ads"), projectId: z.string().min(1), templates: z.array(z.string()).max(12).optional(), formats: z.array(z.string()).max(12).optional(), promo: z.object({ pct: z.number().nullable().optional(), price: z.number().nullable().optional(), comparePrice: z.number().nullable().optional(), currency: z.string().nullable().optional(), code: z.string().nullable().optional(), deadline: z.string().nullable().optional(), label: z.string().max(40).nullable().optional() }).optional(), proof: z.object({ rating: z.number().min(0).max(5).nullable().optional(), reviewCount: z.number().int().nullable().optional(), quote: z.string().max(240).nullable().optional(), author: z.string().max(60).nullable().optional() }).optional(), copy: z.record(z.string(), z.string().max(160)).optional(), productUrl: z.string().url().optional(), beforeUrl: z.string().url().optional() }),
   /** Pre-flight creative score of a run's master (thumb-stop predictor, no spend) → qcReport.preflight. */
   z.object({ action: z.literal("preflight"), projectId: z.string().min(1), runId: z.string().min(1), platform: z.string().max(40).optional(), goal: z.string().max(40).optional() }),
+  /** Hook trend report: competitor/category openings → rising / saturated hooks, examples, recommendations. llm: batch the unsure openings (≤ 40 per call). */
+  z.object({ action: z.literal("hook-trends"), projectId: z.string().min(1), category: z.string().max(80).optional(), platform: z.string().max(60).optional(), windowDays: z.number().int().min(7).max(180).optional(), llm: z.boolean().optional() }),
+  /** Auto-iteration: propose the next test round (keep / kill / explore / retest / cutdowns + cost) → Project.nextRound. Never renders or spends. */
+  z.object({ action: z.literal("next-round"), projectId: z.string().min(1), platform: z.string().max(60).optional() }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;

@@ -280,7 +280,8 @@ const HOOK_RULES: [string, RegExp, "v" | "t" | "b"][] = [
   ["H11", /asmr|satisfying|crunch|sizzle|\bclick(s|ing)?\b.*\bsound|foley/i, "b"],
   ["H12", /speed[- ]?ramp|time[- ]?lapse|transformation/i, "v"],
   ["H13", /\b(\d|three|five) (reasons|things|ways)\b|reasons (why|to)/i, "t"],
-  ["H15", /\b\d[\d,.]*\s?(%|x|×|million|k\b|hours|nits|days)|\bbold number\b|huge number/i, "b"],
+  // "40% off" is a discount (H16), not a stat.
+  ["H15", /\b\d[\d,.]*\s?(%(?!\s*off)|x|×|million|k\b|hours|nits|days)|\bbold number\b|huge number/i, "b"],
   ["H16", /\d+\s?% off|\bsale\b|price drop|deal|\$\d|was \$|strike-?through/i, "b"],
   ["H17", /talking head|selfie|creator (looks|speaks|talks)|into (the )?lens|to (the )?camera/i, "v"],
   ["H18", /green[- ]?screen/i, "b"],
@@ -309,7 +310,8 @@ const HOOK_RULES: [string, RegExp, "v" | "t" | "b"][] = [
   ["H14", /\?\s*$/, "t"],
 ];
 
-const SURE = 3;
+/** Rule score at which classifyHookRules is "sure" (no model pick needed). */
+export const SURE = 3;
 
 /** Weighted rule match on the reference opening. Score ≥ 3 is "sure". */
 export function classifyHookRules(ref: Pick<ReferenceAdSpec, "hookText" | "hookVisual" | "hookType" | "beats">): Omit<HookClassification, "method"> {

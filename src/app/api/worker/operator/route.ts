@@ -28,6 +28,8 @@
  * POST { action: "estimate-run" | "set-budget" | "spend-report" | "campaign-report", projectId, … } — cost forecast, budget, ledger, client report
  * POST { action: "image-ads", projectId, templates?, formats?, promo?, proof?, copy?, productUrl?, beforeUrl? } — static ad set → Project.imageAdSets
  * POST { action: "preflight", projectId, runId, platform?, goal? } — pre-flight creative score → qcReport.preflight
+ * POST { action: "hook-trends", projectId, category?, platform?, windowDays?, llm? } — rising / saturated competitor hooks + recommendations
+ * POST { action: "next-round", projectId, platform? } — proposed next test round + cost → Project.nextRound (never spends)
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -422,6 +424,20 @@ export async function POST(request: Request) {
   if (input.action === "set-budget") return opsReply(await (await import("@/services/ops/operator-ops")).setBudgetAction(input));
   if (input.action === "spend-report") return opsReply(await (await import("@/services/ops/operator-ops")).spendReportAction(input));
   if (input.action === "campaign-report") return opsReply(await (await import("@/services/ops/operator-ops")).campaignReportAction(input));
+  if (input.action === "hook-trends" || input.action === "next-round") {
+    try {
+      if (input.action === "hook-trends") {
+        const { hookTrendReport } = await import("@/services/research/hook-trends");
+        if (input.llm) await loadAiSettings();
+        return NextResponse.json({ ok: true, report: await hookTrendReport(input.projectId, { category: input.category, platform: input.platform, windowDays: input.windowDays, llm: input.llm ? "default" : null }) });
+      }
+      const { planNextRound } = await import("@/services/performance/iterate");
+      return NextResponse.json({ ok: true, nextRound: await planNextRound(input.projectId, { platform: input.platform }) });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: msg }, { status: /not found/i.test(msg) ? 404 : 500 });
+    }
+  }
 
   if (input.action === "clone-ad") {
     const { cloneAdIntoProject } = await import("@/services/creative/ad-cloner.store");

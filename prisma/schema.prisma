@@ -231,6 +231,10 @@ model Project {
   budgetUsd         Float?
   spentUsd          Float?
   imageAdSets       Json? // static image ad sets, latest first (services/image-ads/generate.ts): [{createdAt, items[{template, format, w, h, url}], skipped}]
+  // Auto-iteration agent (services/performance/iterate.ts): the proposed next test round — keep / kill /
+  // explore / re-test, batch spec and cost. A proposal only; rendering it needs an explicit approval.
+  nextRound         Json?
+  nextRoundAt       DateTime?
 }
 
 model Brand {

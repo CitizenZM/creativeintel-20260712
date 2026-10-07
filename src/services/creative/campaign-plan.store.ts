@@ -60,10 +60,22 @@ export async function createCampaignPlan(projectId: string, req: PlanRequest = {
     strictCompliance: req.strictCompliance ?? strictByDefault(),
     overrides: normalizeOverrides(req.overrides),
     llm: req.llm,
-    bias: req.bias === undefined ? await import("@/services/performance/agent").then((m) => m.performanceBias(projectId)).catch(() => undefined) : (req.bias ?? undefined),
+    bias: req.bias === undefined ? await loadPlanBias(projectId, brief.category, platforms) : (req.bias ?? undefined),
   });
   await prisma.project.update({ where: { id: projectId }, data: { campaignPlan: plan as object, campaignPlanAt: new Date() } });
   return plan;
+}
+
+/**
+ * Default selectCreative bias: our own results (Performance Agent) merged with competitor hook
+ * trends (research/hook-trends, rules only — no model call); our results win for any id both score.
+ */
+async function loadPlanBias(projectId: string, category: string | undefined, platforms: string[]): Promise<Partial<Record<string, number>> | undefined> {
+  const [perf, trends] = await Promise.all([
+    import("@/services/performance/agent").then((m) => m.performanceBias(projectId)).catch(() => undefined),
+    import("@/services/research/hook-trends").then((m) => m.trendBias(category, platforms.length === 1 ? platforms[0] : null, { projectId }).then((t) => ({ t, merge: m.mergeBias }))).catch(() => undefined),
+  ]);
+  return trends ? trends.merge(perf, trends.t) : perf && Object.keys(perf).length ? perf : undefined;
 }
 
 export async function getCampaignPlan(projectId: string): Promise<{ plan: CampaignPlan | null; planAt: Date | null } | null> {
