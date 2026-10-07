@@ -95,7 +95,8 @@ PEOPLE vs the casting sheet — for each person on the sheet: face shape (jaw, e
 Identity score: 1.0 clearly the same person · 0.8 same person, small drift · 0.6 resembles but one feature differs · 0.4 a different-looking person · 0 absent.
 People who are NOT from the casting sheet (extras, installers) are ignored for identity.
 
-For an END frame (a reference labelled "start frame"): set sceneConsistent=false when the room, lighting, lens/framing distance or wardrobe changed.
+For an END frame (a reference labelled "start frame"): set sceneConsistent=false only when the room, lighting or wardrobe changed. The planned motion legitimately changes the action and framing (a box opened, the product lifted closer, a push-in) — that is not a scene change.
+SCREEN CONTENT (whatever a TV, tablet or phone screen displays) is never a defect: it is replaced in the edit. Never report "garbled text" for screen content, missing titles or UI.
 
 DEFECTS — list every concrete problem. Start each issue with one of these tags when it applies:
 "bezel thicker", "bezel uneven", "body too thin (stick-like)", "body too thick", "aspect ratio wrong", "ports moved", "camera module wrong", "stand wrong", "logo misspelled", "logo misplaced", "colour wrong", "product warped", "looks like a framed painting",

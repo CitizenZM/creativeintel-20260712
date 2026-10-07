@@ -188,9 +188,16 @@ export function guardDisabled(): boolean {
 }
 
 /** Reserve `estUsd` for this call or refuse. A free call (estimate 0) records nothing and returns null. */
+/** Token-billed calls (thinking models) vary most; images and clips are near-flat per call. */
+export function reserveHeadroom(kind: SpendScope["kind"] | undefined): number {
+  return kind === "vision_qc" || kind === "llm" ? 1.5 : 1.05;
+}
+
 export async function chargeOrRefuse(scope: SpendScope, estUsd: number, ledger?: SpendLedger): Promise<SpendReservation | null> {
   if (!(estUsd > 0) || guardDisabled()) return null;
-  return (ledger ?? (await spendLedger())).reserve(scope, round(estUsd));
+  // Reserve with headroom so reconciling to the provider's bill can't push the total past the cap
+  // (the first live run settled vision QC at 3.2× its estimate and ended $0.03 over a $2 budget).
+  return (ledger ?? (await spendLedger())).reserve(scope, round(estUsd * reserveHeadroom(scope.kind)));
 }
 
 /** What the captured usage rows cost: the provider's reported cost, else tokens / images / seconds at table price. */
@@ -233,7 +240,7 @@ export async function withSpendGuard<T>(scope: SpendScope, estUsd: number, call:
   }
   const actual = opts.actual?.(result) ?? costOfUsage(usage, opts.prices);
   if (actual != null) await ledger.settle(res.id, actual).catch(() => {});
-  else if (opts.settle !== "later") await ledger.settle(res.id, res.estUsd).catch(() => {});
+  else if (opts.settle !== "later") await ledger.settle(res.id, round(estUsd)).catch(() => {});
   return result;
 }
 

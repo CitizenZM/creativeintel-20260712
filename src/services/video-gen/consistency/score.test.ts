@@ -70,19 +70,19 @@ describe("scoreFrame", () => {
   });
 
   it("applies per-shot thresholds: the same product score fails a close-up, passes a wide family shot", async () => {
-    const r = report({ product: { ...report().product!, score: 0.6 }, cast: [{ ref: "casting sheet", present: true, bbox: null, identityScore: 0.9, checks: {} }] });
+    const r = report({ product: { ...report().product!, score: 0.5 }, cast: [{ ref: "casting sheet", present: true, bbox: null, identityScore: 0.9, checks: {} }] });
     const frame = await deviceImage(THIN, "jpeg");
     const base = { product: [{ image: await deviceImage(THIN) }], cast: [{ image: await deviceImage(THIN) }] };
     const close = await scoreFrame(frame, base, { shot: "x", shotType: "product-closeup", deps: { vision: vision(r), pixels: false } });
     const wide = await scoreFrame(frame, base, { shot: "x", shotType: "people-wide", deps: { vision: vision(r), pixels: false } });
     expect(close.pass).toBe(false);
-    expect(close.reasons.join(" ")).toMatch(/product 0\.6 < 0\.78/);
+    expect(close.reasons.join(" ")).toMatch(/product 0\.5 < 0\.66/);
     expect(wide.pass).toBe(true);
     // ...and a drifted face fails the wide shot.
     const drifted = report({ product: report().product, cast: [{ ref: "casting sheet", present: true, bbox: null, identityScore: 0.6, checks: {} }] });
     const wideDrift = await scoreFrame(frame, base, { shot: "x", shotType: "people-wide", deps: { vision: vision(drifted), pixels: false } });
     expect(wideDrift.pass).toBe(false);
-    expect(wideDrift.reasons.join(" ")).toMatch(/identity 0\.6 < 0\.75/);
+    expect(wideDrift.reasons.join(" ")).toMatch(/identity 0\.6 < 0\.7\b/);
   });
 
   it("fails on a major vision defect and on a missing cast member", async () => {

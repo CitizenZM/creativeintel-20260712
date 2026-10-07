@@ -309,6 +309,16 @@ async function withOpacity(png: Buffer, a: number): Promise<Buffer> {
     .toBuffer();
 }
 
+/** A pill that never wraps: shrink the type (to 60%) and widen the box (to 84%) until it is one line. */
+export async function oneLinePill(text: string, c: Canvas, style: Parameters<typeof pill>[2]): Promise<Buffer> {
+  const oneLine = (await size(await pill("X", c, style))).h;
+  let out = await pill(text, c, style);
+  for (let k = 1; k <= 6 && (await size(out)).h > oneLine * 1.25; k++) {
+    out = await pill(text, c, { ...style, size: Math.round(style.size * (1 - 0.067 * k)), widthPct: Math.min(0.84, style.widthPct + 0.04 * k) });
+  }
+  return out;
+}
+
 // ─── Builders: E02–E04, E08, E09, E12 ────────────────────────────────────────────────────────────
 
 /** E02 — a 12-point starburst carrying "−30%" + "OFF". */
@@ -697,7 +707,10 @@ async function templateLayers(id: EndCardTemplate, data: EndCardData, c: Canvas,
   const u = unit(c);
   const cur = data.currency || "$";
   const headline = data.headline?.trim();
-  const headPill = (text: string) => pill(text.toUpperCase(), c, { size: Math.round(u * 0.062), fg: p.look.offerText, bg: p.look.offerBg, family: p.look.headline.family, fontFile: p.look.headline.file, widthPct: 0.66 });
+  // The headline sits right under the logo: keep it to ONE line (shrink to 60%, widen to 84%) — a wrapped
+  // 2-line pill grew upward into the logo on the first live end card ("20% OFF THIS BLACK FRIDAY").
+  const headPill = (text: string) =>
+    oneLinePill(text.toUpperCase(), c, { size: Math.round(u * 0.062), fg: p.look.offerText, bg: p.look.offerBg, family: p.look.headline.family, fontFile: p.look.headline.file, widthPct: 0.66 });
   const head = async (y = s.headline): Promise<EndCardLayer[]> => (headline ? [{ png: await headPill(headline), y, delaySec: 0.15, anim: "pop", role: "headline" }] : []);
   switch (id) {
     case "E01":
