@@ -419,7 +419,9 @@ export async function renderFromRun(input: {
   musicMood?: "pop" | "holiday";
   ctaText?: string;
   tag: string;
-}): Promise<{ hookText: string | null; masterUrl: string; previewUrl: string | null; durationSec: number; qc: QcReport }> {
+  /** Overrides on the Brand Kit look (localized versions: caption fonts with the script's glyphs, translated CTA). */
+  brandPatch?: Partial<import("./edit/brand-style").BrandStyle>;
+}): Promise<{ hookText: string | null; masterUrl: string; previewUrl: string | null; durationSec: number; qc: QcReport; srt?: string | null }> {
   const { cutdownFrames } = await import("./edit/cutdown");
   const frames = input.cutdownSec ? cutdownFrames(input.frames, input.cutdownSec) : input.frames;
   const segments = planSegments(frames, input.jobs);
@@ -437,8 +439,7 @@ export async function renderFromRun(input: {
     }
     const { renderEditV2 } = await import("./edit/render-v2");
     const { loadBrandStyle } = await import("./edit/brand-style");
-    const kit = await loadBrandStyle(input.projectId);
-    const brand = input.ctaText ? { ...kit, ctaText: input.ctaText } : kit;
+    const brand = { ...(await loadBrandStyle(input.projectId)), ...(input.ctaText ? { ctaText: input.ctaText } : {}), ...input.brandPatch };
     const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText, brand, musicMood: input.musicMood });
     const tag = `${input.tag}-${Date.now().toString(36)}`;
     const [m, p] = await Promise.all([
@@ -452,6 +453,7 @@ export async function renderFromRun(input: {
       previewUrl: p.provider === "inline" ? null : p.url,
       durationSec: v.plan.durationSec,
       qc: v.qc,
+      srt: v.srt,
     };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});

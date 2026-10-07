@@ -1,0 +1,37 @@
+{
+  "id": "td_glare_01",
+  "projectId": "proj_nxt",
+  "contentAssetId": "ca_glare_01",
+  "competitorId": "comp_lumio",
+  "rank": 1,
+  "hookType": "problem_agitate",
+  "hookText": "POV: you try to read your iPad in the sun",
+  "hookVisual": "Creator selfie on a sunny balcony, holds a glossy LumioTab up to the camera; the screen is a mirror of the sky",
+  "beats": [
+    { "startSec": 0, "endSec": 1.5, "role": "hook", "visual": "Creator selfie on a sunny balcony, holds a glossy LumioTab up; screen is all reflection", "vo": "POV: you try to read your iPad in the sun.", "onScreenText": "POV: your iPad in the sun" },
+    { "startSec": 1.5, "endSec": 4, "role": "problem", "visual": "Close-up of the glossy screen mirroring her face, she squints and tilts it", "vo": "Glare everywhere, and my eyes hurt after an hour.", "onScreenText": "the glare 😩" },
+    { "startSec": 4, "endSec": 7.5, "role": "demo", "visual": "Split screen under a ring light: glossy tablet left full of reflections, matte LumioTab right, clean", "vo": "This matte screen kills reflections completely.", "onScreenText": "NO GLARE" },
+    { "startSec": 7.5, "endSec": 10, "role": "proof", "visual": "Macro extreme close-up of text on the matte screen, paper-like texture", "vo": "It honestly reads like actual paper.", "onScreenText": "feels like paper" },
+    { "startSec": 10, "endSec": 12.5, "role": "proof", "visual": "Hands scrolling an e-book in bed at night, warm screen, TÜV badge pops", "vo": "And it's certified easy on the eyes.", "onScreenText": "TÜV certified" },
+    { "startSec": 12.5, "endSec": 15, "role": "cta", "visual": "End card: LumioTab packshot, coupon ticket with code READ20, arrow pointing down", "vo": "Grab it with code READ20, link below.", "onScreenText": "20% OFF · CODE READ20" }
+  ],
+  "sellingPoints": [
+    { "point": "matte anti-glare screen", "evidenceTimestamp": "5s" },
+    { "point": "paper-like reading", "evidenceTimestamp": "8s" },
+    { "point": "eye-comfort certification", "evidenceTimestamp": "11s" }
+  ],
+  "proofDevices": [
+    { "type": "demo", "description": "split-screen glare test under a ring light", "timestamp": "5s" },
+    { "type": "authority", "description": "TÜV eye-comfort badge", "timestamp": "11s" }
+  ],
+  "ctaText": "Use code READ20 — link below",
+  "ctaPlacement": "end_card",
+  "offer": "20% off with code READ20",
+  "landingUrl": null,
+  "whyItWorks": "Opens on a relatable POV pain everyone with a glossy tablet knows, agitates it with a face-in-the-reflection close-up, then resolves with a side-by-side demo before two quick proofs and a code close.",
+  "evidenceLevel": "vision_transcript",
+  "confidence": "high",
+  "promptVersion": 1,
+  "competitor": { "name": "LumioTab" },
+  "contentAsset": { "title": "LumioTab matte tablet — sun test", "url": "https://www.tiktok.com/@lumiotab/video/7400000000000000001", "viewCount": 2400000, "durationSec": 15, "platform": "tiktok", "aspectRatio": "9:16" }
+}

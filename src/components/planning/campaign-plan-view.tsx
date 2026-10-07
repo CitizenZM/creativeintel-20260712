@@ -121,7 +121,9 @@ function PlatformPlanPanel({ p }: { p: PlatformPlan }) {
 }
 
 export function CampaignPlanView({ plan, at }: { plan: CampaignPlan; at?: string | null }) {
-  const first = plan.platforms[0]?.platform;
+  // A cloned plan can share its platform with the auto plan: tabs key on platform + position.
+  const tab = (p: CampaignPlan["platforms"][number], i: number) => `${p.platform}-${i}`;
+  const first = plan.platforms[0] ? tab(plan.platforms[0], 0) : undefined;
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
@@ -148,14 +150,14 @@ export function CampaignPlanView({ plan, at }: { plan: CampaignPlan; at?: string
       {first ? (
         <Tabs defaultValue={first}>
           <TabsList className="h-auto flex-wrap">
-            {plan.platforms.map((p) => (
-              <TabsTrigger key={p.platform} value={p.platform}>
+            {plan.platforms.map((p, i) => (
+              <TabsTrigger key={tab(p, i)} value={tab(p, i)}>
                 {p.label || PLATFORM_LABELS[p.platform] || p.platform}
               </TabsTrigger>
             ))}
           </TabsList>
-          {plan.platforms.map((p) => (
-            <TabsContent key={p.platform} value={p.platform}>
+          {plan.platforms.map((p, i) => (
+            <TabsContent key={tab(p, i)} value={tab(p, i)}>
               <PlatformPlanPanel p={p} />
             </TabsContent>
           ))}

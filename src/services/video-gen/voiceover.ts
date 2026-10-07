@@ -61,24 +61,27 @@ const bare = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 export function respell(words: Word[], spellings: { spoken: string; shown: string }[]): Word[] {
   let out = words;
   for (const sp of spellings) {
-    const said = sp.spoken.split(/\s+/).map(bare).filter(Boolean);
+    // The phrase is matched on its letters, so a TTS that splits it differently (ja/zh) still hits.
+    const said = bare(sp.spoken);
     const shown = sp.shown.split(/\s+/).filter(Boolean);
-    if (!said.length || !shown.length) continue;
+    if (!said || !shown.length) continue;
     const next: Word[] = [];
     for (let i = 0; i < out.length; ) {
-      const hit = said.every((w, j) => out[i + j] && bare(out[i + j].text) === w);
-      if (!hit) {
+      let acc = "";
+      let n = 0;
+      while (bare(out[i].text) && i + n < out.length && acc.length < said.length && said.startsWith(acc + bare(out[i + n].text))) acc += bare(out[i + n++].text);
+      if (acc !== said) {
         next.push(out[i++]);
         continue;
       }
       const first = out[i];
-      const last = out[i + said.length - 1];
+      const last = out[i + n - 1];
       const tail = last.text.match(/[^\p{L}\p{N}]+$/u)?.[0] ?? "";
       const span = last.startSec + last.durSec - first.startSec;
       shown.forEach((t, k) =>
         next.push({ text: k === shown.length - 1 ? t + tail : t, startSec: first.startSec + (span * k) / shown.length, durSec: span / shown.length })
       );
-      i += said.length;
+      i += n;
     }
     out = next;
   }
@@ -130,6 +133,7 @@ const alnum = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
  * tokens and give each the timing of the TTS words it covers.
  */
 export function alignToSource(words: Word[], lineText: string): Word[] {
+  if (UNSPACED.test(lineText)) return alignUnspaced(words, lineText);
   const tokens = lineText.split(/\s+/).filter(Boolean);
   const out: Word[] = [];
   let w = 0;
@@ -155,6 +159,86 @@ export function alignToSource(words: Word[], lineText: string): Word[] {
     const endSec = last ? last.startSec + last.durSec : startSec + 0.3;
     out.push({ text: token, startSec, durSec: Math.max(0.05, endSec - startSec) });
   }
+  return out;
+}
+
+/** Scripts written without spaces between words (Japanese, Chinese). */
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const CJK_EDGE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF・ー]/u;
+
+/** The separator between two caption tokens: none when either side is CJK, else a space. */
+export function sepBetween(a: string, b: string): string {
+  return CJK_EDGE.test(a.slice(-1)) || CJK_EDGE.test(b.slice(0, 1)) ? "" : " ";
+}
+
+/** Join caption tokens: spaces between words, none inside Japanese / Chinese. */
+export function joinTokens(tokens: string[]): string {
+  return tokens.reduce((out, t, i) => (i ? out + sepBetween(tokens[i - 1], t) + t : t), "");
+}
+
+/**
+ * A line without spaces: each TTS word becomes one caption token cut from the source text (so the
+ * script's own characters and punctuation show). Source characters the voice skipped ride on the
+ * previous token; a word that can't be found keeps its TTS text.
+ */
+function alignUnspaced(words: Word[], lineText: string): Word[] {
+  const chars = [...lineText];
+  const key = (c: string) => alnum(c);
+  const out: Word[] = [];
+  let pos = 0;
+  const matchAt = (s: number, want: string[]): number => {
+    let i = s;
+    let k = 0;
+    while (i < chars.length && k < want.length) {
+      const a = key(chars[i]);
+      if (!a) {
+        if (k === 0) return -1;
+        i++;
+        continue;
+      }
+      if (a !== want[k]) return -1;
+      k++;
+      i++;
+    }
+    return k === want.length ? i : -1;
+  };
+  for (const w of words) {
+    const want = [...alnum(w.text)];
+    if (!want.length) continue;
+    let start = pos;
+    while (start < chars.length && /\s/.test(chars[start])) start++;
+    let found = -1;
+    let at = start;
+    for (let s = start; s < Math.min(chars.length, start + 12); s++) {
+      if (!key(chars[s])) continue;
+      found = matchAt(s, want);
+      if (found >= 0) {
+        at = s;
+        break;
+      }
+    }
+    if (found < 0) {
+      out.push({ ...w });
+      continue;
+    }
+    // Leading punctuation (「) joins this token; skipped letters join the previous one.
+    let lead = start;
+    while (lead < at && !key(chars[lead])) lead++;
+    if (lead < at && out.length) out[out.length - 1] = { ...out[out.length - 1], text: out[out.length - 1].text + chars.slice(start, at).join("").trim() };
+    const from = lead < at && out.length ? at : start;
+    let end = found;
+    while (end < chars.length && !key(chars[end]) && !/\s/.test(chars[end])) end++;
+    const text = chars.slice(from, end).join("").trim();
+    const prev = out[out.length - 1];
+    // "NXT20" read as "NXT" + "20": Latin pieces with no space between them in the source stay one token.
+    if (prev && from === pos && pos > 0 && /[A-Za-z0-9]$/.test(prev.text) && /^[A-Za-z0-9]/.test(text)) {
+      out[out.length - 1] = { text: prev.text + text, startSec: prev.startSec, durSec: w.startSec + w.durSec - prev.startSec };
+    } else out.push({ text, startSec: w.startSec, durSec: w.durSec });
+    pos = end;
+  }
+  // Source text after the last spoken word (closing punctuation) rides on the last token.
+  const rest = chars.slice(pos).join("").trim();
+  if (rest && out.length && !/[\p{L}\p{N}]/u.test(rest)) out[out.length - 1] = { ...out[out.length - 1], text: out[out.length - 1].text + rest };
   return out;
 }
 
@@ -200,7 +284,7 @@ export function subtitleCues(words: Word[], placement: Placement, maxChars = 32,
 
 /** Edge TTS reports punctuation as separate "words"; glue it back on. */
 function joinWords(tokens: string[]): string {
-  return tokens.join(" ").replace(/\s+([.,!?;:%)])/g, "$1").replace(/([($])\s+/g, "$1");
+  return joinTokens(tokens).replace(/\s+([.,!?;:%)])/g, "$1").replace(/([($])\s+/g, "$1");
 }
 
 function srtTime(sec: number): string {
@@ -296,7 +380,7 @@ export function kineticGroups(words: TimedWord[], maxWords = 3, maxChars = 18): 
     }
     cur.push(w);
     // Break after punctuation, also when a closing quote follows it ("room?'").
-    if (/[.!?;:,…]['"’”)]*$/.test(w.text)) {
+    if (/[.!?;:,…、。！？；：，]['"’”)]*$/.test(w.text)) {
       groups.push(cur);
       cur = [];
     }
