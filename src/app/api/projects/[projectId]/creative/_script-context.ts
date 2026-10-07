@@ -63,6 +63,8 @@ export interface ScriptContext {
   styleCategories: string[];
   sellingPoints: string[];
   platformId?: string;
+  /** Research block for the script prompt (platform rules + sp-1 brief + chosen hooks/end card). */
+  creativeBlock?: string;
   totalDurationSec: number;
   selectedEnvironment?: string;
   environmentNotes?: string;
@@ -173,6 +175,11 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     Array.isArray(brandKit?.claimsForbidden) ? (brandKit.claimsForbidden as unknown[]) : []
   ).filter((c): c is string => typeof c === "string" && c.trim().length > 0);
 
+  // Research-backed creative block: platform profile + stored sp-1 brief + hooks/end card for this goal.
+  const { creativeBlock } = await import("@/services/creative/prompt-blocks");
+  const brief = (project as { productBrief?: unknown }).productBrief as import("@/services/creative/product-brief").ProductBrief | null | undefined;
+  const creative = creativeBlock({ brief: brief?.sellingPoints ? brief : null, platform: platformId, goalText: [project.campaignGoal, (project as { goalType?: string | null }).goalType, brandKit?.offerText].filter(Boolean).join(" ") });
+
   return {
     project: {
       id: project.id,
@@ -185,8 +192,10 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     },
     goalType: project.goalType,
     styleCategories: sanitizeStyleCategories(campaignSel?.styleCategories),
-    sellingPoints: sellingPoints.map((sp) => sp.point),
+    // The ranked, filmable brief wins over legacy mined points when it exists.
+    sellingPoints: brief?.sellingPoints?.length ? brief.sellingPoints.slice(0, 6).map((sp) => `${sp.claim} → ${sp.benefit}`) : sellingPoints.map((sp) => sp.point),
     platformId,
+    creativeBlock: creative.text,
     totalDurationSec: (campaignSel?.totalDurationSec as number | null) || 30,
     selectedEnvironment: (campaignSel?.selectedEnvironment as string | null) || undefined,
     environmentNotes: (campaignSel?.selectedEnvNotes as string | null) || undefined,
@@ -341,6 +350,7 @@ export function buildScriptInput(
     cameraAngles: ctx.cameraAngles,
     briefing: ctx.project.briefingText || undefined,
     customBrief: opts.customBrief,
+    creativeBlock: ctx.creativeBlock,
     audienceSummary: ctx.audienceSummary,
     nicheResearch: ctx.nicheResearch,
     brandTruth: ctx.brandTruth,

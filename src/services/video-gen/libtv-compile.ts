@@ -555,6 +555,12 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
         brand: project.brandName,
         product: project.productName || project.brandName,
         productFacts: brandTruth,
+        sellingBrief: await (async () => {
+          const b = (project as { productBrief?: unknown }).productBrief as import("@/services/creative/product-brief").ProductBrief | null;
+          if (!b?.sellingPoints?.length) return undefined;
+          const { briefBlock } = await import("@/services/creative/prompt-blocks");
+          return briefBlock(b, 4);
+        })(),
         scale,
         aspectRatio,
         clipSeconds: clipDurationSec,

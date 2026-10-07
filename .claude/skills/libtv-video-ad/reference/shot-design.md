@@ -65,7 +65,7 @@ flash. Assign a different one per ad so A/B tests are clean.
 - Match the brand wordmark. For a chunky rounded logo (MIXIK) the closest free faces are
   **Titan One** (first choice) and **Bowlby One**; Fredoka/Baloo need heavy variable weights.
 - Body captions: the brand's own UI font (MIXIK uses Manrope).
-- Keep text inside: top 14%, bottom 20%, right 12% clear of platform UI. Compose the主体 inside the
+- **Safe box (2026-10 research):** on 9:16 every readable layer (text, logo, price, CTA, legal) sits inside **y 288–1220, x 120–960** (above the TikTok right rail: x 240–840 below y 560). TikTok, Reels and Shorts cover the bottom ~35% and the top ~15% — the old "bottom 20%" rule hid buttons and fine print. Backgrounds and the product may bleed full-frame. The edit engine's slots: logo .17 · headline .22 · main .40 · fine .555 · button .607 · captions .60.
   centre 4:5 so the Meta feed crop still works.
 - Two short lines beat one long line on 9:16 (a 22-character slogan clips at 96px).
 
