@@ -124,9 +124,11 @@ export const DEFAULT_PRICES: PriceTable = {
     "msedge-tts": { perCall: 0, source: "msedge-tts (free Edge read-aloud voices, video-gen/voiceover.ts)", asOf: PRICES_AS_OF, verified: true },
   },
   qc: {
+    // Calibrated 2026-10-07 on the NXTPAPER 14 test run: 48 consistency/QC calls billed $0.442
+    // (≈ $0.0092 a call) — thinking output dominates; the first estimate was 3.2× low.
     promptTokens: 700,
-    perImageTokens: 400,
-    outputTokens: { low: 150, expected: 700, high: 2000 },
+    perImageTokens: 1100,
+    outputTokens: { low: 800, expected: 3000, high: 5000 },
     defaultModel: "google/gemini-2.5-flash",
     source:
       "token estimate: keyframe-qc.ts system + identity prompt (~600 tokens) + shot text; Gemini bills 258 tokens per ≤768 px tile (512 px keyframe ≈ 1–2 tiles); 2.5 models bill thinking as output",

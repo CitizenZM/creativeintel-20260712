@@ -213,3 +213,17 @@ describe("layerFilter", () => {
     expect(layerInputArgs("a.png", undefined, 15)).toEqual(["-i", "a.png"]);
   });
 });
+
+describe("one-line headline pill", () => {
+  it("keeps a long end-card headline on one line instead of wrapping into the logo", async () => {
+    const { oneLinePill } = await import("./endcard-render");
+    const { DEFAULT_STYLE } = await import("./brand-style");
+    const sharp = (await import("sharp")).default;
+    const c = { w: 1080, h: 1920 };
+    const style = { size: 67, fg: "#111", bg: "#ffd400", family: DEFAULT_STYLE.headline.family, fontFile: DEFAULT_STYLE.headline.file, widthPct: 0.66 };
+    const short = await sharp(await oneLinePill("SALE", c, style)).metadata();
+    const long = await sharp(await oneLinePill("20% OFF THIS BLACK FRIDAY", c, style)).metadata();
+    expect(long.height!).toBeLessThanOrEqual(short.height! * 1.25);
+    expect(long.width!).toBeLessThanOrEqual(1080 * 0.84 + 2 * 67);
+  }, 30_000);
+});

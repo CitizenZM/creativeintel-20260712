@@ -44,7 +44,8 @@ describe("chargeOrRefuse", () => {
     const ledger = new MemorySpendLedger();
     await ledger.setBudget({ projectId: "p1" }, 1);
     const results = await Promise.allSettled(Array.from({ length: 30 }, (_, i) => chargeOrRefuse(scope({ jobId: `j${i}` }), 0.1, ledger)));
-    expect(results.filter((r) => r.status === "fulfilled").length).toBe(10);
+    // Each 0.10 image reservation holds 0.105 (5% headroom): 9 fit under $1.
+    expect(results.filter((r) => r.status === "fulfilled").length).toBe(9);
     const total = (await ledger.entries({ projectId: "p1" })).reduce((s, e) => s + e.estUsd, 0);
     expect(total).toBeLessThanOrEqual(1 + 1e-9);
   });
@@ -65,7 +66,7 @@ describe("withSpendGuard", () => {
     }, { ledger });
     expect(out).toBe("ok");
     const [e] = await ledger.entries({ projectId: "p1" });
-    expect(e.estUsd).toBe(0.018);
+    expect(e.estUsd).toBeCloseTo(0.0189, 6); // reserved with 5% headroom
     expect(e.actualUsd).toBeCloseTo(0.0175, 6);
   });
 
@@ -86,7 +87,15 @@ describe("withSpendGuard", () => {
     expect(entries.find((e) => e.kind === "image")!.actualUsd).toBe(0.02);
     expect(entries.find((e) => e.kind === "video")!.actualUsd).toBeNull();
     const open = await ledger.openEntryForJob("v1", "video");
-    expect(open?.estUsd).toBe(0.12);
+    expect(open?.estUsd).toBeCloseTo(0.126, 6);
+  });
+
+  it("reserves token-billed calls with 50% headroom so a high bill cannot cross the cap", async () => {
+    const ledger = new MemorySpendLedger();
+    await ledger.setBudget({ projectId: "p1" }, 0.014);
+    // est 0.01 → holds 0.015 > 0.014: refused before the call (the bill could land at 3× the estimate).
+    const err = await chargeOrRefuse(scope({ kind: "vision_qc", model: "google/gemini-2.5-flash" }), 0.01, ledger).catch((e) => e);
+    expect(String(err)).toMatch(/Budget exceeded/);
   });
 
   it("releases the reservation when the provider rejected the request, keeps it when the outcome is unknown", async () => {

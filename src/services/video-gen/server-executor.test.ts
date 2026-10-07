@@ -522,7 +522,7 @@ describe("spend guard at the paid call sites", () => {
     expect(adapter.submitVideo).not.toHaveBeenCalled();
     expect(store.jobs.find((j) => j.id === "v1")!.error).toMatch(/Budget exceeded.*run run1.*\$0\.05/);
     const entries = await ledger.entries({ projectId: "p1" });
-    expect(entries.map((e) => [e.kind, e.estUsd])).toEqual([["image", 0.018]]);
+    expect(entries.map((e) => [e.kind, e.estUsd])).toEqual([["image", 0.0189]]); // 5% reservation headroom
   });
 
   it("reserves a clip at submit and reconciles it with the cost its poll reports", async () => {
@@ -537,7 +537,7 @@ describe("spend guard at the paid call sites", () => {
     });
     await tickRun(adapter, "run1");
     expect(adapter.submitVideo).toHaveBeenCalledTimes(1);
-    expect((await ledger.openEntryForJob("v1", "video"))?.estUsd).toBe(0.12);
+    expect((await ledger.openEntryForJob("v1", "video"))?.estUsd).toBeCloseTo(0.126, 6); // 5% reservation headroom
     await tickRun(adapter, "run1");
     expect(statusOf("v1")).toBe("completed");
     const clip = (await ledger.entries({ projectId: "p1" })).find((e) => e.kind === "video")!;
