@@ -10,6 +10,29 @@ Built from the MIXIK campaign (2026-09-10) and the TCL US campaign (2026-09-11),
 after the 2026-09-11 review in which all five of Barron's complaints were reproduced as numbers
 and fixed in code. Everything here is measured, not assumed.
 
+
+## Planning layer (2026-10 research → `src/services/creative/`)
+Run these before writing any script; the script writer and the director receive the result automatically.
+1. **Product brief (sp-1):** operator `{"action":"product-brief","projectId":…, "reviews":[{stars,text}…], "qa":[…], "price","listPrice","rating","reviewCount"}`.
+   One structured pass → category, audience, JTBD, big idea + 3 alternates, 5–8 ranked selling points
+   (claim → benefit → **proof shot** → safe wording + disclosure), objections, keywords, beat map; stored on
+   `Project.productBrief`. Feed stratified reviews (5★ / 3–4★ / 1–2★) — anxieties make the best objection busters.
+2. **Creative choice:** operator `{"action":"select-creative","projectId":…, "platform":"tiktok|instagram_reels|meta_feed|youtube_shorts|youtube_instream_skippable|…", "goal":"cold|retarget|promo|awareness|app_install|lead", "promo":{price,comparePrice,priceCheckedAt,code,deadline}, "runDate":…}`
+   → 3 opening hooks (reveal + claim + native, from the 35-hook library H01–H35 with keyframe/motion recipes)
+   and an end card (E01–E12). Price / % / coupon / deadline / rating cards are refused without live facts.
+3. **Platform profiles** (12): audience, length, hook second, cut rate, sound mode, caption/voice/music/CTA style,
+   safe zone, do-nots — `platformBrief(id)` is the prompt block. Make Meta and TikTok variants genuinely different
+   concepts, not resizes. Label realistic AI people/voices (TikTok, Meta, YouTube).
+4. **End card in the storyboard:** on the CTA frame set `locked.endCard = {id: "E02", data: {pct, code, price,
+   comparePrice, tag, sticker}}`. Renderable: E01, E02, E03, E04, E08, E09, E12.
+5. **First + last frame anchoring (strict consistency):** every generated segment ≥ ~3 s gets an end keyframe
+   `K<n>E` edited from its approved start keyframe + the casting sheet + the product photo, and the clip is
+   generated between both anchors (Veo 3.1 / Kling 3.0 / Seedance). Plan people and product segments at 3–4 s
+   with framings inside (the edit still cuts every ≤ 2 s); set `locked.endState` for the exact end pose, or
+   `anchorEnd:false` to opt out. Keyframes edited from references are QC'd for identity and re-rolled up to 2×.
+   Product-detail shots (sides, 360°, ports, close-ups) are built from official photos, never generated.
+Research files: `out/research/ad-research/01–04*.md`.
+
 ## Two rules that shape everything
 
 **1. All thinking happens locally in Claude; LibTV is only a render farm.**

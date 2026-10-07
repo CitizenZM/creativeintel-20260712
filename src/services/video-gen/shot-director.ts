@@ -104,7 +104,7 @@ export const DIRECTOR_SYSTEM = `You direct a short vertical performance ad: thin
  "cast":"on-camera talent as one paragraph: age, ethnicity, build, hair, skin, face, wardrobe fabric/colour (null if nobody appears)",
  "shots":[{"f":frameNumber,"sp":index into sp or null,"cam":"push_in|pull_out|orbit|arc|track|crane|whip|rack_focus|handheld_follow","act":true if a person makes a big body movement,"vo":"voiceover line","txt":"on-screen keyword","kf":"first frame","mo":"motion"}]}
 
-1 SELLING POINTS: pick 2–4 from productFacts. Each gets a VISUAL proof (brightness: a sunlit room and the picture still punches; contrast: a night scene with true black beside a bright moon; colour: a macaw's feathers). Every BODY shot proves one selling point.
+1 SELLING POINTS: when sellingBrief is given, use its ranked points, their proof shots and their safe wording (never stronger claims); otherwise pick 2–4 from productFacts. Each gets a VISUAL proof (brightness: a sunlit room and the picture still punches; contrast: a night scene with true black beside a bright moon; colour: a macaw's feathers). Every BODY shot proves one selling point.
 2 CAMERA — every shot moves, nothing is locked off or held. A whip only carries us INTO a shot and lands sharp within 0.5 s; the product and faces are never smeared by blur. push_in / pull_out / orbit / arc (30–60°) / track / crane / whip / rack_focus / handheld_follow. Never repeat a move on consecutive shots. The product hero shot is an orbit while the product (or the room around it) turns, reading as a 360° reveal. The first shot opens on a fast move (whip or fast push_in); the last non-CTA shot pulls out or cranes up to reveal.
 3 CONTINUITY — each clip is ONE continuous take in one place (no cuts, no shot-size change, no "Beat 1/Beat 2"). Movement direction carries across cuts (a push into shot n continues as forward motion in n+1). Same talent, wardrobe, location and light family throughout.
 4 kf (55–85 words): shot size, angle, lens (e.g. "Medium close-up, low angle, 35mm"). Subject mid-action, never posed. Location + 2 concrete lived-in props. One hard key light: source, side, colour temperature. Name small imperfections (pores, creases, dust, fingerprints). Screens show a specific vivid image (macaw, football match, sunset lake) — never text or UI. Dark scenes are lit by the screen glow plus a practical lamp: faces and furniture readable on a phone, never underexposed. Never write photorealistic, cinematic, 8K, flawless or perfect.
@@ -247,6 +247,8 @@ export interface DirectInput {
   brand: string;
   product: string;
   productFacts?: string;
+  /** Ranked selling points with their proof shots and safe wording (sp-1 brief). */
+  sellingBrief?: string;
   scale?: string;
   aspectRatio: string;
   clipSeconds: number;
@@ -261,6 +263,7 @@ export async function directAd(input: DirectInput): Promise<DirectedAd> {
       brand: input.brand,
       product: input.product,
       productFacts: cut(input.productFacts, 450),
+      ...(input.sellingBrief ? { sellingBrief: cut(input.sellingBrief, 1400) } : {}),
       scale: cut(input.scale, 160),
       ratio: input.aspectRatio,
       clipSec: input.clipSeconds,

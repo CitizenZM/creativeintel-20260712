@@ -50,6 +50,8 @@ export interface ScriptInput {
   briefing?: string;
   /** Free-text idea/style the operator typed for this batch. */
   customBrief?: string;
+  /** Research block (services/creative/prompt-blocks.ts): platform rules, product brief, chosen hooks + end card. */
+  creativeBlock?: string;
   /** Campaign platform id from CAMPAIGN_PLATFORMS (tiktok|instagram|youtube|tvc|amazon). */
   platformId?: string;
   /** "What's working in this niche" summary derived from DeepAnalysis.platformInsights. */
@@ -343,6 +345,7 @@ ${timelineBlock}
 ${nicheResearchBlock}
 
 ${input.briefing ? `PROJECT BRIEF:\n${input.briefing.slice(0, 1000)}` : ""}
+${input.creativeBlock ? input.creativeBlock.slice(0, 4000) : ""}
 ${input.customBrief ? `\nWHAT THE OPERATOR ASKED FOR (highest priority after brand truth and compliance — follow it even where it overrides the template's usual treatment):\n${input.customBrief.slice(0, 800)}` : ""}
 
 DELIVERABLE CHECKLIST:
