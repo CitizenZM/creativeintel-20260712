@@ -40,6 +40,8 @@ export interface PlanInputSegment {
   zoomHit?: { x: number; y: number } | null;
   /** Legal fine print shown while this frame plays. */
   fine?: string | null;
+  /** Talking-head clip: its own (lip-synced) audio plays for this frame (edit/native-audio.ts). */
+  nativeAudio?: boolean;
 }
 
 export interface Shot {
@@ -68,6 +70,8 @@ export interface Shot {
   speed?: number;
   /** Push-in → hold → pull-back target (0–1 of the frame), rendered as a camera move. */
   zoomHit?: { x: number; y: number } | null;
+  /** The clip's native audio plays under this shot (talking head). */
+  nativeAudio?: boolean;
 }
 
 /**
@@ -209,6 +213,7 @@ export function planEdit(
       compare: s.compare ?? null,
       speed: s.speed ?? 1,
       zoomHit: s.zoomHit ?? null,
+      ...(s.kind === "clip" && s.nativeAudio ? { nativeAudio: true } : {}),
       ...extra,
     });
   };
@@ -288,7 +293,7 @@ export function planEdit(
   if (opener && opener.segment === "HOOK" && opts.hookStyle === "c") opener.contrast = true;
   if (opener && opener.segment === "HOOK" && opts.hookStyle === "p") {
     const product = laid.find((s) => s.segment === "CTA" && s.kind === "still");
-    if (product) Object.assign(opener, { kind: "still", url: product.url, srcFrom: 0, zoom: 1.1, motion: "push", anchorY: 0.5, compare: null });
+    if (product) Object.assign(opener, { kind: "still", url: product.url, srcFrom: 0, zoom: 1.1, motion: "push", anchorY: 0.5, compare: null, nativeAudio: false });
   }
   // Re-index and close any rounding gaps so shots tile the timeline exactly.
   for (const [i, sh] of shots.entries()) {

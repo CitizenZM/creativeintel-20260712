@@ -16,7 +16,7 @@
  * POST { action: "save-structure", projectId, teardownId } / { action: "choose-structure", projectId, structureId|null }
  * POST { action: "product-brief", projectId, reviews?, qa?, price?, … } — sp-1 brief → Project.productBrief
  * POST { action: "select-creative", projectId?, platform, goal, promo? } — 3 hooks + end card
- * POST { action: "plan-to-storyboard", projectId, platform?, hookId?, cast?, setting?, engine? } — plan script → locked storyboard
+ * POST { action: "plan-to-storyboard", projectId, platform?, hookId?, cast?, setting?, engine?, presenter?: true | personaId, casting? } — plan script → locked storyboard (presenter: AI talking-head frames)
  * POST { action: "plan-campaign", projectId, platforms?, goal?, promo?, runDate?, durationSec? } — campaign plan → Project.campaignPlan
  * POST { action: "plan-batch", projectId, runId, dims?, maxVariants?, design?: pairwise|full } — Batch Mode matrix + cost → qc.batches
  * POST { action: "render-batch", projectId, runId, batchId, limit? } — render free re-edit variants of a batch
@@ -304,7 +304,7 @@ export async function POST(request: Request) {
 
   if (input.action === "plan-to-storyboard") {
     const { directPlanStoryboard } = await import("@/services/creative/plan-to-storyboard");
-    const project = await prisma.project.findUnique({ where: { id: input.projectId }, select: { campaignPlan: true, productName: true, name: true } });
+    const project = await prisma.project.findUnique({ where: { id: input.projectId }, select: { campaignPlan: true, productName: true, name: true, ...(input.presenter ? { brandName: true, productBrief: true } : {}) } });
     const plan = project?.campaignPlan as { platforms?: import("@/services/creative/campaign-plan.types").PlatformPlan[]; cast?: string; setting?: string } | null;
     const platformPlan = plan?.platforms?.find((p) => !input.platform || p.platform === input.platform);
     if (!platformPlan) return NextResponse.json({ error: "No campaign plan for that platform — run plan-campaign first" }, { status: 409 });
@@ -316,12 +316,14 @@ export async function POST(request: Request) {
       setting: input.setting ?? plan?.setting,
       engine: input.engine,
       ctaButton: input.ctaButton,
+      ...(await presenterOptions(input, project as { brandName?: string | null; productBrief?: unknown } | null)),
     });
     const sb = await prisma.storyboard.create({
       data: { projectId: input.projectId, title: out.title, frames: out.frames as unknown as object[], style: "locked-script", frameSeconds: 1 },
       select: { id: true },
     });
-    return NextResponse.json({ ok: true, storyboardId: sb.id, frames: out.frames.length, promptSource: out.source, error: out.error }, { status: 201 });
+    const talkFrames = out.frames.filter((f) => f.locked.talk).map((f) => f.frameNumber);
+    return NextResponse.json({ ok: true, storyboardId: sb.id, frames: out.frames.length, promptSource: out.source, error: out.error, ...(out.presenter ? { presenter: out.presenter, talkFrames } : {}) }, { status: 201 });
   }
 
   if (input.action === "select-creative") {
@@ -534,4 +536,17 @@ export async function POST(request: Request) {
   }
   after(() => driveServerRun(run.executor, run.id, 280_000).then(() => undefined));
   return NextResponse.json({ ok: true, run: summarize((await getRunWithJobs(run.id)) ?? run) });
+}
+
+/** plan-to-storyboard presenter options: persona choice inputs (category, casting: call → project → brand → env → default). */
+async function presenterOptions(
+  input: { presenter?: boolean | string; casting?: { ethnicities: string[] | null } },
+  project: { brandName?: string | null; productBrief?: unknown } | null
+): Promise<{ presenter?: boolean | string; category?: string; casting?: import("@/services/creative/personas").CastingPrefs }> {
+  if (!input.presenter) return {};
+  const { resolveCasting } = await import("@/services/creative/personas");
+  const { TO_CREATIVE_CATEGORY } = await import("@/services/creative/product-brief");
+  const brief = (project?.productBrief ?? null) as { category?: string; casting?: unknown } | null;
+  const category = brief?.category ? TO_CREATIVE_CATEGORY[brief.category as keyof typeof TO_CREATIVE_CATEGORY] : undefined;
+  return { presenter: input.presenter, category, casting: resolveCasting({ override: input.casting, project: brief?.casting, brandName: project?.brandName, env: process.env.PRESENTER_CASTING }) };
 }

@@ -24,10 +24,19 @@
  *   screenPlate  real screen content composited by the edit onto the TV/tablet screen of this clip
  *            (contents + switch times, and the screen corners: track | firstLast | detect) — see
  *            edit/screen-plate.ts; the video prompt keeps the screen flat green (#00FF00) or black
+ *   talk     talking-head frame (engine veo): {line, persona, delivery} — the presenter persona says the
+ *            line to a selfie camera; the line goes into the Veo prompt in quotes and the clip's native
+ *            audio (lip-synced dialogue) is KEPT by the edit for this frame (talk-frame.ts). The keyframe is
+ *            edited from CAST (the persona's casting reference when no castLock is given); never
+ *            end-anchored or time-remapped (that would warp the voice)
+ *   captionStyle  "native" (creator look: white bold, black stroke, yellow active word) | "kinetic";
+ *            the first frame that sets it decides for the whole edit
  * No director rewrite, no comparison LLM split, no cast-lock heuristics.
  */
 import type { CompiledJobDraft } from "./libtv-compile";
 import { REALISM_STILL } from "./shot-director";
+import { PERSONAS, personaById, personaCast } from "@/services/creative/personas";
+import { hasQuotedLine, talkClipSec, talkKeyframePrompt, talkVideoPrompt } from "./talk-frame";
 
 export type LockedEngine = "kling" | "veo" | "veo1080" | "local";
 export type LockedRefs = "cast" | "product" | "cast+product" | "none";
@@ -52,7 +61,24 @@ export interface LockedBlock {
   endCard?: { id: string; data?: Record<string, unknown> };
   /** Screen-plate compositing for this clip (edit/screen-plate.ts). */
   screenPlate?: import("./edit/screen-plate").ScreenPlate;
+  /** Talking-head frame (engine veo): the presenter persona says `line`; the clip's native audio is kept. */
+  talk?: TalkBlock;
+  /** Caption look for the whole edit (first frame that sets it). */
+  captionStyle?: "native" | "kinetic";
 }
+
+export interface TalkBlock {
+  line: string;
+  /** Persona id (services/creative/personas.ts). */
+  persona: string;
+  delivery?: string;
+  /** The presenter holds the product up while talking (the keyframe also gets the product ref). */
+  holdsProduct?: boolean;
+}
+
+/** A frame that renders as a talking head (Veo with native audio). */
+export const isTalkFrame = (L: LockedBlock | undefined): L is LockedBlock & { talk: TalkBlock } =>
+  !!L?.talk?.line?.trim() && (L.engine === "veo" || L.engine === "veo1080");
 
 export interface LockedFrame {
   frameNumber: number;
@@ -107,8 +133,11 @@ export function lockedDrafts(
   }
 ): { drafts: CompiledJobDraft[]; castDescription: string | null } {
   const drafts: CompiledJobDraft[] = [];
-  const cast = frames.map((f) => f.locked?.castLock).find((c) => !!c?.trim()) ?? null;
-  const usesCast = frames.some((f) => (f.locked?.refs ?? "none").includes("cast"));
+  // Talk frames default to the presenter's casting reference; a script's own castLock still wins.
+  const talkPersona = frames.map((f) => (isTalkFrame(f.locked) ? personaById(f.locked.talk.persona) : undefined)).find(Boolean);
+  const cast = frames.map((f) => f.locked?.castLock).find((c) => !!c?.trim()) ?? (talkPersona ? personaCast(talkPersona) : null);
+  const talkRefs = (L: LockedBlock): LockedRefs => L.refs ?? (L.talk?.holdsProduct ? "cast+product" : "cast");
+  const usesCast = frames.some((f) => (isTalkFrame(f.locked) ? talkRefs(f.locked) : (f.locked?.refs ?? "none")).includes("cast"));
   if (cast && usesCast) {
     drafts.push({
       shotIndex: -1,
@@ -152,7 +181,9 @@ export function lockedDrafts(
         creditsEstimated: 0,
       });
     } else {
-      const r = refsFor(L.refs);
+      const talk = isTalkFrame(L) ? L.talk : null;
+      const persona = talk ? (personaById(talk.persona) ?? talkPersona ?? PERSONAS[0]) : null;
+      const r = refsFor(talk ? talkRefs(L) : L.refs);
       const qc = { ...(L.qcShotType ? { qcShotType: L.qcShotType } : {}), ...(L.productSpec?.trim() ? { productSpec: L.productSpec.trim() } : {}) };
       if (L.refImageUrl) {
         // The shot's own reference replaces the kit packshot (a shot with no product ref gains one).
@@ -164,19 +195,56 @@ export function lockedDrafts(
         }
         r.leftRefs = r.leftRefs.map((x) => (x === "PROD-1" ? ref : x));
       }
+      const holds = r.leftRefs.length > 1;
+      const keyframe = f.imagePrompt?.trim() || (talk && persona ? talkKeyframePrompt({ persona, holdsProduct: holds, product: holds ? "product" : undefined }) : "");
       drafts.push({
         shotIndex: index,
         kind: "image",
         nodeName: `K${n}`,
         leftRefs: r.leftRefs,
-        prompt: f.imagePrompt ?? "",
+        prompt: keyframe,
         modelName: opts.imageModel,
-        settings: { ...opts.imgSettings, ...base, directed: 1, directedKeyframe: f.imagePrompt ?? "", ...(r.editFrom ? { editFrom: r.editFrom } : {}), ...qc },
+        settings: { ...opts.imgSettings, ...base, directed: 1, directedKeyframe: keyframe, ...(r.editFrom ? { editFrom: r.editFrom } : {}), ...(talk ? { qcShotType: holds ? "people-product" : "people" } : {}), ...qc },
         sourceUrl: null,
         creditsEstimated: opts.imageCredits,
       });
       const v = opts.video(L.engine);
       const clipSec = Number(v.settings.duration) || 4;
+      if (talk && persona) {
+        // Talking head: Veo speaks the quoted line with native, lip-synced audio. Natural speed and no end
+        // anchor (a remap would warp the voice); the clip is sized to hold both the frame and the line.
+        const d = talkClipSec(len, talk.line);
+        const own = f.videoPrompt?.trim() ?? "";
+        const prompt = hasQuotedLine(own, talk.line)
+          ? own
+          : [talkVideoPrompt({ line: talk.line, persona, delivery: talk.delivery, frameSec: len, holdsProduct: holds, product: holds ? "product" : undefined }), own].filter(Boolean).join(" ");
+        drafts.push({
+          shotIndex: index,
+          kind: "video",
+          nodeName: `V${n}`,
+          leftRefs: [`K${n}`],
+          prompt,
+          modelName: v.modelName,
+          settings: {
+            ...v.settings,
+            ...base,
+            directed: 1,
+            budgetMode: "full",
+            duration: d,
+            frameSeconds: len,
+            frameOffsetsSec: [{ frameNumber: n, clipStartSec: 0, clipEndSec: Math.min(d, len) }],
+            speed: 1,
+            zoomHit: null,
+            nativeAudio: 1,
+            talkLine: talk.line.trim(),
+            persona: persona.id,
+            ...(opts.holdVideos ? { hold: 1 } : {}),
+          },
+          sourceUrl: null,
+          creditsEstimated: Math.round((v.credits * d) / clipSec),
+        });
+        return;
+      }
       const speed = Math.max(1, L.speed ?? 1);
       const anchor = L.anchorEnd === false ? null : anchorPlan(L.engine, len, speed, L.anchorEnd === true);
       if (anchor) {

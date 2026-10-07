@@ -108,3 +108,40 @@ describe("first + last frame anchoring", () => {
     expect(by("V3").leftRefs).toEqual(["K3"]);
   });
 });
+
+describe("talking-head frames (AI presenter)", () => {
+  const line = "Okay wait, this screen reads like paper.";
+  const { drafts, castDescription } = lockedDrafts(
+    [
+      { frameNumber: 1, startSec: 0, endSec: 3, segment: "HOOK", locked: { engine: "veo", talk: { line, persona: "reels-kitchen-mom", delivery: "surprised" } } },
+      { frameNumber: 2, startSec: 3, endSec: 6, segment: "BODY", imagePrompt: "The tablet on a desk", videoPrompt: "push in", locked: { engine: "veo", refs: "product" } },
+      { frameNumber: 3, startSec: 6, endSec: 8, segment: "BODY", imagePrompt: "Selfie at the counter", videoPrompt: "She talks to camera.", locked: { engine: "veo", refs: "cast+product", talk: { line: "Twenty percent off. Go.", persona: "reels-kitchen-mom", holdsProduct: true } } },
+    ],
+    opts
+  );
+  const by = (n: string) => drafts.find((d) => d.nodeName === n)!;
+
+  it("casts the presenter from the persona when no castLock is given, and edits every talk keyframe from CAST", () => {
+    expect(castDescription).toMatch(/white woman/);
+    expect(by("CAST").prompt).toMatch(/honey-blonde/);
+    expect(by("K1")).toMatchObject({ leftRefs: ["CAST"], settings: expect.objectContaining({ editFrom: "cast" }) });
+    expect(by("K1").prompt).toMatch(/person from image 1/);
+    expect(by("K3")).toMatchObject({ leftRefs: ["CAST", "PROD-1"], settings: expect.objectContaining({ editFrom: "cast+product" }) });
+    expect(by("K3").prompt).toBe("Selfie at the counter");
+  });
+
+  it("puts the quoted line in the clip prompt and asks for native audio, never end-anchored or sped up", () => {
+    expect(by("V1").prompt).toContain(`"${line}"`);
+    expect(by("V1").prompt).toMatch(/lip-sync/i);
+    expect(by("V1").settings).toMatchObject({ nativeAudio: 1, talkLine: line, speed: 1, duration: 4, frameOffsetsSec: [{ frameNumber: 1, clipStartSec: 0, clipEndSec: 3 }] });
+    expect(by("V1").settings).not.toHaveProperty("anchorEnd");
+    expect(by("V1").leftRefs).toEqual(["K1"]);
+    expect(drafts.find((d) => d.nodeName === "K1E")).toBeUndefined();
+    // A hand-written prompt without the quoted line gets the talk prompt.
+    expect(by("V3").prompt).toContain('"Twenty percent off. Go."');
+    expect(by("V3").prompt).toContain("She talks to camera.");
+    // Non-talk frames are untouched (still anchored, silent).
+    expect(by("V2").settings).not.toHaveProperty("nativeAudio");
+    expect(by("V2").settings).toMatchObject({ anchorEnd: 1 });
+  });
+});

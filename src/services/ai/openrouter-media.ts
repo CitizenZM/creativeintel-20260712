@@ -112,6 +112,8 @@ export interface OpenRouterVideoInput {
   lastImageUrl?: string;
   /** Reproducible takes on models with seed support. */
   seed?: number;
+  /** Talking-head clips: keep the model's native audio (Veo speaks the prompt's quoted line, lip-synced). */
+  nativeAudio?: boolean;
 }
 
 /** Models that honour a last_frame anchor (OpenRouter catalog, 2026-10-06; Wan 3.0 rejects it). */
@@ -139,8 +141,9 @@ export function openrouterVideoBody(input: OpenRouterVideoInput, withAudioFlag =
     aspect_ratio: openrouterAspect(input.aspectRatio),
     duration: Math.round(input.durationSec),
     ...(input.resolution ? { resolution: input.resolution.toLowerCase() } : {}),
-    // Our edit lays its own voiceover and music over the clips; silent clips are cheaper.
-    ...(withAudioFlag ? { generate_audio: false } : {}),
+    // Our edit lays its own voiceover and music over the clips; silent clips are cheaper. Talking-head
+    // clips are the exception: their dialogue is the clip's own audio.
+    ...(withAudioFlag ? { generate_audio: !!input.nativeAudio } : {}),
     ...(input.seed !== undefined && SEED_MODEL.test(input.model) ? { seed: input.seed } : {}),
     ...(input.imageUrl || input.lastImageUrl
       ? {

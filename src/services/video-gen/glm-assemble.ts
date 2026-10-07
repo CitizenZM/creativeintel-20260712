@@ -47,6 +47,13 @@ export interface AssembleFrame {
   fine?: string | null;
   /** Locked scripts: real content composited onto the device screen in this frame's clip (edit/screen-plate.ts). */
   screenPlate?: import("./edit/screen-plate").ScreenPlate | null;
+  /** Talking-head frame: the clip's own lip-synced audio carries it (no TTS); captions from `talkLine`. */
+  nativeAudio?: boolean;
+  talkLine?: string | null;
+  /** The presenter's Edge TTS voice, so the voiceover around the talk frames matches them. */
+  ttsVoice?: string | null;
+  /** Caption look for the whole edit (the first frame that sets it decides). */
+  captionStyle?: "native" | "kinetic" | null;
 }
 
 export const CAPTION_FONT = path.join(process.cwd(), "assets/fonts/Anton-Regular.ttf");
@@ -215,7 +222,7 @@ export interface SegmentCompare {
 }
 
 export type Segment =
-  | { kind: "clip"; url: string; from: number; length: number; frameNumber: number; text?: string; compare?: SegmentCompare; speed?: number; zoomHit?: { x: number; y: number } | null }
+  | { kind: "clip"; url: string; from: number; length: number; frameNumber: number; text?: string; compare?: SegmentCompare; speed?: number; zoomHit?: { x: number; y: number } | null; nativeAudio?: boolean }
   | { kind: "still"; url: string; length: number; frameNumber: number; text?: string; compare?: SegmentCompare; zoomHit?: { x: number; y: number } | null };
 
 /** The comparison pairing for a frame, when its keyframe was split (comparison.ts). */
@@ -249,8 +256,10 @@ export function planSegments(frames: AssembleFrame[], jobs: Pick<LibtvJob, "kind
       // A sped-up shot plays `speed` × its length of source in its frame's time. An end-anchored clip carries
       // its own speed: the whole clip (start keyframe → end keyframe) fits the frame, so it ends on its anchor.
       const anchored = (s as { anchorEnd?: number; speed?: number }).anchorEnd ? (s as { speed?: number }).speed : undefined;
-      const speed = Math.max(1, anchored ?? f.speed ?? 1);
-      segments.push({ kind: "clip", url: clip.resultUrl!, from, length: speed > 1 ? length : len, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs), speed, zoomHit: f.zoomHit ?? null });
+      // A talking head plays at natural speed with its own audio (a remap would warp the voice).
+      const native = !!f.nativeAudio;
+      const speed = native ? 1 : Math.max(1, anchored ?? f.speed ?? 1);
+      segments.push({ kind: "clip", url: clip.resultUrl!, from, length: speed > 1 ? length : len, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs), speed, zoomHit: f.zoomHit ?? null, ...(native ? { nativeAudio: true } : {}) });
       continue;
     }
     const still = jobs.find((j) => {
@@ -260,6 +269,11 @@ export function planSegments(frames: AssembleFrame[], jobs: Pick<LibtvJob, "kind
     if (still) segments.push({ kind: "still", url: still.resultUrl!, length, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs), zoomHit: f.zoomHit ?? null });
   }
   return segments;
+}
+
+/** The presenter's Edge TTS voice when the script has talk frames. */
+export function presenterVoice(frames: Pick<AssembleFrame, "ttsVoice">[]): string | undefined {
+  return frames.find((f) => f.ttsVoice?.trim())?.ttsVoice?.trim() || undefined;
 }
 
 async function download(url: string, file: string) {
@@ -283,6 +297,8 @@ export async function assembleGlmMaster(input: {
   if (!ffmpegPath) throw new Error("ffmpeg is not available on this server");
   const segments = planSegments(input.frames, input.jobs);
   if (!segments.length) throw new Error("Nothing to assemble — no finished clips");
+  // A presenter run's voiceover speaks in the presenter's voice.
+  if (!input.voice) input = { ...input, voice: presenterVoice(input.frames) };
 
   const { w, h } = canvasFor(input.aspectRatio);
   const vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},fps=${FPS},setsar=1,format=yuv420p`;
@@ -432,6 +448,7 @@ export async function renderFromRun(input: {
 }): Promise<{ hookText: string | null; masterUrl: string; previewUrl: string | null; durationSec: number; qc: QcReport; srt?: string | null; covers?: import("./edit/qc").CoverSet }> {
   const { cutdownFrames } = await import("./edit/cutdown");
   const frames = input.cutdownSec ? cutdownFrames(input.frames, input.cutdownSec) : input.frames;
+  if (!input.voice) input = { ...input, voice: presenterVoice(input.frames) };
   const segments = planSegments(frames, input.jobs);
   if (!segments.length) throw new Error("Nothing to assemble — no finished clips");
   const { w, h } = canvasFor(input.outputAspect ?? input.aspectRatio);
@@ -501,6 +518,8 @@ export async function speakVoiceover(input: {
   frames: AssembleFrame[];
   totalSec: number;
   voice?: string;
+  /** Hard limits for the lines (talking-head frames start there — edit/native-audio.ts). */
+  stops?: number[];
 }): Promise<SpokenVoiceover | null> {
   const lines = planVoiceover(input.frames);
   if (!lines.length) return null;
@@ -517,7 +536,7 @@ export async function speakVoiceover(input: {
     },
     { concurrency: 3 }
   );
-  const placements = placeLines(lines, spoken.map((s) => s.duration), input.totalSec);
+  const placements = placeLines(lines, spoken.map((s) => s.duration), input.totalSec, input.stops);
 
   const voiceoverFile = path.join(input.dir, "voiceover.mp3");
   const mixInputs = spoken.flatMap((s) => ["-i", s.file]);

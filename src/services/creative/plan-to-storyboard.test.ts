@@ -96,3 +96,85 @@ describe("cleanVisual / refs for live plan visuals", async () => {
     expect(scaffoldLockedFrames({ plan: p, productName: "NXTPAPER 14" })[0].locked.refs).toBe("product");
   });
 });
+
+describe("AI presenter (talking-head frames)", () => {
+  const ugc = {
+    ...plan,
+    captionStyle: "native TikTok-style white bold with black stroke",
+    audience: "busy moms 30-40",
+    hookVariants: [{ hookId: "H17", name: "Creator Talking Head", family: "native", durationSec: 2, openingVisual: "Creator talks to camera", openingText: "", openingVO: "" }],
+    scripts: [
+      {
+        hookId: "H17",
+        title: "Creator talking head",
+        beats: [
+          { t0: 0, t1: 2, purpose: "hook", visual: "A mom talks straight to camera in her kitchen", vo: "Okay, I did not expect this." },
+          { t0: 2, t1: 4, purpose: "proof", visual: "Close-up of the matte screen in bright sunlight", vo: "A matte screen that reads like paper." },
+          { t0: 4, t1: 6, purpose: "benefit", visual: "POV: she holds the tablet up to the camera and taps through a recipe", vo: "Recipes, notes, homework." },
+          { t0: 6, t1: 8, purpose: "offer", visual: "Selfie: she smiles holding the tablet", vo: "Twenty percent off this week, seriously, go grab one before it's gone." },
+          { t0: 8, t1: 9, purpose: "cta", visual: "Logo and button", vo: "Link below." },
+        ],
+      },
+    ],
+  } as unknown as PlatformPlan;
+
+  it("does nothing without presenter", () => {
+    expect(scaffoldLockedFrames({ plan: ugc, productName: "NXTPAPER 14" }).some((f) => f.locked.talk)).toBe(false);
+  });
+
+  const frames = scaffoldLockedFrames({ plan: ugc, productName: "NXTPAPER 14", presenter: true, category: "electronics", cast: "a man in a suit" });
+
+  it("turns native-hook beats and creator / POV / selfie beats into talk frames, never the CTA or a product close-up", () => {
+    expect(frames.map((f) => !!f.locked.talk)).toEqual([true, false, true, true, false]);
+    const talk = frames[0].locked.talk!;
+    expect(talk.line).toBe("Okay, I did not expect this.");
+    expect(frames[0].locked.engine).toBe("veo");
+    expect(frames[0].locked.anchorEnd).toBe(false);
+  });
+
+  it("casts one presenter (default casting) as the CAST lock and uses them for every talk frame", () => {
+    const ids = new Set(frames.filter((f) => f.locked.talk).map((f) => f.locked.talk!.persona));
+    expect(ids.size).toBe(1);
+    const cast = frames.find((f) => f.locked.castLock)!.locked.castLock!;
+    expect(cast).toMatch(/white|Latina|Latino/);
+    expect(cast).not.toMatch(/suit/);
+    expect(frames.filter((f) => f.locked.castLock)).toHaveLength(1);
+    expect(frames[0].locked.refs).toBe("cast");
+    expect(frames[2].locked.refs).toBe("cast+product");
+    expect(frames[2].locked.talk!.holdsProduct).toBe(true);
+  });
+
+  it("builds selfie keyframes and quoted-line Veo prompts, and sizes long lines (later frames shift)", () => {
+    expect(frames[0].videoPrompt).toContain('"Okay, I did not expect this."');
+    expect(frames[0].videoPrompt).toMatch(/lip-sync/i);
+    expect(frames[0].imagePrompt).toMatch(/person from image 1/);
+    expect(frames[3].endSec - frames[3].startSec).toBeGreaterThan(2); // the long offer line needs more than 2 s
+    expect(frames[4].startSec).toBe(frames[3].endSec);
+    expect(frames[4].endSec - frames[4].startSec).toBe(1);
+  });
+
+  it("picks a named persona and carries the native caption style from the platform", () => {
+    const named = scaffoldLockedFrames({ plan: ugc, productName: "NXTPAPER 14", presenter: "meta-garage-dad" });
+    expect(named.find((f) => f.locked.talk)!.locked.talk!.persona).toBe("meta-garage-dad");
+    expect(named[0].locked.captionStyle).toBe("native");
+    // TikTok's profile asks for native captions even when the plan leaves the field empty; Meta feed doesn't.
+    expect(scaffoldLockedFrames({ plan, productName: "NXTPAPER 14" })[0].locked.captionStyle).toBe("native");
+    expect(scaffoldLockedFrames({ plan: { ...plan, platform: "meta_feed" } as PlatformPlan, productName: "NXTPAPER 14" })[0].locked.captionStyle).toBeUndefined();
+  });
+
+  it("falls back to a talking hook when presenter is asked for but no beat is creator-style", () => {
+    const f = scaffoldLockedFrames({ plan, productName: "NXTPAPER 14", presenter: true });
+    expect(f[0].locked.talk?.line).toBe("Want a New Year gift?");
+  });
+
+  it("the director pass never rewrites a talk frame's prompts", async () => {
+    const out = await directPlanStoryboard(
+      { plan: ugc, productName: "NXTPAPER 14", presenter: true },
+      { llm: async () => ({ frames: [1, 2].map((i) => ({ i, imagePrompt: `LLM ${i}`, videoPrompt: `LLM motion ${i}` })) }) }
+    );
+    expect(out.frames[0].imagePrompt).not.toBe("LLM 1");
+    expect(out.frames[0].videoPrompt).toContain('"Okay, I did not expect this."');
+    expect(out.frames[1].imagePrompt).toBe("LLM 2");
+    expect(out.presenter).toBeTruthy();
+  });
+});

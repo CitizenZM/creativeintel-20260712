@@ -15,6 +15,7 @@
 import { ensureFontconfig, pangoEscape } from "../glm-assemble";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
 import { joinTokens, sepBetween } from "../voiceover";
+import { NATIVE_CAPTION, nativeSafeBox } from "./caption-style";
 
 /** Arabic / Hebrew text: a leading RLM makes the paragraph right-to-left even when it opens on a Latin brand name. */
 const RTL_TEXT = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
@@ -56,7 +57,7 @@ async function sharpLib() {
   return (await import("sharp")).default;
 }
 
-export async function renderMarkup(markup: string, opts: { family: string; fontFile: string; size: number; width: number }): Promise<Buffer> {
+export async function renderMarkup(markup: string, opts: { family: string; fontFile: string; size: number; width: number; spacing?: number }): Promise<Buffer> {
   await ensureFontconfig(opts.fontFile);
   const sharp = await sharpLib();
   return sharp({
@@ -68,7 +69,7 @@ export async function renderMarkup(markup: string, opts: { family: string; fontF
       align: "centre",
       rgba: true,
       dpi: 72,
-      spacing: Math.round(opts.size * 0.15),
+      spacing: Math.round(opts.size * (opts.spacing ?? 0.15)),
     },
   })
     .png()
@@ -107,6 +108,51 @@ export function kineticCaptionPng(words: string[], active: number, canvas: Canva
   const opts = { family: look.body.family, fontFile: look.body.file, size, width };
   // A caption is a 2–3 word phrase: in a safe box it steps its type down to stay on one line.
   return (canvas.safeW ? fittedSize(plain, opts, 1) : Promise.resolve(size)).then((s) => shadowed(markup, plain, { ...opts, size: s }));
+}
+
+/**
+ * One state of a creator-native caption (TikTok / Reels look): white bold sentence-case words with a
+ * solid black stroke, the spoken word in the platform yellow, at most two lines inside the safe width.
+ * The stroke is the black text stamped around a circle under the fill (pango has no outline).
+ */
+export async function nativeCaptionPng(words: string[], active: number, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
+  const sharp = await sharpLib();
+  const box = nativeSafeBox(canvas);
+  const markup = (color: (i: number) => string) =>
+    words.map((w, i) => `${i ? sepBetween(words[i - 1], w) : ""}<span foreground="${color(i)}">${pangoEscape(w)}</span>`).join("");
+  let size = Math.round(unit(canvas) * 0.064);
+  let stroke = 0;
+  // Looser leading than the kinetic caption: two stroked lines must not touch.
+  let opts = { family: look.body.family, fontFile: look.body.file, size, width: 1, spacing: 0.32 };
+  let fg: Buffer = Buffer.alloc(0);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    stroke = Math.max(3, Math.round(size * 0.1));
+    opts = { ...opts, size, width: box.x1 - box.x0 - 2 * (stroke + 2) };
+    fg = await renderMarkup(markup((i) => (i === active ? NATIVE_CAPTION.accent : "#FFFFFF")), opts);
+    const lineH = (await sharp(await renderMarkup("Hg", opts)).metadata()).height ?? size;
+    const h = (await sharp(fg).metadata()).height ?? size;
+    // Two lines are 2 × line height plus the line spacing; anything taller would be a third line.
+    if (h <= lineH * 2.6 || size < 24) break;
+    size = Math.round(size * 0.88);
+  }
+  const outline = await renderMarkup(markup(() => "#000000"), opts);
+  const { width = 1, height = 1 } = await sharp(fg).metadata();
+  const pad = stroke + 2;
+  const stamps: { input: Buffer; top: number; left: number }[] = [];
+  const steps = 24;
+  for (let k = 0; k < steps; k++) {
+    const a = (2 * Math.PI * k) / steps;
+    stamps.push({ input: outline, top: pad + Math.round(stroke * Math.sin(a)), left: pad + Math.round(stroke * Math.cos(a)) });
+  }
+  // Fill the stroke's inner ring too, so thick strokes have no gaps between stamps.
+  for (let k = 0; k < 12; k++) {
+    const a = (2 * Math.PI * k) / 12;
+    stamps.push({ input: outline, top: pad + Math.round((stroke / 2) * Math.sin(a)), left: pad + Math.round((stroke / 2) * Math.cos(a)) });
+  }
+  return sharp({ create: { width: width + pad * 2, height: height + pad * 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([...stamps, { input: fg, top: pad, left: pad }])
+    .png()
+    .toBuffer();
 }
 
 /** The hook headline: big headline face, last word highlighted. */

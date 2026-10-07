@@ -100,6 +100,10 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     setting: z.string().max(300).optional(),
     engine: z.enum(["kling", "veo", "veo1080"]).optional(),
     ctaButton: z.string().max(40).optional(),
+    /** AI presenter: true = pick a persona (platform × category × audience), or a persona id (services/creative/personas.ts). */
+    presenter: z.union([z.boolean(), z.string().min(1).max(60)]).optional(),
+    /** Presenter casting override, e.g. { ethnicities: ["white", "latino"] } (null = anyone); default: project → brand → env → white/Latino. */
+    casting: z.object({ ethnicities: z.array(z.string().max(20)).max(6).nullable() }).optional(),
   }),
   /** Pick 3 diverse opening hooks + an end card for category × platform × goal (category defaults to the stored brief). */
   z.object({
