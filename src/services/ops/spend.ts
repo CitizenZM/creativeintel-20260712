@@ -87,5 +87,21 @@ export async function guardLlm<T>(
   return withSpendGuard({ projectId: scope.projectId, runId: scope.runId ?? null, kind: scope.kind ?? "llm", model }, usd, call, { prices });
 }
 
+/**
+ * An LLM function ({ system, user } → result) under the spend guard: every call is reserved under the
+ * scope (estimated from the prompt length and `outTokens`), reconciled with the usage it logged, and
+ * refused (BudgetExceededError) when the run's or project's budget can't cover it.
+ */
+export function guardLlmFn<A extends { system: string; user: unknown }, R>(
+  scope: { projectId?: string | null; runId?: string | null; kind?: SpendKind },
+  fn: (args: A) => Promise<R>,
+  est: { outTokens: number; model?: string }
+): (args: A) => Promise<R> {
+  return (args) => {
+    const chars = args.system.length + (typeof args.user === "string" ? args.user.length : JSON.stringify(args.user ?? "").length);
+    return guardLlm(scope, { model: est.model, inTokens: Math.ceil(chars / 4), outTokens: est.outTokens }, () => fn(args));
+  };
+}
+
 /** OpenRouter's standard text tier (claude-client.ts) — what a text call is estimated at. */
 export const DEFAULT_TEXT_MODEL = "deepseek/deepseek-v4-pro";

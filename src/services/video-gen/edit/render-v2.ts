@@ -373,6 +373,8 @@ async function renderNativeTrack(dir: string, windows: NativeWindow[], sources: 
 export async function renderEditV2(input: {
   dir: string;
   runId: string;
+  /** The run's project (spend guard scope for paid calls inside the edit). */
+  projectId?: string | null;
   aspectRatio: string;
   canvas: Canvas;
   frames: AssembleFrame[];
@@ -468,7 +470,11 @@ export async function renderEditV2(input: {
 
   // 1a. Screen plates: real screen content composited onto the device screen of the source clips
   // first, so reframing, speed ramps, text and the end card all sit on top of it.
-  if (frames.some((f) => f.screenPlate)) await applyScreenPlates({ dir, frames: frames, segments: segments, sources: input.sources });
+  // The vision corner detection is paid: under the run's spend guard, and cached per clip on its job.
+  if (frames.some((f) => f.screenPlate)) {
+    const { guardedScreenVision, jobTrackCache } = await import("./screen-plate-store");
+    await applyScreenPlates({ dir, frames: frames, segments: segments, sources: input.sources, vision: guardedScreenVision({ projectId: input.projectId, runId: input.runId }), trackCache: jobTrackCache(input.runId) });
+  }
 
   // 1b. Smart segments: each hook shot from a clip takes that clip's most dynamic window.
   const motionCache = new Map<string, Awaited<ReturnType<typeof motionScores>>>();

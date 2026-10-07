@@ -329,7 +329,7 @@ export async function assembleGlmMaster(input: {
         // The master leads with the hook style real A/B results favour (question by default).
         const { winningHookStyle } = await import("@/services/performance/store");
         const hookStyle = await winningHookStyle(input.projectId).catch(() => "q" as const);
-        const v2 = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice, brand, hookStyle, platform: input.platform ?? null });
+        const v2 = await renderEditV2({ dir, runId: input.runId, projectId: input.projectId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice, brand, hookStyle, platform: input.platform ?? null });
         const up = (buffer: Buffer, filename: string, contentType: string) => uploadBuffer({ buffer, filename, contentType, folder: "glm-masters" });
         const [m, p, c, vo, srt] = await Promise.all([
           up(await readFile(v2.masterFile), `master-${input.runId}.mp4`, "video/mp4"),
@@ -468,7 +468,7 @@ export async function renderFromRun(input: {
     const { renderEditV2 } = await import("./edit/render-v2");
     const { loadBrandStyle } = await import("./edit/brand-style");
     const brand = { ...(await loadBrandStyle(input.projectId)), ...(input.ctaText ? { ctaText: input.ctaText } : {}), ...input.brandPatch };
-    const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText, brand, musicMood: input.musicMood, platform: input.platform ?? null, fixes: input.fixes });
+    const v = await renderEditV2({ dir, runId: input.runId, projectId: input.projectId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText, brand, musicMood: input.musicMood, platform: input.platform ?? null, fixes: input.fixes });
     const tag = `${input.tag}-${Date.now().toString(36)}`;
     const [m, p] = await Promise.all([
       uploadBuffer({ buffer: await readFile(v.masterFile), filename: `${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),

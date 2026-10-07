@@ -15,6 +15,21 @@ const money = (n: number) => Math.ceil(n * 100) / 100;
 const asMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const MAX_RENDER_MS = 24 * 3600_000;
 
+/**
+ * A paid model call of a step before the budget gate (brief, plan, storyboard): reserved in the spend
+ * ledger under the project, so it shows up there, and refused when the project's budget can't cover it
+ * (fatal: retrying can't help until the owner raises it — then autopilot-status retry).
+ */
+async function guardedStepCall<T>(projectId: string, est: { inTokens: number; outTokens: number }, call: () => Promise<T>): Promise<T> {
+  const [{ guardLlm }, { isBudgetExceeded }] = await Promise.all([import("@/services/ops/spend"), import("@/services/ops/budget-guard")]);
+  try {
+    return await guardLlm({ projectId, kind: "llm" }, est, call);
+  } catch (err) {
+    if (isBudgetExceeded(err)) throw new AutopilotFatalError(err.message);
+    throw err;
+  }
+}
+
 function requireProject(ctx: StepContext): string {
   if (!ctx.state.projectId) throw new AutopilotFatalError("No project yet — the scrape step did not record one");
   return ctx.state.projectId;
@@ -115,7 +130,7 @@ const brief = async (ctx: StepContext): Promise<StepOutcome> => {
   if (!title && !project.productPageText) throw new AutopilotFatalError("No product page on this project");
   const { extractProductBrief } = await import("@/services/creative/product-brief");
   const text = project.productPageText ?? "";
-  const made = await extractProductBrief(
+  const made = await guardedStepCall(projectId, { inTokens: 2000 + Math.ceil(text.length / 4), outTokens: 3000 }, () => extractProductBrief(
     {
       url: project.productUrl,
       title,
@@ -127,7 +142,7 @@ const brief = async (ctx: StepContext): Promise<StepOutcome> => {
       platforms: ctx.input.platforms,
     },
     { strictCompliance: process.env.CREATIVE_STRICT_COMPLIANCE === "true" }
-  );
+  ));
   await prisma.project.update({ where: { id: projectId }, data: { productBrief: made as object, productBriefAt: new Date() } });
   return { kind: "done", state: { briefSellingPoints: made.sellingPoints.length } };
 };
@@ -144,7 +159,7 @@ const plan = async (ctx: StepContext): Promise<StepOutcome> => {
   }
   const { createCampaignPlan, CampaignPlanError } = await import("@/services/creative/campaign-plan.store");
   try {
-    const made = await createCampaignPlan(projectId, { platforms: input.platforms, goal: input.goal, promo: input.promo });
+    const made = await guardedStepCall(projectId, { inTokens: 6000, outTokens: 6000 }, () => createCampaignPlan(projectId, { platforms: input.platforms, goal: input.goal, promo: input.promo }));
     return { kind: "done", state: { plannedPlatforms: made.platforms.map((p) => p.platform) } };
   } catch (err) {
     if (err instanceof CampaignPlanError && err.status < 500) throw new AutopilotFatalError(err.message);
@@ -168,7 +183,7 @@ const storyboard = async (ctx: StepContext): Promise<StepOutcome> => {
   const want = input.platform ? normalizePlatform(input.platform) : input.platforms?.[0] ? normalizePlatform(input.platforms[0]) : null;
   const platformPlan = stored.platforms.find((p) => p.platform === want) ?? stored.platforms[0];
   const { directPlanStoryboard } = await import("@/services/creative/plan-to-storyboard");
-  const out = await directPlanStoryboard({
+  const out = await guardedStepCall(projectId, { inTokens: 4000, outTokens: 4000 }, () => directPlanStoryboard({
     plan: platformPlan,
     hookId: input.hookId,
     productName: project?.productName || project?.name || "product",
@@ -176,7 +191,7 @@ const storyboard = async (ctx: StepContext): Promise<StepOutcome> => {
     setting: input.setting ?? stored.setting,
     engine: input.engine,
     ctaButton: input.ctaButton,
-  });
+  }));
   await prisma.storyboard.create({
     data: { id: sbId, projectId, title: out.title, frames: out.frames as unknown as object[], style: "locked-script", frameSeconds: 1 },
     select: { id: true },

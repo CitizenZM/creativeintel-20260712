@@ -206,3 +206,10 @@ describe("run bookkeeping", () => {
     expect(localeAdName("TCL_Nxtpaper14_15s_HookQ", "pt-BR")).toBe("TCL_Nxtpaper14_15s_HookQ_ptBR");
   });
 });
+
+describe("localize translation under the spend guard", () => {
+  it("exports the default model call so localize-run can guard it", async () => {
+    const { defaultLocalizeLlm } = await import("./localize");
+    expect(typeof defaultLocalizeLlm).toBe("function");
+  });
+});

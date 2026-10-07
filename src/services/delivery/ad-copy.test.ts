@@ -124,3 +124,25 @@ describe("generateAdCopy", () => {
     expect(sets[1].variants[0].fields.brandName).toBe("TCL");
   });
 });
+
+describe("generateAdCopy under the spend guard (export pack)", () => {
+  it("falls back to the scaffold, without calling the model, when the budget refuses the call", async () => {
+    const { MemorySpendLedger, setSpendLedger } = await import("@/services/ops/budget-guard");
+    const { guardLlmFn } = await import("@/services/ops/spend");
+    const { defaultAdCopyLlm } = await import("./ad-copy");
+    expect(typeof defaultAdCopyLlm).toBe("function");
+    const ledger = new MemorySpendLedger();
+    setSpendLedger(ledger);
+    try {
+      await ledger.setBudget({ projectId: "p1", runId: "r1" }, 0);
+      const model = vi.fn(async () => ({ channels: [] }));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const sets = await generateAdCopy({ product: { brand: "TCL", name: "QM7" }, platforms: ["tiktok"], llm: guardLlmFn({ projectId: "p1", runId: "r1" }, model, { outTokens: 3000 }) });
+      warn.mockRestore();
+      expect(model).not.toHaveBeenCalled();
+      expect(sets[0].source).toBe("scaffold");
+    } finally {
+      setSpendLedger(null);
+    }
+  });
+});

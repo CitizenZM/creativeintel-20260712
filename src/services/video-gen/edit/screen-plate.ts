@@ -550,7 +550,7 @@ const visionQuadSchema = z.object({ found: z.boolean().default(false), tl: pt.op
 export type VisionQuadFn = (imageDataUrl: string, systemPrompt: string) => Promise<unknown>;
 
 /** Default vision call: the project's vision-capable model helper (same one keyframe QC uses). */
-const defaultVision: VisionQuadFn = async (imageDataUrl, systemPrompt) => {
+export const defaultScreenVision: VisionQuadFn = async (imageDataUrl, systemPrompt) => {
   const { analyzeWithClaude } = await import("@/services/ai/claude-client");
   return analyzeWithClaude({
     systemPrompt,
@@ -584,7 +584,7 @@ export async function detectScreenQuad(
     const sharp = (await import("sharp")).default;
     const buf = await loadImage(imageUrlOrPath);
     const small = await sharp(buf).resize({ width: 768, height: 768, fit: "inside" }).jpeg({ quality: 80 }).toBuffer();
-    const raw = await (deps.vision ?? defaultVision)(`data:image/jpeg;base64,${small.toString("base64")}`, SCREEN_QUAD_SYSTEM);
+    const raw = await (deps.vision ?? defaultScreenVision)(`data:image/jpeg;base64,${small.toString("base64")}`, SCREEN_QUAD_SYSTEM);
     const parsed = visionQuadSchema.safeParse(raw);
     if (!parsed.success || !parsed.data.found) return null;
     const { tl, tr, br, bl } = parsed.data;
@@ -650,6 +650,8 @@ export async function applyScreenPlate(input: {
   dir: string;
   still?: boolean;
   vision?: VisionQuadFn;
+  /** The detected track of this source, kept across re-edits (screen-plate-store). */
+  trackCache?: import("./screen-plate-store").PlateTrackCache;
 }): Promise<{ out: string; track: TrackKey[] }> {
   if (!ffmpegPath) throw new Error("ffmpeg is not available");
   const { src, out, dir } = input;
@@ -658,7 +660,8 @@ export async function applyScreenPlate(input: {
   let plate = input.plate;
   if (!plate.track?.length && !plate.firstLast) {
     if (!plate.detect) throw new Error("screen plate has no track, firstLast or detect");
-    const track = await detectTrack(src, plate, dur, dir, { vision: input.vision });
+    const { detectedTrack } = await import("./screen-plate-store");
+    const track = await detectedTrack(() => detectTrack(src, plate, dur, dir, { vision: input.vision }), input.trackCache);
     if (!track.length) throw new Error("screen plate: no screen found on the clip");
     plate = { ...plate, track };
   }
@@ -694,6 +697,8 @@ export async function applyScreenPlates(input: {
   segments: { kind: "clip" | "still"; url: string; frameNumber: number }[];
   sources: Map<string, string>;
   vision?: VisionQuadFn;
+  /** Detected tracks kept per source clip, so a re-edit doesn't detect (and pay) again. */
+  trackCache?: import("./screen-plate-store").TrackCache;
 }): Promise<void> {
   const done = new Set<string>();
   for (const f of input.frames) {
@@ -704,7 +709,7 @@ export async function applyScreenPlates(input: {
       done.add(s.url);
       const out = path.join(input.dir, `sp${f.frameNumber}-${done.size}.${s.kind === "still" ? "png" : "mp4"}`);
       try {
-        await applyScreenPlate({ src, out, plate: f.screenPlate, dir: input.dir, still: s.kind === "still", vision: input.vision });
+        await applyScreenPlate({ src, out, plate: f.screenPlate, dir: input.dir, still: s.kind === "still", vision: input.vision, trackCache: input.trackCache?.bind(s.url, f.screenPlate) });
         input.sources.set(s.url, out);
       } catch (err) {
         console.warn(`[screen-plate] frame ${f.frameNumber} skipped:`, err instanceof Error ? err.message.slice(0, 200) : err);
