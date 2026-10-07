@@ -56,6 +56,35 @@ const stripEnd = (s: string) => s.replace(/[.!?…\s]+$/, "");
 /** 2.5 spoken words per second (the director's VO budget). */
 const voBudget = (sec: number) => Math.max(2, Math.floor(sec * 2.5));
 
+/**
+ * Fit a spoken line to a word budget without ever cutting mid-sentence: keep whole sentences that
+ * fit; if even the first one is too long, end it at its last clause break (",", ";", "—") inside the
+ * budget, else at the budget. Always closes with real punctuation — never "…" (it is read aloud).
+ */
+export function fitSpoken(text: string, maxWords: number): string {
+  const t = squash(text);
+  const words = (x: string) => x.split(/\s+/).filter(Boolean).length;
+  if (words(t) <= maxWords) return t;
+  // Split after sentence punctuation followed by a space ("3.0" and "$4.99" stay whole).
+  const sentences = t.split(/(?<=[.!?]["')\]]?)\s+/).filter(Boolean);
+  let out = "";
+  for (const sn of sentences) {
+    const next = out ? `${out} ${sn}` : sn;
+    if (words(next) > maxWords) break;
+    out = next;
+  }
+  if (out) return out;
+  const w = sentences[0].replace(/[.!?…]+$/, "").split(/\s+/).slice(0, maxWords);
+  let cut = w.length;
+  for (let i = w.length - 1; i >= 1; i--) {
+    if (/[,;:—–-]$/.test(w[i])) {
+      cut = i + 1;
+      break;
+    }
+  }
+  return `${w.slice(0, cut).join(" ").replace(/[,;:—–-]+$/, "")}.`;
+}
+
 const PLATFORM_IDS = new Set<string>(PLATFORM_PROFILES.map((p) => p.id));
 export const PLATFORM_LABELS: Record<PlatformId, string> = {
   tiktok: "TikTok",
@@ -529,11 +558,11 @@ export function mergeCampaignCopy(scaffold: PlatformPlan, raw: unknown, productN
     if (!r.success || !beats[r.data.i]) continue;
     const b = beats[r.data.i];
     if (r.data.vo?.trim()) {
-      b.vo = clipWords(r.data.vo, voBudget(b.t1 - b.t0) + 3);
+      b.vo = fitSpoken(r.data.vo, voBudget(b.t1 - b.t0) + 3);
       applied++;
     }
     if (r.data.onScreenText?.trim()) {
-      b.onScreenText = clipWords(r.data.onScreenText, 8);
+      b.onScreenText = clipWords(r.data.onScreenText, 8).replace(/…$/, "");
       applied++;
     }
     // A rewritten visual must keep the product in frame (and with it every zoom on the product).
@@ -551,11 +580,11 @@ export function mergeCampaignCopy(scaffold: PlatformPlan, raw: unknown, productN
       applied++;
     }
     if (r.data.openingText?.trim()) {
-      h.openingText = clipWords(r.data.openingText, 8);
+      h.openingText = clipWords(r.data.openingText, 8).replace(/…$/, "");
       applied++;
     }
     if (r.data.openingVO?.trim()) {
-      h.openingVO = clipWords(r.data.openingVO, voBudget(h.durationSec) + 3);
+      h.openingVO = fitSpoken(r.data.openingVO, voBudget(h.durationSec) + 3);
       applied++;
     }
   }
