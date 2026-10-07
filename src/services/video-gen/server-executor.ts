@@ -360,7 +360,7 @@ export async function storyboardFrames(storyboardId: string | null, directorPlan
   const sb = await prisma.storyboard.findUnique({ where: { id: storyboardId }, select: { frames: true, frameSeconds: true } });
   const frameSeconds = sb?.frameSeconds || 2;
   const frames = Array.isArray(sb?.frames)
-    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null; segment?: string | null; imagePrompt?: string | null; scene?: string | null; locked?: { speed?: number; zoomHit?: { x: number; y: number }; fine?: string } }[])
+    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null; segment?: string | null; imagePrompt?: string | null; scene?: string | null; locked?: { speed?: number; zoomHit?: { x: number; y: number }; fine?: string; endCard?: { id: string; data?: Record<string, unknown> } } }[])
     : [];
   const plan = (directorPlan as { frames?: Record<string, { vo?: string | null; txt?: string | null }> } | null)?.frames ?? {};
   return frames.map((f, i) => {
@@ -376,6 +376,7 @@ export async function storyboardFrames(storyboardId: string | null, directorPlan
       speed: f.locked?.speed ?? 1,
       zoomHit: f.locked?.zoomHit ?? null,
       fine: f.locked?.fine ?? null,
+      endCard: f.locked?.endCard?.id ? { id: f.locked.endCard.id, data: (f.locked.endCard.data ?? {}) as never } : null,
     };
   });
 }

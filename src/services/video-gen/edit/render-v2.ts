@@ -28,6 +28,7 @@ import { detectBeats, trackWindowStart } from "./beat-detect";
 import { measureCuts, measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
 import { claimChipPng, comparisonLabelPng, ctaButtonPng, domainPng, finePrintPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
+import { endCardLayers, endCardSlots, layerFilter, RENDERABLE_END_CARDS, type EndCardTemplate, type LayerAnim } from "./endcard-render";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
 import { kineticGroups, shownForm, timedWords, toSrt, subtitleCues, type TimedWord } from "../voiceover";
 import { speakVoiceover, type AssembleFrame, type Segment } from "../glm-assemble";
@@ -197,6 +198,8 @@ interface Overlay {
   y: number;
   /** Drops in from above and bounces to rest (CTA button). */
   bounce?: boolean;
+  /** End-card template animation (pop / slam / pulse / bob). */
+  anim?: LayerAnim;
 }
 
 /** Holiday / gift copy picks the seasonal music bed. */
@@ -366,6 +369,9 @@ export async function renderEditV2(input: {
   const groups = kineticGroups(words.filter((w) => w.startSec < captionEnd));
   const windows = captionWindows(groups, captionEnd);
   const overlays: Overlay[] = [];
+  // Layout slots: every readable layer inside the strict safe box on 9:16 (y 288–1220).
+  const slots = endCardSlots(canvas);
+  const vertical = canvas.h / canvas.w > 1.5;
   // A caption that only repeats the headline or claim already on screen is dropped (no "NEW YEAR GIFT?" twice).
   const bare = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}%]+/gu, " ").trim();
   const repeatsCard = (win: (typeof windows)[number]) => {
@@ -376,9 +382,25 @@ export async function renderEditV2(input: {
     if (repeatsCard(win)) continue;
     const file = path.join(dir, `v2cap${String(i).padStart(3, "0")}.png`);
     await writeFile(file, await kineticCaptionPng(groups[win.group].map((x) => x.text), win.word, canvas, look));
-    overlays.push({ file, startSec: win.startSec, endSec: win.endSec, y: 0.7 });
+    overlays.push({ file, startSec: win.startSec, endSec: win.endSec, y: slots.caption });
+  }
+  // End-card template (creative library E01–E12) from the CTA frame; facts missing → the default close.
+  const ecFrame = input.frames.find((f) => f.endCard?.id);
+  const template = ecFrame?.endCard && plan.ctaSec !== null && (RENDERABLE_END_CARDS as string[]).includes(ecFrame.endCard.id)
+    ? await endCardLayers(ecFrame.endCard.id as EndCardTemplate, { headline: plan.cards.find((c) => c.role === "offer")?.text ?? null, ...ecFrame.endCard.data }, canvas, look).catch((err) => {
+        console.warn(`[edit-v2] end card ${ecFrame.endCard?.id} failed, using the default close:`, err instanceof Error ? err.message.slice(0, 160) : err);
+        return null;
+      })
+    : null;
+  if (template && plan.ctaSec !== null) {
+    for (const [i, l] of template.layers.entries()) {
+      const file = path.join(dir, `v2end${i}.png`);
+      await writeFile(file, l.png);
+      overlays.push({ file, startSec: plan.ctaSec + l.delaySec, endSec: total, y: l.y, anim: l.anim === "bounce" ? undefined : l.anim, bounce: l.anim === "bounce" });
+    }
   }
   for (const [i, card] of plan.cards.entries()) {
+    if (template && card.role === "offer") continue; // the template carries the offer as its headline
     const file = path.join(dir, `v2card${i}.png`);
     const png =
       card.role === "hook"
@@ -393,13 +415,13 @@ export async function renderEditV2(input: {
     const hookOverPerson = card.role === "hook" && input.frames.some((f) => (f.segment ?? "").toUpperCase() === "HOOK" && f.hasPerson);
     // During a comparison shot a claim belongs to our half (under its label), not over the other side.
     const overCompare = card.role === "claim" && plan.shots.some((s) => s.compare && s.startSec < card.endSec && s.endSec > card.startSec);
-    const y = card.role === "fine" ? 0.9 : card.role === "claim" ? (overCompare ? 0.63 : 0.3) : hookOverPerson ? 0.52 : 0.22;
+    const y = card.role === "fine" ? (template?.fineY ?? slots.fine) : card.role === "offer" ? slots.headline : card.role === "claim" ? (overCompare ? Math.min(0.6, 0.63) : 0.3) : hookOverPerson ? 0.52 : 0.22;
     overlays.push({ file, startSec: card.startSec, endSec: card.endSec, y });
   }
-  if (plan.ctaButton) {
+  if (plan.ctaButton && !template?.hideButton) {
     const file = path.join(dir, "v2cta.png");
     await writeFile(file, await ctaButtonPng(input.brand ? look.ctaText : plan.ctaButton.text, canvas, look));
-    overlays.push({ file, startSec: plan.ctaButton.startSec, endSec: total, y: 0.74, bounce: true });
+    overlays.push({ file, startSec: plan.ctaButton.startSec, endSec: total, y: slots.button, bounce: true });
   }
   // End card branding: the logo lands with the CTA, the domain under the button.
   if (plan.ctaSec !== null) {
@@ -407,9 +429,10 @@ export async function renderEditV2(input: {
     if (logo) {
       const file = path.join(dir, "v2logo.png");
       await writeFile(file, logo);
-      overlays.push({ file, startSec: plan.ctaSec, endSec: total, y: 0.1 });
+      overlays.push({ file, startSec: plan.ctaSec, endSec: total, y: slots.logo });
     }
-    if (look.domain) {
+    // On 9:16 the domain would fall under the platform UI; the offer line / button carry it there.
+    if (look.domain && !vertical) {
       const file = path.join(dir, "v2domain.png");
       await writeFile(file, await domainPng(look.domain, canvas, look));
       overlays.push({ file, startSec: plan.ctaButton?.startSec ?? plan.ctaSec, endSec: total, y: 0.8 });
@@ -437,6 +460,10 @@ export async function renderEditV2(input: {
   const video = [`[0:v]${fxFilter(plan, canvas)}[fx]`];
   overlays.forEach((o, i) => {
     const from = i === 0 ? "[fx]" : `[o${i - 1}]`;
+    if (o.anim && o.anim !== "none" && o.anim !== "bounce") {
+      video.push(...layerFilter(firstOverlay + i, o.anim, o.y, o.startSec, o.endSec, from, `[o${i}]`));
+      return;
+    }
     // A bouncing overlay falls from 9% of the height and bounces to rest (decaying |cos|).
     const y = o.bounce ? `'H*${o.y}-h/2-H*0.09*abs(cos(2*PI*1.6*(t-${f3(o.startSec)})))*exp(-3.2*(t-${f3(o.startSec)}))'` : `H*${o.y}-h/2`;
     video.push(`${from}[${firstOverlay + i}:v]overlay=x=(W-w)/2:y=${y}:eval=${o.bounce ? "frame" : "init"}:enable='between(t,${f3(o.startSec)},${f3(o.endSec)})'[o${i}]`);

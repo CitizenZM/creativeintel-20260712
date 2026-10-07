@@ -37,6 +37,8 @@ export interface LockedBlock {
   fine?: string;
   anchorEnd?: boolean;
   endState?: string;
+  /** CTA frame: end-card template (creative library E01–E12) and its live facts (pct, code, price…). */
+  endCard?: { id: string; data?: Record<string, unknown> };
 }
 
 export interface LockedFrame {
