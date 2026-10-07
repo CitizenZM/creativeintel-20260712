@@ -86,6 +86,16 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     /** Studio choices: { [platform]: { hookIds?: string[] (≤ 3, lead the auto picks), endCardId? } }. */
     overrides: z.record(z.string(), z.unknown()).optional(),
   }),
+  /** Turn a stored campaign-plan script into a locked storyboard (refs, cast lock, zooms, anchoring, end card decided in code; one model call writes the prompts). */
+  z.object({
+    action: z.literal("plan-to-storyboard"),
+    projectId: z.string().min(1),
+    platform: z.string().optional(),
+    hookId: z.string().optional(),
+    cast: z.string().max(400).optional(),
+    setting: z.string().max(300).optional(),
+    engine: z.enum(["kling", "veo", "veo1080"]).optional(),
+  }),
   /** Pick 3 diverse opening hooks + an end card for category × platform × goal (category defaults to the stored brief). */
   z.object({
     action: z.literal("select-creative"),
