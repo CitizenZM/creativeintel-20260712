@@ -455,6 +455,7 @@ export function auditContext(ctx: ScriptContext): ScriptClaimsAuditInput {
     ctaOptions: ctx.ctaPool,
     offerText: ctx.offer,
     sourceText,
+    strictCompliance: ctx.strictCompliance,
   };
 }
 

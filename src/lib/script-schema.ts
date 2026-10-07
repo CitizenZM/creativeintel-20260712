@@ -237,6 +237,12 @@ export interface ScriptClaimsAuditInput {
    * compatibility: when omitted, the numeric-claims check is skipped.
    */
   sourceText?: string;
+  /**
+   * Off by default (owner direction 2026-10-06: sell hard, no compliance gating). When false the
+   * absolute-word and unsourced-social-proof checks are skipped; the brand's own forbidden list, the
+   * CTA pool and the unsourced-number (hallucination) check still run.
+   */
+  strictCompliance?: boolean;
 }
 
 export interface ScriptClaimsViolation {
@@ -491,7 +497,7 @@ export function auditScriptText(text: string, opts: ScriptClaimsAuditInput): Scr
   for (const hit of findForbiddenMatches(text, claimsForbidden)) {
     violations.push({ path: "body", text: hit, reason: `forbidden claim: "${hit}"` });
   }
-  for (const hit of findAbsoluteMatches(text)) {
+  for (const hit of opts.strictCompliance ? findAbsoluteMatches(text) : []) {
     violations.push({ path: "body", text: hit, reason: `absolute/curative claim: "${hit}"` });
   }
   if (sourceText) {
@@ -537,10 +543,10 @@ export function auditScriptClaims(script: ScriptV2, opts: ScriptClaimsAuditInput
     for (const hit of findForbiddenMatches(field.text, claimsForbidden)) {
       violations.push({ path: field.path, text: hit, reason: `forbidden claim: "${hit}"` });
     }
-    for (const hit of findAbsoluteMatches(field.text)) {
+    for (const hit of opts.strictCompliance ? findAbsoluteMatches(field.text) : []) {
       violations.push({ path: field.path, text: hit, reason: `absolute/curative claim: "${hit}"` });
     }
-    if (field.path !== "body (rendered)") {
+    if (opts.strictCompliance && field.path !== "body (rendered)") {
       for (const hit of findUnsourcedSocialProof(field.text, sourceText)) {
         violations.push({ path: field.path, text: hit, reason: `unsourced social proof: "${hit}" is not in brand truth / briefing / claimsAllowed` });
       }
