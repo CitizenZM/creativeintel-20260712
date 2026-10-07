@@ -81,8 +81,8 @@ export function renderLearningBlock(l: Learning | null): string {
     (s) => `- ${HOOK_STYLE_NAME[s.hookStyle] ?? s.hookStyle} hooks: hook rate ${(s.hookRate * 100).toFixed(1)}%, CTR ${(s.ctr * 100).toFixed(2)}% over ${s.impressions.toLocaleString("en-US")} impressions`
   );
   const verdicts = [
-    l.hookWinner ? `${HOOK_STYLE_NAME[l.hookWinner.hookStyle]} hooks stop the scroll best (+${l.hookWinner.lift}% hook rate, significant)` : null,
-    l.ctrWinner ? `${HOOK_STYLE_NAME[l.ctrWinner.hookStyle]} hooks get the most clicks (+${l.ctrWinner.lift}% CTR, significant)` : null,
+    l.hookWinner ? `${HOOK_STYLE_NAME[l.hookWinner.hookStyle] ?? l.hookWinner.hookStyle.toUpperCase()} hooks stop the scroll best (+${l.hookWinner.lift}% hook rate, significant)` : null,
+    l.ctrWinner ? `${HOOK_STYLE_NAME[l.ctrWinner.hookStyle] ?? l.ctrWinner.hookStyle.toUpperCase()} hooks get the most clicks (+${l.ctrWinner.lift}% CTR, significant)` : null,
   ].filter(Boolean);
   return `REAL RESULTS FROM THIS BRAND'S PAST A/B TESTS:\n${lines.join("\n")}${verdicts.length ? `\nVerdict: ${verdicts.join("; ")}. Lead with that hook style unless the brief says otherwise.` : "\nNo significant winner yet — keep testing all three hook styles."}`;
 }

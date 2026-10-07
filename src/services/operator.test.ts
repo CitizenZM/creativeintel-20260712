@@ -40,3 +40,13 @@ describe("operatorActionSchema", () => {
     expect(operatorActionSchema.safeParse({ action: "approve-frames", projectId: "p", storyboardId: "s" }).success).toBe(true);
   });
 });
+
+describe("batch + export-pack actions", () => {
+  it("parses plan-batch with defaults and rejects a bad aspect", () => {
+    const ok = operatorActionSchema.parse({ action: "plan-batch", projectId: "p", runId: "r" });
+    expect(ok).toMatchObject({ design: "pairwise", maxVariants: 24, dims: {} });
+    expect(operatorActionSchema.safeParse({ action: "plan-batch", projectId: "p", runId: "r", dims: { aspects: ["2:3"] } }).success).toBe(false);
+    expect(operatorActionSchema.parse({ action: "render-batch", projectId: "p", runId: "r", batchId: "b1" })).toMatchObject({ limit: 1 });
+    expect(operatorActionSchema.safeParse({ action: "export-pack", projectId: "p", runId: "r" }).success).toBe(true);
+  });
+});

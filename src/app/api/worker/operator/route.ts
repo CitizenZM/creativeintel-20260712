@@ -18,6 +18,9 @@
  * POST { action: "select-creative", projectId?, platform, goal, promo? } — 3 hooks + end card
  * POST { action: "plan-to-storyboard", projectId, platform?, hookId?, cast?, setting?, engine? } — plan script → locked storyboard
  * POST { action: "plan-campaign", projectId, platforms?, goal?, promo?, runDate?, durationSec? } — campaign plan → Project.campaignPlan
+ * POST { action: "plan-batch", projectId, runId, dims?, maxVariants?, design?: pairwise|full } — Batch Mode matrix + cost → qc.batches
+ * POST { action: "render-batch", projectId, runId, batchId, limit? } — render free re-edit variants of a batch
+ * POST { action: "export-pack", projectId, runId, platforms? } — videos, thumbnails, ad copy, bulk CSVs, README, manifest
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -201,7 +204,7 @@ export async function POST(request: Request) {
       subtitlesUrl: master.subtitlesUrl,
       previewMp4Url: master.previewUrl ?? null,
       contactSheetUrl: master.contactSheetUrl ?? null,
-      qcReport: master.qcReport ? { ...master.qcReport, variants: ((run.qcReport as { variants?: unknown[] } | null)?.variants ?? []) } : null,
+      qcReport: master.qcReport ? { ...master.qcReport, variants: ((run.qcReport as { variants?: unknown[] } | null)?.variants ?? []), batches: ((run.qcReport as { batches?: unknown[] } | null)?.batches ?? []) } : null,
       creditsSpent: run.creditsSpent,
     });
     return NextResponse.json({ ok: true, run: summarize((await getRunWithJobs(run.id))!), qc: master.qcReport ?? null });
@@ -363,6 +366,29 @@ export async function POST(request: Request) {
     try {
       const variant = await renderVariantForRun(run.id, input.hookStyle, input.hookText);
       return NextResponse.json({ ok: true, variant });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+    }
+  }
+
+  if (input.action === "plan-batch" || input.action === "render-batch" || input.action === "export-pack") {
+    const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId }, select: { id: true } });
+    if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    try {
+      if (input.action === "plan-batch") {
+        const { planBatchForRun } = await import("@/services/video-gen/batch-render");
+        const batch = await planBatchForRun({ runId: run.id, dims: input.dims, design: input.design, maxVariants: input.maxVariants });
+        return NextResponse.json({ ok: true, batch });
+      }
+      if (input.action === "render-batch") {
+        // Claim now, render after the response (each re-edit is ~2–3 min); poll GET ?runId= for qc.batches.
+        const { claimBatchVariants, renderClaimedVariants } = await import("@/services/video-gen/batch-render");
+        const claimed = await claimBatchVariants(run.id, input.batchId, input.limit);
+        if (claimed.length) after(() => renderClaimedVariants(run.id, input.batchId, claimed).then(() => undefined));
+        return NextResponse.json({ ok: true, rendering: claimed.map((v) => ({ id: v.id, name: v.name })) }, { status: claimed.length ? 202 : 200 });
+      }
+      const { buildExportPack } = await import("@/services/delivery/export-pack");
+      return NextResponse.json({ ok: true, ...(await buildExportPack(run.id, { platforms: input.platforms })) });
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
     }
