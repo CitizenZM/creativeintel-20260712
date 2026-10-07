@@ -72,8 +72,42 @@ const COLS: Record<keyof Omit<PerfRow, "platform" | "hookStyle" | "format">, Reg
   conversions: [/^results$/i, /^conversions$/i, /^purchases$/i],
 };
 
-/** Hook style and format from our A/B naming: …_HookC, …_HookP_4x5, …_HookQ_15s. */
-export function parseAdName(name: string): { hookStyle: string | null; format: string | null } {
+/** Fields a Batch Mode name adds (creative/batch-matrix.ts batchAdName). */
+export interface BatchNameFields {
+  hookId: string | null;
+  endCard: string;
+  aspect: string;
+  durationSec: number;
+  voice: string;
+  music: string | null;
+  cta: string | null;
+}
+
+/** Brand_Script_15s_HookH09_E04_4x5_VAndrew_MPop_CShopNow (M… and C… optional). */
+const BATCH_NAME = /_(\d{1,3})s_Hook([QCP]|H\d{2})_(E\d{2})_(9x16|4x5|1x1|16x9)_V([A-Za-z0-9]+)(?:_M([A-Za-z0-9]+))?(?:_C([A-Za-z0-9]+))?(?:_|$)/i;
+
+/**
+ * Hook style and format from our A/B naming: …_HookC, …_HookP_4x5, …_HookQ_15s. Batch Mode names also
+ * give the library hook id, end card, aspect, length, voice, music and CTA; their hookStyle is q/c/p
+ * for a restyle or the lower-case hook id (h09) so the learning loop compares library hooks too.
+ */
+export function parseAdName(name: string): { hookStyle: string | null; format: string | null } & Partial<BatchNameFields> {
+  const b = BATCH_NAME.exec(name);
+  if (b) {
+    const hookId = /^H/i.test(b[2]) ? b[2].toUpperCase() : null;
+    const aspect = b[4].toLowerCase();
+    return {
+      hookStyle: b[2].toLowerCase(),
+      format: aspect,
+      hookId,
+      endCard: b[3].toUpperCase(),
+      aspect,
+      durationSec: Number(b[1]),
+      voice: b[5],
+      music: b[6]?.toLowerCase() ?? null,
+      cta: b[7] ?? null,
+    };
+  }
   const hook = /_Hook([QCP])(?:_|$)/i.exec(name)?.[1]?.toLowerCase() ?? null;
   const format = /_(4x5|1x1|16x9|9x16|15s|10s)(?:_|$)/i.exec(name)?.[1]?.toLowerCase() ?? (hook ? "9x16" : null);
   return { hookStyle: hook, format };

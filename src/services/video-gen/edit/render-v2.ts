@@ -241,6 +241,8 @@ export async function renderEditV2(input: {
   hookText?: string | null;
   /** Brand Kit packaging (colours, fonts, logo, CTA, domain). */
   brand?: BrandStyle;
+  /** Music bed override (Batch Mode); default: picked from the copy. */
+  musicMood?: "pop" | "holiday";
 }): Promise<EditV2Result> {
   const look = input.brand ?? DEFAULT_STYLE;
   if (!ffmpegPath) throw new Error("ffmpeg is not available on this server");
@@ -450,7 +452,7 @@ export async function renderEditV2(input: {
   if (track) {
     await run(ff, ["-y", "-v", "error", "-ss", f3(track.startSec), "-t", f3(total), "-i", track.file, "-af", `afade=t=out:st=${f3(Math.max(0, total - 0.4))}:d=0.4,aresample=44100`, "-ac", "2", musicFile], { timeout: 60_000 });
   } else {
-    const mood = musicMood(input.frames);
+    const mood = input.musicMood ?? musicMood(input.frames);
     const music = synthesizeMusic({ durationSec: total, bpm: plan.grid.bpm, dropSec: plan.dropSec, breakdownSec: plan.breakdownSec, ctaSec: plan.ctaSec, energy: mood === "holiday" ? 0.55 : 0.8, seed: input.runId.length, mood });
     await writeFile(musicFile, toWav(music.left, music.right));
   }

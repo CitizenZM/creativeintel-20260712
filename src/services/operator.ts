@@ -131,6 +131,19 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     hookStyle: z.enum(["q", "c", "p"]),
     hookText: z.string().max(80).optional(),
   }),
+  /** Batch Mode: variant matrix (hooks × end cards × CTA × voice × music × aspect × duration) + cost, kept on qcReport.batches. */
+  z.object({
+    action: z.literal("plan-batch"),
+    projectId: z.string().min(1),
+    runId: z.string().min(1),
+    dims: z.object({ hooks: z.array(z.string()).max(12).optional(), endCards: z.array(z.string()).max(12).optional(), ctas: z.array(z.string().max(40)).max(8).optional(), voices: z.array(z.string()).max(8).optional(), musicMoods: z.array(z.string()).max(4).optional(), aspects: z.array(z.enum(["9:16", "4:5", "1:1", "16:9"])).max(4).optional(), durations: z.array(z.number().int().min(5).max(60)).max(6).optional() }).default({}),
+    maxVariants: z.number().int().min(1).max(200).default(24),
+    design: z.enum(["pairwise", "full"]).default("pairwise"),
+  }),
+  /** Render the next free re-edit variants of a planned batch (never generates new hook clips). */
+  z.object({ action: z.literal("render-batch"), projectId: z.string().min(1), runId: z.string().min(1), batchId: z.string().min(1), limit: z.number().int().min(1).max(10).default(1) }),
+  /** Export pack: videos + thumbnails, per-platform ad copy, Meta/TikTok bulk CSVs, README, manifest (+ zip). */
+  z.object({ action: z.literal("export-pack"), projectId: z.string().min(1), runId: z.string().min(1), platforms: z.array(z.string()).max(12).optional() }),
   z.object({
     action: z.literal("approve-run"),
     projectId: z.string().min(1),

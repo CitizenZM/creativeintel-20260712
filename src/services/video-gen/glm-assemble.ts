@@ -415,6 +415,9 @@ export async function renderFromRun(input: {
   /** Cut the edit down to this many seconds. */
   cutdownSec?: number;
   voice?: string;
+  /** Batch Mode overrides: music bed and CTA button copy. */
+  musicMood?: "pop" | "holiday";
+  ctaText?: string;
   tag: string;
 }): Promise<{ hookText: string | null; masterUrl: string; previewUrl: string | null; durationSec: number; qc: QcReport }> {
   const { cutdownFrames } = await import("./edit/cutdown");
@@ -434,8 +437,9 @@ export async function renderFromRun(input: {
     }
     const { renderEditV2 } = await import("./edit/render-v2");
     const { loadBrandStyle } = await import("./edit/brand-style");
-    const brand = await loadBrandStyle(input.projectId);
-    const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText, brand });
+    const kit = await loadBrandStyle(input.projectId);
+    const brand = input.ctaText ? { ...kit, ctaText: input.ctaText } : kit;
+    const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText, brand, musicMood: input.musicMood });
     const tag = `${input.tag}-${Date.now().toString(36)}`;
     const [m, p] = await Promise.all([
       uploadBuffer({ buffer: await readFile(v.masterFile), filename: `${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
