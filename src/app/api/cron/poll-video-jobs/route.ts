@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { pollAllActiveJobs } from "@/services/video-gen/poll";
 import { advanceActiveServerRuns } from "@/services/video-gen/server-engines";
+import { cronHeartbeat } from "@/services/ops/heartbeat";
 
 // Long enough to assemble a finished server-rendered run (see ASSEMBLY_RESERVE_MS).
 export const maxDuration = 300;
@@ -25,6 +26,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  await cronHeartbeat("poll-video-jobs");
   const summary = await pollAllActiveJobs();
   // Also advance server-rendered Studio runs — GLM and ComfyUI render from
   // here, not on the Mac worker.

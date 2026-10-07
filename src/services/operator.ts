@@ -211,6 +211,10 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("covers"), projectId: z.string().min(1), runId: z.string().min(1), force: z.boolean().optional() }),
   /** Pre-flight auto-fix: one free re-edit with the corrections for fixable QC / pre-flight issues → qcReport.autofix. */
   z.object({ action: z.literal("auto-fix"), projectId: z.string().min(1), runId: z.string().min(1), platform: z.enum(PLATFORM_IDS).optional() }),
+  /** Ops health: stuck runs / jobs, failing engines, broken renders, spend anomalies, cron heartbeats (read-only). */
+  z.object({ action: z.literal("ops-health") }),
+  /** Safe auto-recovery (re-drive, re-assemble, release orphaned reservations, re-queue provider-failed tasks); dry run by default. */
+  z.object({ action: z.literal("ops-recover"), dryRun: z.boolean().default(true) }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;

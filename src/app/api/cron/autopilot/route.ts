@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { advanceAllAutopilots } from "@/services/autopilot/operator-actions";
+import { cronHeartbeat } from "@/services/ops/heartbeat";
 
 // One tick per running autopilot while the budget lasts (a render step drives its run inside it).
 export const maxDuration = 300;
@@ -17,6 +18,7 @@ export async function GET(request: Request) {
   } else if (process.env.VERCEL === "1") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  await cronHeartbeat("autopilot");
   if (process.env.AUTOPILOT === "off") return NextResponse.json({ ticked: 0, disabled: true });
   try {
     return NextResponse.json(await advanceAllAutopilots(270_000));

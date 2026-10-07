@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { advanceAutoVariants } from "@/services/video-gen/variants";
+import { cronHeartbeat } from "@/services/ops/heartbeat";
 
 // One full variant render (edit engine v2) fits comfortably.
 export const maxDuration = 300;
@@ -18,6 +19,7 @@ export async function GET(request: Request) {
   } else if (process.env.VERCEL === "1") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  await cronHeartbeat("hook-variants");
   try {
     return NextResponse.json({ rendered: await advanceAutoVariants() });
   } catch (err) {

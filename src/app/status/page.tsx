@@ -4,6 +4,7 @@ import { collectSources, type JobSourceStatus, type JobStep } from "@/services/r
 import { getStorageStatus } from "@/services/storage";
 import { getSystemStats, isComfyConfigured, summariseSystemStats } from "@/services/ai/comfyui";
 import { cn } from "@/lib/utils";
+import type { HealthReport } from "@/services/ops/health";
 
 export const dynamic = "force-dynamic";
 
@@ -65,8 +66,124 @@ async function comfyStatus(): Promise<ComfyStatus> {
   }
 }
 
+type OpsHealth =
+  | { state: "ok"; report: HealthReport; events: { id: string; action: string; issueCode: string | null; targetType: string | null; targetId: string | null; ok: boolean; createdAt: Date; detail: unknown }[] }
+  | { state: "error"; error: string };
+
+/** Ops health monitor (services/ops/health.ts): live scan + the newest auto-recovery actions. */
+async function opsHealth(): Promise<OpsHealth> {
+  try {
+    const [{ scanHealth }, { recentOpsEvents }] = await Promise.all([import("@/services/ops/health"), import("@/services/ops/health-prisma")]);
+    const [report, events] = await Promise.all([scanHealth(), recentOpsEvents(15)]);
+    return { state: "ok", report, events };
+  } catch (err) {
+    return { state: "error", error: (err instanceof Error ? err.message : String(err)).slice(0, 300) };
+  }
+}
+
+const SEVERITY_STYLE: Record<string, string> = {
+  critical: "bg-[var(--status-urgent-bg)] text-[var(--status-urgent-fg)]",
+  warning: "bg-[var(--status-attention-bg)] text-[var(--status-attention-fg)]",
+  info: "bg-muted text-muted-foreground",
+};
+
+function OpsHealthSection({ ops }: { ops: OpsHealth }) {
+  if (ops.state === "error") {
+    return (
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold tracking-tight">Ops health</h2>
+        <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground break-words">Health scan unavailable · {ops.error}</div>
+      </section>
+    );
+  }
+  const { report, events } = ops;
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold tracking-tight">Ops health</h2>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Dot ok={report.ok} warn={report.counts.critical === 0} />
+          {report.counts.critical} critical · {report.counts.warning} warning · {report.counts.info} info
+        </span>
+      </div>
+      {report.issues.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">No issues — runs, jobs, renders, spend and crons look healthy.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead className="text-[11px] text-muted-foreground">
+              <tr className="border-b border-border text-left">
+                <th className="px-3 py-2 font-medium">Severity</th>
+                <th className="px-3 py-2 font-medium">Area</th>
+                <th className="px-3 py-2 font-medium">Issue</th>
+                <th className="px-3 py-2 font-medium">Auto-fix</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {report.issues.slice(0, 40).map((i, n) => (
+                <tr key={`${i.code}-${i.target?.id ?? n}`} className="align-top">
+                  <td className="px-3 py-2">
+                    <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap", SEVERITY_STYLE[i.severity])}>{i.severity}</span>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">{i.category}</td>
+                  <td className="px-3 py-2">
+                    <p className="text-xs break-words">{i.message}</p>
+                    {i.target && <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{i.code} · {i.target.type} {i.target.id}</p>}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">{i.fix ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <h3 className="text-xs font-semibold text-muted-foreground">Last recovery actions</h3>
+          {events.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">None yet.</div>
+          ) : (
+            <ul className="rounded-lg border border-border divide-y divide-border">
+              {events.map((e) => (
+                <li key={e.id} className="flex items-start justify-between gap-3 px-3 py-2">
+                  <span className="flex min-w-0 items-start gap-2 text-xs">
+                    <span className="mt-1"><Dot ok={e.ok} /></span>
+                    <span className="min-w-0 break-words">
+                      {e.action} <span className="font-mono text-[10px] text-muted-foreground">{e.targetType} {e.targetId}</span>
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{stamp(e.createdAt)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <h3 className="text-xs font-semibold text-muted-foreground">Cron heartbeats</h3>
+          <ul className="rounded-lg border border-border divide-y divide-border">
+            {report.heartbeats.map((h) => (
+              <li key={h.name} className="flex items-center justify-between gap-3 px-3 py-2">
+                <span className="flex items-center gap-2 text-xs">
+                  <Dot ok={!h.stale} warn={h.lastRunAt === null} />
+                  <code className="font-mono">{h.name}</code>
+                </span>
+                <span className="text-[11px] text-muted-foreground text-right">
+                  {h.lastRunAt ? `${stamp(new Date(h.lastRunAt))} · ${h.runs} runs` : "no heartbeat yet"}
+                  {h.everyMin ? ` · every ${h.everyMin} min` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default async function StatusPage() {
   const comfyPromise = comfyStatus();
+  const opsPromise = opsHealth();
   const [recentJobs, lastAdTask, lastFetchTask, queued, failedTasks, freshRows, recentFailedRows, beatRows] = await Promise.all([
     prisma.researchJob.findMany({
       where: { status: "complete" },
@@ -105,6 +222,7 @@ export default async function StatusPage() {
   ]);
   const recentFailed = Number(recentFailedRows[0]?.failed ?? 0);
   const comfy = await comfyPromise;
+  const ops = await opsPromise;
 
   // Roll every recent run's per-source outcome into one row per source, keeping
   // the most recent note so the page says why something is not working.
@@ -159,6 +277,8 @@ export default async function StatusPage() {
     <div>
       <Header title="System status" description="Where the data actually comes from, and what is currently working." />
       <div className="px-4 py-6 sm:px-6 lg:px-8 max-w-5xl mx-auto space-y-8">
+        <OpsHealthSection ops={ops} />
+
         <section className="space-y-2">
           <h2 className="text-sm font-semibold tracking-tight">Local workers</h2>
           <div className="rounded-lg border border-border divide-y divide-border text-sm">

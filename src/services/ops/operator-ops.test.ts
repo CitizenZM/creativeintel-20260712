@@ -21,3 +21,13 @@ describe("operator actions: cost, budget, report", () => {
     expect(operatorActionSchema.safeParse({ action: "campaign-report", projectId: "p", narrative: "pdf" }).success).toBe(false);
   });
 });
+
+describe("operator actions: ops health", () => {
+  it("parses ops-health and ops-recover (dry run unless dryRun: false)", () => {
+    expect(operatorActionSchema.safeParse({ action: "ops-health" }).success).toBe(true);
+    const def = operatorActionSchema.parse({ action: "ops-recover" });
+    expect(def).toEqual({ action: "ops-recover", dryRun: true });
+    expect(operatorActionSchema.parse({ action: "ops-recover", dryRun: false })).toEqual({ action: "ops-recover", dryRun: false });
+    expect(operatorActionSchema.safeParse({ action: "ops-recover", dryRun: "no" }).success).toBe(false);
+  });
+});

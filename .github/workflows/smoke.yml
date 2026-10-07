@@ -1,0 +1,60 @@
+# Post-deploy smoke test: Vercel posts a deployment_status to GitHub for every deployment; when a
+# Production deployment succeeds, run the FREE checks (scripts/smoke.ts) against it. Read-only — nothing
+# is generated, spent or sent anywhere. Secrets are optional: without them only the public checks run.
+#   secrets  CI_WORKER_TOKEN       operator token (select-creative, estimate-run)
+#            SMOKE_PROJECT_ID      project page render + estimate-run
+#            SMOKE_STORYBOARD_ID   estimate-run (optional)
+#            CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET   Access service token (only with an Access host base URL)
+#   vars     SMOKE_BASE_URL        default: the deployment's URL, else https://creativeintel.vercel.app
+name: smoke
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Base URL to check
+        required: false
+        default: https://creativeintel.vercel.app
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.event.deployment.id || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       (github.event.deployment.environment == 'Production' || github.event.deployment.environment == 'production'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SMOKE_BASE_URL: ${{ github.event.inputs.base_url || vars.SMOKE_BASE_URL || github.event.deployment_status.environment_url || 'https://creativeintel.vercel.app' }}
+      CI_WORKER_TOKEN: ${{ secrets.CI_WORKER_TOKEN }}
+      SMOKE_PROJECT_ID: ${{ secrets.SMOKE_PROJECT_ID }}
+      SMOKE_STORYBOARD_ID: ${{ secrets.SMOKE_STORYBOARD_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Check out scripts/ only
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Note missing secrets
+        run: |
+          if [ -z "$CI_WORKER_TOKEN" ]; then echo "::notice::CI_WORKER_TOKEN not set — skipping the operator checks (select-creative, estimate-run)"; fi
+          if [ -z "$SMOKE_PROJECT_ID" ]; then echo "::notice::SMOKE_PROJECT_ID not set — skipping the project page and estimate-run checks"; fi
+
+      # Self-contained script: no npm ci (no install, no prisma generate) — just Node's type stripping.
+      - name: Smoke test ${{ env.SMOKE_BASE_URL }}
+        run: node --experimental-strip-types scripts/smoke.ts
