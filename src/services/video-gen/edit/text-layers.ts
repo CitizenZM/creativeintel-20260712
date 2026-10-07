@@ -161,8 +161,9 @@ export async function logoPng(url: string, canvas: Canvas): Promise<Buffer | nul
     const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok) return null;
     const sharp = await sharpLib();
-    const boxW = Math.round(unit(canvas) * 0.34);
-    const boxH = Math.round(unit(canvas) * 0.12);
+    // Fits the end card's logo slot inside the strict safe box (on 9:16: y 296–388 at slot .178).
+    const boxW = Math.round(unit(canvas) * 0.3);
+    const boxH = Math.round(unit(canvas) * 0.085);
     return await sharp(Buffer.from(await res.arrayBuffer()))
       .resize({ width: boxW, height: boxH, fit: "inside", withoutEnlargement: false })
       .png()

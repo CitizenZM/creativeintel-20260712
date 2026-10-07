@@ -28,7 +28,7 @@ import { detectBeats, trackWindowStart } from "./beat-detect";
 import { measureCuts, measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
 import { claimChipPng, comparisonLabelPng, ctaButtonPng, domainPng, finePrintPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
-import { endCardLayers, endCardSlots, layerFilter, RENDERABLE_END_CARDS, type EndCardTemplate, type LayerAnim } from "./endcard-render";
+import { endCardLayers, endCardSlots, layerFilter, layerInputArgs, RENDERABLE_END_CARDS, type EndCardTemplate, type LayerAnim } from "./endcard-render";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
 import { kineticGroups, shownForm, timedWords, toSrt, subtitleCues, type TimedWord } from "../voiceover";
 import { speakVoiceover, type AssembleFrame, type Segment } from "../glm-assemble";
@@ -198,7 +198,7 @@ interface Overlay {
   y: number;
   /** Drops in from above and bounces to rest (CTA button). */
   bounce?: boolean;
-  /** End-card template animation (pop / slam / pulse / bob). */
+  /** End-card template animation (pop / slam / pulse / bob / wipe / fade / rise / drift). */
   anim?: LayerAnim;
 }
 
@@ -387,7 +387,7 @@ export async function renderEditV2(input: {
   // End-card template (creative library E01–E12) from the CTA frame; facts missing → the default close.
   const ecFrame = input.frames.find((f) => f.endCard?.id);
   const template = ecFrame?.endCard && plan.ctaSec !== null && (RENDERABLE_END_CARDS as string[]).includes(ecFrame.endCard.id)
-    ? await endCardLayers(ecFrame.endCard.id as EndCardTemplate, { headline: plan.cards.find((c) => c.role === "offer")?.text ?? null, ...ecFrame.endCard.data }, canvas, look).catch((err) => {
+    ? await endCardLayers(ecFrame.endCard.id as EndCardTemplate, { headline: plan.cards.find((c) => c.role === "offer")?.text ?? null, ...ecFrame.endCard.data }, canvas, look, { durationSec: total - (plan.ctaSec ?? total) }).catch((err) => {
         console.warn(`[edit-v2] end card ${ecFrame.endCard?.id} failed, using the default close:`, err instanceof Error ? err.message.slice(0, 160) : err);
         return null;
       })
@@ -396,7 +396,9 @@ export async function renderEditV2(input: {
     for (const [i, l] of template.layers.entries()) {
       const file = path.join(dir, `v2end${i}.png`);
       await writeFile(file, l.png);
-      overlays.push({ file, startSec: plan.ctaSec + l.delaySec, endSec: total, y: l.y, anim: l.anim === "bounce" ? undefined : l.anim, bounce: l.anim === "bounce" });
+      // Frame sequences (star fill, carousel, shine) end on their own; everything else holds to the end.
+      const endSec = l.durSec !== undefined ? Math.min(total, plan.ctaSec + l.delaySec + l.durSec) : total;
+      overlays.push({ file, startSec: plan.ctaSec + l.delaySec, endSec, y: l.y, anim: l.anim === "bounce" ? undefined : l.anim, bounce: l.anim === "bounce" });
     }
   }
   for (const [i, card] of plan.cards.entries()) {
@@ -420,7 +422,7 @@ export async function renderEditV2(input: {
   }
   if (plan.ctaButton && !template?.hideButton) {
     const file = path.join(dir, "v2cta.png");
-    await writeFile(file, await ctaButtonPng(input.brand ? look.ctaText : plan.ctaButton.text, canvas, look));
+    await writeFile(file, await ctaButtonPng(input.brand ? look.ctaText : plan.ctaButton.text, canvas, template?.look ?? look));
     overlays.push({ file, startSec: plan.ctaButton.startSec, endSec: total, y: slots.button, bounce: true });
   }
   // End card branding: the logo lands with the CTA, the domain under the button.
@@ -452,7 +454,7 @@ export async function renderEditV2(input: {
   await writeFile(sfxFile, toWav(sfx.left, sfx.right));
 
   // 4b. The final encode.
-  const inputs = ["-i", body, ...(vo ? ["-i", vo.voiceoverFile] : []), "-i", musicFile, "-i", sfxFile, ...overlays.flatMap((o) => ["-i", o.file])];
+  const inputs = ["-i", body, ...(vo ? ["-i", vo.voiceoverFile] : []), "-i", musicFile, "-i", sfxFile, ...overlays.flatMap((o) => layerInputArgs(o.file, o.anim, total))];
   const voIdx = vo ? 1 : -1;
   const musicIdx = vo ? 2 : 1;
   const sfxIdx = musicIdx + 1;
