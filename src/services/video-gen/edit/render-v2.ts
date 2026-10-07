@@ -32,7 +32,7 @@ import { renderSfxBed } from "./sfx";
 import { applyScreenPlates } from "./screen-plate";
 import { claimChipPng, comparisonLabelPng, ctaButtonPng, domainPng, finePrintPng, hookHeadlinePng, kineticCaptionPng, logoPng, nativeCaptionPng, offerCardPng } from "./text-layers";
 import { audioMixGraph, nativeAudioWindows, talkCaptionWords, ttsFrames, type NativeWindow } from "./native-audio";
-import { nativeCaptionBox, type CaptionStyle } from "./caption-style";
+import { nativeCaptionAt, nativeCaptionBounds, type CaptionStyle } from "./caption-style";
 import { parseSilences, speechSpan } from "../talk-frame";
 import { endCardLayers, endCardSlots, layerFilter, layerInputArgs, RENDERABLE_END_CARDS, type EndCardTemplate, type LayerAnim } from "./endcard-render";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
@@ -601,7 +601,9 @@ export async function renderEditV2(input: {
       await writeFile(file, png);
       const sharp = (await import("sharp")).default;
       const m = await sharp(png).metadata();
-      overlays.push({ file, startSec: win.startSec, endSec: win.endSec, y: slots.caption, at: nativeCaptionBox(canvas, m.width ?? 1, m.height ?? 1), role: "caption" });
+      // Placed by its top-left, inside the native box ∩ the platform safe box; `y` is its real centre line.
+      const at = nativeCaptionAt(canvas, m.width ?? 1, m.height ?? 1, { box: fitToBox ? box : null });
+      overlays.push({ file, startSec: win.startSec, endSec: win.endSec, y: Math.round(((at.y + (m.height ?? 1) / 2) / canvas.h) * 10000) / 10000, at, role: "caption" });
       continue;
     }
     await writeFile(file, await kineticCaptionPng(groups[win.group].map((x) => x.text), win.word, tc, look));
@@ -668,19 +670,26 @@ export async function renderEditV2(input: {
 
   // Platform safe box: every readable layer shrinks to fit and centres in the box (TikTok: x 64–940).
   if (fitToBox) {
-    const heights = new Map<Overlay, number>();
+    const sizes = new Map<Overlay, { w: number; h: number }>();
+    // A native caption fits the native box inside the platform box; every other layer the platform box.
+    const nb = nativeCaptionBounds(canvas, box);
+    const nativeBox = { left: nb.x0, right: nb.x1, top: nb.y0, bottom: nb.y1 };
     for (const o of overlays) {
       if (o.role === "backdrop" || o.role === "decor") continue;
       const png = await readFile(o.file);
-      const fit = await fitLayerPng(png, o.y, box, canvas);
+      const fit = await fitLayerPng(png, o.y, o.at ? nativeBox : box, canvas);
       if (fit.png !== png) await writeFile(o.file, fit.png);
       o.cx = fit.cx;
       o.y = fit.y;
-      heights.set(o, (await (await import("sharp")).default(fit.png).metadata()).height ?? 0);
+      const m = await (await import("sharp")).default(fit.png).metadata();
+      sizes.set(o, { w: m.width ?? 0, h: m.height ?? 0 });
     }
     // A caption never lands on a hook headline / claim on screen at the same time.
-    const placed = [...heights.keys()];
-    separateCaptions(placed.map((o) => ({ role: o.role, y: o.y, h: heights.get(o)!, startSec: o.startSec, endSec: o.endSec })), canvas, box).forEach((y, i) => (placed[i].y = y));
+    const placed = [...sizes.keys()];
+    separateCaptions(placed.map((o) => ({ role: o.role, y: o.y, h: sizes.get(o)!.h, startSec: o.startSec, endSec: o.endSec })), canvas, box).forEach((y, i) => (placed[i].y = y));
+    // Native captions are placed by their top-left: recompute it from the final (possibly downscaled) size
+    // and centre line, so the caption stays centred, inside the box and off the hook headline.
+    for (const o of placed) if (o.at) o.at = nativeCaptionAt(canvas, sizes.get(o)!.w, sizes.get(o)!.h, { box, yCenter: o.y });
   }
 
   const musicFile = path.join(dir, "v2music.wav");

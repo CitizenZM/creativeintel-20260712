@@ -35,10 +35,31 @@ export function nativeSafeBox(canvas: { w: number; h: number }): { x0: number; x
 
 /** Top-left of a w×h caption: centred in the box horizontally, on y 0.62 vertically, clamped inside the box. */
 export function nativeCaptionBox(canvas: { w: number; h: number }, w: number, h: number): { x: number; y: number } {
+  return nativeCaptionAt(canvas, w, h);
+}
+
+/** A platform's text-safe box in canvas pixels (edit/safe-layout LayoutBox). */
+type PlatformBox = { left: number; right: number; top: number; bottom: number };
+
+/** Where a native caption may sit: the strict native box, inside the platform's safe box when there is one. */
+export function nativeCaptionBounds(canvas: { w: number; h: number }, box?: PlatformBox | null): { x0: number; x1: number; y0: number; y1: number } {
   const b = nativeSafeBox(canvas);
+  if (!box) return b;
+  const x0 = Math.max(b.x0, box.left), x1 = Math.min(b.x1, box.right), y0 = Math.max(b.y0, box.top), y1 = Math.min(b.y1, box.bottom);
+  // Boxes that don't overlap (never on real profiles): the platform box wins.
+  return x1 > x0 && y1 > y0 ? { x0, x1, y0, y1 } : { x0: box.left, x1: box.right, y0: box.top, y1: box.bottom };
+}
+
+/**
+ * Top-left of a w×h native caption: centred horizontally in nativeCaptionBounds, its centre on `yCenter`
+ * (share of the height; default 0.62 — moved by the layout when a hook headline is on screen), clamped
+ * inside the bounds. Recompute it with the caption's final size after any downscale.
+ */
+export function nativeCaptionAt(canvas: { w: number; h: number }, w: number, h: number, opts: { box?: PlatformBox | null; yCenter?: number } = {}): { x: number; y: number } {
+  const b = nativeCaptionBounds(canvas, opts.box);
   const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
   return {
     x: Math.round(clamp((b.x0 + b.x1) / 2 - w / 2, b.x0, b.x1 - w)),
-    y: Math.round(clamp(NATIVE_CAPTION.yCenter * canvas.h - h / 2, b.y0, b.y1 - h)),
+    y: Math.round(clamp((opts.yCenter ?? NATIVE_CAPTION.yCenter) * canvas.h - h / 2, b.y0, b.y1 - h)),
   };
 }
