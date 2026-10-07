@@ -50,8 +50,13 @@ export interface ScriptInput {
   briefing?: string;
   /** Free-text idea/style the operator typed for this batch. */
   customBrief?: string;
-  /** Research block (services/creative/prompt-blocks.ts): platform rules, product brief, chosen hooks + end card. */
+  /** Research block (services/creative/prompt-blocks.ts): platform rules, product brief, playbook, chosen hooks + end card or the stored campaign plan. */
   creativeBlock?: string;
+  /**
+   * Legacy legal layer: claims only from the approved list, no absolute wording, no self-made urgency.
+   * Off by default — the script sells as hard as the real facts allow.
+   */
+  strictCompliance?: boolean;
   /** Campaign platform id from CAMPAIGN_PLATFORMS (tiktok|instagram|youtube|tvc|amazon). */
   platformId?: string;
   /** "What's working in this niche" summary derived from DeepAnalysis.platformInsights. */
@@ -213,11 +218,22 @@ OUTPUT JSON (no markdown, no extra keys):
     ? `\nBRAND TRUTH (every frame, claim and CTA must stay inside this — it overrides your instincts):\n${input.brandTruth.trim().slice(0, 2500)}`
     : "";
 
-  const complianceBlock =
-    input.claimsAllowed?.length ||
-    input.claimsForbidden?.length ||
-    input.ctaPool?.length ||
-    input.offer
+  const hasKitRules = !!(input.claimsAllowed?.length || input.claimsForbidden?.length || input.ctaPool?.length || input.offer);
+  const salesBlock = hasKitRules
+    ? `\nBRAND KIT RULES (the brand owner's own settings):
+- Lead with the ALLOWED CLAIMS and the research brief's facts, and sell them as hard as the facts carry: the boldest, most concrete, most desirable wording — superlatives, direct comparisons and urgency are welcome when a real fact backs them.${
+        input.claimsForbidden?.length ? `\n- Never say anything on this FORBIDDEN list: ${input.claimsForbidden.join(" | ")}.` : ""
+      }${
+        input.ctaPool?.length
+          ? `\n- cta.text and every ctaVariant must be copied verbatim from the APPROVED CTA POOL above — do not edit, combine, or invent CTA copy.`
+          : ""
+      }
+- Use the approved offer as stated; put urgency in cta.urgency whenever the offer, the campaign plan or the sale event gives a real deadline or event.`
+    : `\nSELL HARD: the boldest, most persuasive wording the facts support — superlatives, direct comparisons and urgency are welcome when a real fact backs them.`;
+
+  const complianceBlock = !input.strictCompliance
+    ? salesBlock
+    : hasKitRules
       ? `\nCOMPLIANCE (hard constraints — the script fails legal/brand review if any of these are broken):
 - Claims: make ONLY claims drawn from the ALLOWED CLAIMS above. Paraphrasing is fine; making the claim sound stronger, more certain, or more absolute than approved is not.${
           input.claimsForbidden?.length
@@ -233,7 +249,7 @@ OUTPUT JSON (no markdown, no extra keys):
 - cta.urgency must be an empty string unless the approved offer text itself states a deadline — never add urgency on your own initiative.`
       : "";
 
-  const numericClaimsBlock = `\nNUMERIC CLAIMS (hard constraint, applies even when no claims/CTA data is supplied above): any number, percentage, count, "X in Y" / "X out of Y" ratio, review count, or star rating you write anywhere (hook, body, proof, CTA) MUST appear verbatim — or as the exact same number — in BRAND TRUTH, the PROJECT BRIEF, the ALLOWED CLAIMS list, or the approved offer text below. Never invent, round, estimate, or infer a statistic from category knowledge or "common sense" ("most women notice X by 40" is not license to say "84%"). If no sourced stat exists for a beat that calls for one, write a qualitative hook instead (e.g. "Most women over forty notice lip lines first" rather than "Eighty-four percent of women over forty…") and set hook.hookFormula to note "no sourced stat available".`;
+  const numericClaimsBlock = `\nNUMERIC CLAIMS (hard constraint, applies even when no claims/CTA data is supplied above): any number, percentage, count, "X in Y" / "X out of Y" ratio, review count, or star rating you write anywhere (hook, body, proof, CTA) MUST appear verbatim — or as the exact same number — in BRAND TRUTH, the PROJECT BRIEF, the ALLOWED CLAIMS list, the CREATIVE BRIEF FROM RESEARCH (its selling points, facts and campaign plan), or the approved offer text below. Never invent, round, estimate, or infer a statistic from category knowledge or "common sense" ("most women notice X by 40" is not license to say "84%"). If no sourced stat exists for a beat that calls for one, write a qualitative hook instead (e.g. "Most women over forty notice lip lines first" rather than "Eighty-four percent of women over forty…") and set hook.hookFormula to note "no sourced stat available".`;
 
   const ctaBlock =
     input.ctaPool?.length || input.offer || input.landingUrl
@@ -345,8 +361,8 @@ ${timelineBlock}
 ${nicheResearchBlock}
 
 ${input.briefing ? `PROJECT BRIEF:\n${input.briefing.slice(0, 1000)}` : ""}
-${input.creativeBlock ? input.creativeBlock.slice(0, 4000) : ""}
-${input.customBrief ? `\nWHAT THE OPERATOR ASKED FOR (highest priority after brand truth and compliance — follow it even where it overrides the template's usual treatment):\n${input.customBrief.slice(0, 800)}` : ""}
+${input.creativeBlock ? input.creativeBlock.slice(0, 9000) : ""}
+${input.customBrief ? `\nWHAT THE OPERATOR ASKED FOR (highest priority after brand truth${input.strictCompliance ? " and compliance" : ""} — follow it even where it overrides the template's usual treatment):\n${input.customBrief.slice(0, 800)}` : ""}
 
 DELIVERABLE CHECKLIST:
 - hook{} honours the template hook style, names a platform hook formula, and fits its share of ${durationSec}s

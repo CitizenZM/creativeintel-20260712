@@ -20,6 +20,9 @@ import {
 } from "@/lib/script-schema";
 import { NarrativeType } from "@/generated/prisma/enums";
 import { creativeDirectionLine, sanitizeStyleCategories } from "@/lib/style-categories";
+import type { CampaignPlan, PlatformPlan } from "@/services/creative/campaign-plan.types";
+import { campaignToPlatform, creativeBlock as creativeBlockFn, type CreativeBlockInput } from "@/services/creative/prompt-blocks";
+import type { ProductBrief } from "@/services/creative/product-brief";
 
 const VALID_NARRATIVE_TYPES: NarrativeType[] = [
   "PROBLEM_SOLUTION",
@@ -63,8 +66,18 @@ export interface ScriptContext {
   styleCategories: string[];
   sellingPoints: string[];
   platformId?: string;
-  /** Research block for the script prompt (platform rules + sp-1 brief + chosen hooks/end card). */
+  /** Research block for the script prompt (platform rules + sp-1 brief + playbook + chosen hooks/end card or plan). */
   creativeBlock?: string;
+  /** Inputs of creativeBlock, so each script of a batch can follow its own plan hook variant. */
+  creativeInput?: CreativeBlockInput;
+  /** The stored campaign plan for this run's platform (Project.campaignPlan), when there is one. */
+  campaignPlan?: PlatformPlan | null;
+  /** Next plan hook variant to hand out (rotates across the scripts of a batch). */
+  planHookCursor?: number;
+  /** Real facts from the brief + plan; numbers in them count as sourced in the claims audit. */
+  briefFacts?: string;
+  /** Legal layer on (CREATIVE_STRICT_COMPLIANCE=true or a plan made in strict mode). Default off. */
+  strictCompliance?: boolean;
   totalDurationSec: number;
   selectedEnvironment?: string;
   environmentNotes?: string;
@@ -175,10 +188,22 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     Array.isArray(brandKit?.claimsForbidden) ? (brandKit.claimsForbidden as unknown[]) : []
   ).filter((c): c is string => typeof c === "string" && c.trim().length > 0);
 
-  // Research-backed creative block: platform profile + stored sp-1 brief + hooks/end card for this goal.
-  const { creativeBlock } = await import("@/services/creative/prompt-blocks");
-  const brief = (project as { productBrief?: unknown }).productBrief as import("@/services/creative/product-brief").ProductBrief | null | undefined;
-  const creative = creativeBlock({ brief: brief?.sellingPoints ? brief : null, platform: platformId, goalText: [project.campaignGoal, (project as { goalType?: string | null }).goalType, brandKit?.offerText].filter(Boolean).join(" ") });
+  // Research-backed creative block: platform profile + stored sp-1 brief + playbook + hooks/end card
+  // for this goal — or, when a campaign plan is stored for this platform, the plan's beat map.
+  const brief = (project as { productBrief?: unknown }).productBrief as ProductBrief | null | undefined;
+  const storedPlan = (project as { campaignPlan?: unknown }).campaignPlan as CampaignPlan | null | undefined;
+  const platformPlan = pickPlatformPlan(storedPlan, platformId, campaignToPlatform);
+  const strictCompliance = process.env.CREATIVE_STRICT_COMPLIANCE === "true" || storedPlan?.strictCompliance === true;
+  const totalDurationSec = (campaignSel?.totalDurationSec as number | null) || platformPlan?.durationSec || 30;
+  const creativeInput: CreativeBlockInput = {
+    brief: brief?.sellingPoints ? brief : null,
+    platform: platformId,
+    goalText: [project.campaignGoal, (project as { goalType?: string | null }).goalType, brandKit?.offerText].filter(Boolean).join(" "),
+    ...(platformPlan && storedPlan ? { plan: platformPlan, goal: storedPlan.goal, promo: storedPlan.promo, runDate: storedPlan.runDate } : {}),
+    strictCompliance,
+    targetSec: totalDurationSec,
+  };
+  const creative = creativeBlockFn(creativeInput);
 
   return {
     project: {
@@ -196,7 +221,12 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     sellingPoints: brief?.sellingPoints?.length ? brief.sellingPoints.slice(0, 6).map((sp) => `${sp.claim} → ${sp.benefit}`) : sellingPoints.map((sp) => sp.point),
     platformId,
     creativeBlock: creative.text,
-    totalDurationSec: (campaignSel?.totalDurationSec as number | null) || 30,
+    creativeInput,
+    campaignPlan: platformPlan,
+    planHookCursor: 0,
+    briefFacts: briefFacts(brief, platformPlan) || undefined,
+    strictCompliance,
+    totalDurationSec,
     selectedEnvironment: (campaignSel?.selectedEnvironment as string | null) || undefined,
     environmentNotes: (campaignSel?.selectedEnvNotes as string | null) || undefined,
     selectedActorRole: (campaignSel?.selectedActorRole as string | null) || undefined,
@@ -236,6 +266,33 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     referenceAd,
     performanceBlock: renderLearningBlock(learning) || null,
   };
+}
+
+/** The plan for the run's platform; with no campaign platform chosen, the plan's first platform. */
+export function pickPlatformPlan(
+  plan: CampaignPlan | null | undefined,
+  platformId: string | undefined,
+  toPlatform: (id?: string | null) => string
+): PlatformPlan | null {
+  if (!plan || !Array.isArray(plan.platforms) || !plan.platforms.length) return null;
+  if (!platformId) return plan.platforms[0];
+  const want = toPlatform(platformId);
+  return plan.platforms.find((p) => p.platform === want || p.platform === platformId) ?? null;
+}
+
+/** The brief's and plan's own facts (claims, evidence, offer copy) — sourced text for the claims audit. */
+export function briefFacts(brief: ProductBrief | null | undefined, plan: PlatformPlan | null | undefined): string {
+  const parts: string[] = [];
+  for (const p of brief?.sellingPoints ?? []) {
+    parts.push(p.claim, p.benefit, p.proofVisual?.overlayText ?? "", ...(p.sourceEvidence ?? []).map((e) => e.quote));
+  }
+  if (brief?.product?.price) parts.push(String(brief.product.price));
+  if (plan) {
+    parts.push(plan.endCard.headline ?? "", plan.endCard.button, ...Object.values(plan.endCard.data ?? {}).map(String));
+    for (const b of plan.beats) parts.push(b.onScreenText ?? "", b.vo ?? "");
+    for (const h of plan.hookVariants) parts.push(h.openingText, h.openingVO);
+  }
+  return parts.filter((s) => s && s.trim()).join("\n").slice(0, 6000);
 }
 
 /** The most-viewed competitor ad with a beat-level teardown — the structure to emulate. */
@@ -327,8 +384,17 @@ export function buildScriptInput(
     angle?: ScriptAngle;
     totalDurationSec?: number;
     customBrief?: string;
+    /** Which plan hook variant this script opens with; default: rotate through the variants. */
+    planHookIndex?: number;
   }
 ): ScriptInput {
+  // With a stored plan, each script follows the plan's beat map with its own hook variant.
+  let creativeBlock = ctx.creativeBlock;
+  if (ctx.campaignPlan && ctx.creativeInput) {
+    const hookIndex = opts.planHookIndex ?? ctx.planHookCursor ?? 0;
+    if (opts.planHookIndex === undefined) ctx.planHookCursor = hookIndex + 1;
+    creativeBlock = creativeBlockFn({ ...ctx.creativeInput, hookIndex, targetSec: opts.totalDurationSec || ctx.totalDurationSec }).text;
+  }
   return {
     brandName: ctx.project.brandName,
     productName: ctx.project.productPageTitle || ctx.project.productName || undefined,
@@ -350,7 +416,8 @@ export function buildScriptInput(
     cameraAngles: ctx.cameraAngles,
     briefing: ctx.project.briefingText || undefined,
     customBrief: opts.customBrief,
-    creativeBlock: ctx.creativeBlock,
+    creativeBlock,
+    strictCompliance: ctx.strictCompliance,
     audienceSummary: ctx.audienceSummary,
     nicheResearch: ctx.nicheResearch,
     brandTruth: ctx.brandTruth,
@@ -377,6 +444,7 @@ export function auditContext(ctx: ScriptContext): ScriptClaimsAuditInput {
     ctx.project.briefingText,
     ctx.claimsAllowed?.join("\n"),
     ctx.offer,
+    ctx.briefFacts,
   ]
     .filter((part): part is string => Boolean(part && part.trim()))
     .join("\n\n");

@@ -14,6 +14,9 @@
  * POST { action: "render-export", projectId, runId, format: 4:5|1:1|16:9|15s|10s } — delivery format
  * POST { action: "director-review", projectId, runId } — AI director sign-off of the master
  * POST { action: "save-structure", projectId, teardownId } / { action: "choose-structure", projectId, structureId|null }
+ * POST { action: "product-brief", projectId, reviews?, qa?, price?, … } — sp-1 brief → Project.productBrief
+ * POST { action: "select-creative", projectId?, platform, goal, promo? } — 3 hooks + end card
+ * POST { action: "plan-campaign", projectId, platforms?, goal?, promo?, runDate?, durationSec? } — campaign plan → Project.campaignPlan
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -251,11 +254,31 @@ export async function POST(request: Request) {
         keywordData: input.keywordData,
         platforms: input.platforms,
         durationSec: input.durationSec,
-      });
+      }, { strictCompliance: input.strictCompliance ?? process.env.CREATIVE_STRICT_COMPLIANCE === "true" });
       await prisma.project.update({ where: { id: project.id }, data: { productBrief: brief as object, productBriefAt: new Date() } });
       return NextResponse.json({ ok: true, brief });
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    }
+  }
+
+  if (input.action === "plan-campaign") {
+    const { createCampaignPlan, CampaignPlanError } = await import("@/services/creative/campaign-plan.store");
+    const { summarizePlan } = await import("@/services/creative/campaign-planner");
+    try {
+      const plan = await createCampaignPlan(input.projectId, {
+        platforms: input.platforms,
+        goal: input.goal,
+        promo: input.promo,
+        runDate: input.runDate,
+        durationSec: input.durationSec,
+        strictCompliance: input.strictCompliance,
+        overrides: input.overrides,
+      });
+      return NextResponse.json({ ok: true, summary: summarizePlan(plan) });
+    } catch (err) {
+      const status = err instanceof CampaignPlanError ? err.status : 500;
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
     }
   }
 

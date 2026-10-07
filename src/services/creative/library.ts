@@ -1,7 +1,8 @@
 /**
  * Creative library: platform profiles, the 35-hook opening library, the 12 end-card templates and
- * the matching engine (category × platform × goal → 3 diverse hooks + an end card), with the hard
- * compliance filters from the research (03-hooks-endcards.md Part C.4). Pure — no I/O.
+ * the matching engine (category × platform × goal → 3 diverse hooks + an end card). Creative-fit
+ * filters always apply; the research's legal filters (03-hooks-endcards.md Part C.4) only with
+ * `strictCompliance`. Pure — no I/O.
  */
 import { HOOK_DATA } from "./hooks.data";
 import { PLATFORM_PROFILES } from "./platforms.data";
@@ -109,7 +110,9 @@ const DAY = 86_400_000;
 
 function promoState(i: CreativeInputs): { pct: boolean; compare: boolean; code: boolean; deadline: boolean } {
   const p = i.promo ?? {};
-  const fresh = p.priceCheckedAt ? Date.now() - Date.parse(p.priceCheckedAt) < DAY : false;
+  // Strict mode only: the compare-at price must have been checked in the last 24 h. Otherwise the
+  // numbers being there is enough to render the card.
+  const fresh = !i.strictCompliance || (p.priceCheckedAt ? Date.now() - Date.parse(p.priceCheckedAt) < DAY : false);
   const compare = !!(p.comparePrice && p.price && p.comparePrice > p.price && fresh);
   const deadline = !!(p.deadline && Date.parse(p.deadline) > Date.parse(i.runDate ?? new Date().toISOString()));
   return { pct: !!(p.pct && p.pct > 0) || compare, compare, code: !!p.code?.trim(), deadline };
@@ -130,17 +133,21 @@ function endCardAllowed(e: EndCardDef, i: CreativeInputs, s: ReturnType<typeof p
 }
 
 function hookAllowed(h: HookDef, i: CreativeInputs, s: ReturnType<typeof promoState>): string | null {
+  // Creative fit (always): generated faces morph, a price slam needs a number, awareness/lead isn't a deal.
   if (h.aiFit === "low" && h.id !== "H22" && !i.assets?.creatorFootage) return "needs real creator footage (AI faces morph)";
-  if (h.id === "H22" && !i.assets?.realTestFootage) return "torture-test claims need real footage";
-  if (["H10", "H22", "H15"].includes(h.id) && i.category === "health") return "result claims restricted for health";
-  if (h.id === "H16" && !s.pct) return "deal slam needs a verified live discount";
+  if (h.id === "H16" && !s.pct) return i.strictCompliance ? "deal slam needs a verified live discount" : "deal slam needs a discount (% or compare-at price)";
   if (h.id === "H16" && (i.goal === "awareness" || i.goal === "lead")) return "a price slam doesn't fit an awareness/lead goal";
+  // Legal gating (strict mode only).
+  if (i.strictCompliance) {
+    if (h.id === "H22" && !i.assets?.realTestFootage) return "torture-test claims need real footage";
+    if (["H10", "H22", "H15"].includes(h.id) && i.category === "health") return "result claims restricted for health";
+  }
   return null;
 }
 
 /**
  * Pick 3 opening hooks (one reveal, one claim/text, one native/demo — forced diversity) and an end
- * card, applying the research's hard filters and scoring. Deterministic.
+ * card, applying the creative-fit filters (+ the legal ones when strictCompliance) and scoring. Deterministic.
  */
 export function selectCreative(i: CreativeInputs): CreativeChoice {
   const s = promoState(i);
@@ -210,7 +217,7 @@ export function selectCreative(i: CreativeInputs): CreativeChoice {
   for (const id of order) if (!allowed.find((e) => e.id === id)) notes.push(`${id} ${endCardById(id).name} skipped: missing ${endCardById(id).requires.join("/")}`);
 
   const labels: string[] = [];
-  if (["tiktok", "instagram_reels", "instagram_stories", "meta_feed", "facebook_reels", "youtube_shorts", "youtube_instream_skippable", "youtube_instream_nonskippable_15s", "youtube_bumper_6s", "google_demand_gen"].includes(i.platform))
+  if (i.strictCompliance && ["tiktok", "instagram_reels", "instagram_stories", "meta_feed", "facebook_reels", "youtube_shorts", "youtube_instream_skippable", "youtube_instream_nonskippable_15s", "youtube_bumper_6s", "google_demand_gen"].includes(i.platform))
     labels.push("AI-generated content label (realistic synthetic people/voice)");
 
   return { hooks: pick.slice(0, 3), endCard: allowed[0] ?? endCardById("E01"), alternates: allowed.slice(1, 4), labels, notes };

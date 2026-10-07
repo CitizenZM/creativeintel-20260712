@@ -11,21 +11,37 @@ after the 2026-09-11 review in which all five of Barron's complaints were reprod
 and fixed in code. Everything here is measured, not assumed.
 
 
-## Planning layer (2026-10 research → `src/services/creative/`)
+## Planning layer (2026-10 research → `src/services/creative/`, built in)
 Run these before writing any script; the script writer and the director receive the result automatically.
+The condensed research lives in **`reference/ad-planning-playbook.md`** — category selling-point patterns,
+platform table, hook library H01–H35, end cards E01–E12, script formulas. Read it before planning by hand.
+**Direction (Barron, 2026-10-06):** sell hard. Use the boldest, most persuasive wording the product's real
+facts support (real numbers, superlatives, urgency); the brand owner carries the legal side. The only hard
+data rule: never invent a number, rating, review or offer — every figure comes from the page, the brief or
+the live promo. (`strictCompliance: true` on any action restores the old legal layer; default off.)
 1. **Product brief (sp-1):** operator `{"action":"product-brief","projectId":…, "reviews":[{stars,text}…], "qa":[…], "price","listPrice","rating","reviewCount"}`.
    One structured pass → category, audience, JTBD, big idea + 3 alternates, 5–8 ranked selling points
-   (claim → benefit → **proof shot** → safe wording + disclosure), objections, keywords, beat map; stored on
+   (claim → benefit → **proof shot** → facts), objections, keywords, beat map; stored on
    `Project.productBrief`. Feed stratified reviews (5★ / 3–4★ / 1–2★) — anxieties make the best objection busters.
-2. **Creative choice:** operator `{"action":"select-creative","projectId":…, "platform":"tiktok|instagram_reels|meta_feed|youtube_shorts|youtube_instream_skippable|…", "goal":"cold|retarget|promo|awareness|app_install|lead", "promo":{price,comparePrice,priceCheckedAt,code,deadline}, "runDate":…}`
-   → 3 opening hooks (reveal + claim + native, from the 35-hook library H01–H35 with keyframe/motion recipes)
-   and an end card (E01–E12). Price / % / coupon / deadline / rating cards are refused without live facts.
-3. **Platform profiles** (12): audience, length, hook second, cut rate, sound mode, caption/voice/music/CTA style,
-   safe zone, do-nots — `platformBrief(id)` is the prompt block. Make Meta and TikTok variants genuinely different
-   concepts, not resizes. Label realistic AI people/voices (TikTok, Meta, YouTube).
-4. **End card in the storyboard:** on the CTA frame set `locked.endCard = {id: "E02", data: {pct, code, price,
+2. **Campaign plan:** operator `{"action":"plan-campaign","projectId":…, "platforms":["tiktok","instagram_reels","meta_feed"],
+   "goal":"promo", "promo":{"pct":20,"price":279.99,"comparePrice":349.97,"code":"NXT20","deadline":…}, "runDate":…,
+   "overrides":{"tiktok":{"hookIds":["H08"],"endCardId":"E12"}}}` (Studio: `POST /api/projects/<id>/campaign-plan`, `GET` reads it).
+   Per platform: profile-fitted length/aspect/pacing/voice/captions/music, **3 hook variants** (reveal + claim +
+   native/demo), end card with the promo facts filled in (+ alternates), a **timed beat map** (hook → sale pitch
+   inside 0–3 s for promo → one proof beat per ranked selling point using its proof shot → objection buster →
+   offer → **last 1 s logo + bouncing CTA button**; product on screen ≥ 2×, every zoom lands on the product) and
+   one script per hook variant. One text-model call per platform writes VO / on-screen text / hook openings; if
+   it fails the deterministic scaffold copy is kept. Stored on `Project.campaignPlan`; **the script writer then
+   follows the plan's beat map**, rotating the hook variants across a batch.
+3. **Creative choice only:** operator `{"action":"select-creative","projectId":…, "platform":"tiktok|instagram_reels|meta_feed|youtube_shorts|youtube_instream_skippable|…", "goal":"cold|retarget|promo|awareness|app_install|lead", "promo":{price,comparePrice,code,deadline}, "runDate":…}`
+   → 3 opening hooks + an end card. Price / % / coupon / deadline / rating cards need the number to exist.
+4. **Platform profiles** (12): audience, length, hook second, cut rate, sound mode, caption/voice/music/CTA style,
+   safe zone, do-nots — `platformBrief(id)` is the prompt block; `playbookSlice()` adds the category proof shots,
+   platform grammar and hook / VO / CTA formulas (≤ 400 words) to every script-writer and director prompt.
+   Make Meta and TikTok variants genuinely different concepts, not resizes.
+5. **End card in the storyboard:** on the CTA frame set `locked.endCard = {id: "E02", data: {pct, code, price,
    comparePrice, tag, sticker}}`. Renderable: E01, E02, E03, E04, E08, E09, E12.
-5. **First + last frame anchoring (strict consistency):** every generated segment ≥ ~3 s gets an end keyframe
+6. **First + last frame anchoring (strict consistency):** every generated segment ≥ ~3 s gets an end keyframe
    `K<n>E` edited from its approved start keyframe + the casting sheet + the product photo, and the clip is
    generated between both anchors (Veo 3.1 / Kling 3.0 / Seedance). Plan people and product segments at 3–4 s
    with framings inside (the edit still cuts every ≤ 2 s); set `locked.endState` for the exact end pose, or
@@ -52,9 +68,8 @@ and cannot hit a beat.
 
 1. **Brand intake** — `scripts/shopify_research.py` (best-selling order, variants + compare-at prices,
    spec table, service/promo lines, every official image tagged for rights). Reviews give the real
-   use scenes. Official photos are the only source of truth for the product. Verify live promos and
-   services on the page before writing any claim and copy their limits into the disclaimer; mark
-   unannounced details `[占位]`. See `reference/product-research.md`.
+   use scenes. Official photos are the only source of truth for the product. Read live promos,
+   prices and services off the page so every number in the ad is real; mark unannounced details `[占位]`. See `reference/product-research.md`.
 2. **Reference teardown** — `scripts/analyze_reference.py` on 3–5 benchmark ads. Produce a
    per-cut shot table *and* run `scripts/diagnose_cut.py` on each so the campaign has its own
    measured targets for cut density, static share and motion. Cite video + timestamp for every
@@ -159,7 +174,8 @@ python3 scripts/av_sync.py out/ad.mp4 assets/music/track_15s.m4a     # once per 
 | `reference/lessons.md` | every failure from all three runs and its fix |
 | `reference/director-v2.md` | selling point → proof, camera grammar, anti-plastic prompting + negatives, Kling/Veo routing, VO budget, 2 s rule, film finish, token economy |
 | `reference/product-research.md` | best-seller order, specs/prices/discounts, verifying promos & services, scenes, image rights |
-| `reference/promo-campaign-planning.md` | BF/CM-style 15 s plan template (3 creatives per product), service-as-hero messaging, disclaimers |
+| `reference/ad-planning-playbook.md` | condensed ad research: category selling points + proof shots, platform table, hooks H01–H35, end cards E01–E12, hook / VO / CTA formulas, `plan-campaign` usage — **read before planning** |
+| `reference/promo-campaign-planning.md` | BF/CM-style 15 s plan template (3 creatives per product), service-as-hero messaging, first-3-s sale pitch |
 | `reference/retrospective-tcl-bfcm.md` | TCL BF 2026-10: every failure → rule (hook pitch, casting, bezels, zooms, VO, captions, TTS, SFX, music, CTA, QC, cost) and the skill roadmap — **read before any promo ad** |
 
 ## Scripts
@@ -180,5 +196,5 @@ python3 scripts/av_sync.py out/ad.mp4 assets/music/track_15s.m4a     # once per 
 ## Decision points to raise with Barron (don't guess)
 
 SKU and real dimensions · talent look and ethnicity · credit cap per ad · music source (licence
-may forbid re-editing) and whether an SFX library is available · claim substantiation · where the
+may forbid re-editing) and whether an SFX library is available · where the
 CTA points · which hook variant and CTA style to ship · which visual-effect variants to A/B.

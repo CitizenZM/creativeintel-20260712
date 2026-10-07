@@ -63,7 +63,17 @@ export interface PlatformPlan {
   /** Body beats shared by all hook variants (after the hook, through the CTA). */
   beats: PlanBeat[];
   scripts: PlanScript[];
+  /** Where the copy came from: the LLM pass, or the deterministic scaffold (model failure / mock). */
+  copySource?: "llm" | "scaffold";
+  /** Selector notes (dropped hooks, skipped end cards) and copy-pass fallbacks. */
+  notes?: string[];
 }
+
+/**
+ * User choices from the Studio planning panel, per platform: pinned hook ids (≤ 3, they lead the
+ * auto picks) and a chosen end card (replaces the auto pick, which moves into the alternates).
+ */
+export type PlanOverrides = Partial<Record<PlatformId, { hookIds?: string[]; endCardId?: EndCardId }>>;
 
 export interface CampaignPlan {
   version: 1;
@@ -74,4 +84,16 @@ export interface CampaignPlan {
   keywords: string[];
   platforms: PlatformPlan[];
   notes: string[];
+  /** Planning inputs, kept so a re-plan or the script writer can reuse them. */
+  runDate?: string;
+  promo?: {
+    pct?: number | null;
+    price?: number | null;
+    comparePrice?: number | null;
+    priceCheckedAt?: string | null;
+    code?: string | null;
+    deadline?: string | null;
+  };
+  /** Legal gating was on when this plan was made (default off). */
+  strictCompliance?: boolean;
 }

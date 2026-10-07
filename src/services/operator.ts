@@ -53,7 +53,7 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   /** Tick an approved server run now instead of waiting for the 5-minute cron (no new spend beyond what was approved). */
   z.object({ action: z.literal("drive-run"), projectId: z.string().min(1), runId: z.string().min(1) }),
   z.object({ action: z.literal("director-review"), projectId: z.string().min(1), runId: z.string().min(1) }),
-  /** Extract the sp-1 product brief (selling points → proof visuals, keywords, objections, compliance) and store it on the project. */
+  /** Extract the sp-1 product brief (selling points → proof visuals, keywords, objections) and store it on the project. strictCompliance adds the legal layer. */
   z.object({
     action: z.literal("product-brief"),
     projectId: z.string().min(1),
@@ -67,6 +67,24 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     keywordData: z.record(z.string(), z.array(z.string())).optional(),
     platforms: z.array(z.string()).max(12).optional(),
     durationSec: z.number().int().min(6).max(60).optional(),
+    strictCompliance: z.boolean().optional(),
+  }),
+  /**
+   * Plan the campaign from the stored brief: per platform 3 hook variants, end card, timed beat map
+   * and a script per hook variant (one text-model call per platform). Stored on Project.campaignPlan;
+   * the script writer then follows it. Needs product-brief first.
+   */
+  z.object({
+    action: z.literal("plan-campaign"),
+    projectId: z.string().min(1),
+    platforms: z.array(z.string().min(1)).max(12).optional(),
+    goal: z.string().max(80).optional(),
+    promo: z.object({ pct: z.number().nullable().optional(), price: z.number().nullable().optional(), comparePrice: z.number().nullable().optional(), priceCheckedAt: z.string().nullable().optional(), code: z.string().nullable().optional(), deadline: z.string().nullable().optional() }).optional(),
+    runDate: z.string().optional(),
+    durationSec: z.number().int().min(5).max(90).optional(),
+    strictCompliance: z.boolean().optional(),
+    /** Studio choices: { [platform]: { hookIds?: string[] (≤ 3, lead the auto picks), endCardId? } }. */
+    overrides: z.record(z.string(), z.unknown()).optional(),
   }),
   /** Pick 3 diverse opening hooks + an end card for category × platform × goal (category defaults to the stored brief). */
   z.object({
@@ -79,6 +97,7 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     assets: z.object({ creatorFootage: z.boolean().optional(), realTestFootage: z.boolean().optional(), rating: z.object({ value: z.number(), count: z.number() }).nullable().optional(), multiSku: z.boolean().optional() }).optional(),
     runDate: z.string().optional(),
     ctv: z.boolean().optional(),
+    strictCompliance: z.boolean().optional(),
   }),
   z.object({ action: z.literal("save-structure"), projectId: z.string().min(1), teardownId: z.string().min(1) }),
   z.object({ action: z.literal("choose-structure"), projectId: z.string().min(1), structureId: z.string().min(1).nullable() }),
