@@ -1,0 +1,569 @@
+{
+ "version": "sp-1",
+ "product": {
+  "name": "NXTPAPER 14",
+  "brand": "TCL",
+  "model": "NXTPAPER 14",
+  "price": 349.97
+ },
+ "category": "tablet_laptop",
+ "audience": {
+  "primary": "Digital readers and remote workers seeking eye comfort",
+  "secondary": [
+   "Students taking digital notes",
+   "Parents buying a device for kids' reading/homework"
+  ],
+  "awarenessStage": "Problem aware (digital eye strain, glossy screen glare)"
+ },
+ "primaryJob": {
+  "statement": "When working or reading on a tablet for hours, I want to avoid eye strain and glare, so I can stay productive without headaches or fatigue.",
+  "functional": "Display readable text and video without harsh reflections or blue light flicker.",
+  "emotional": "Feel calm and focused rather than wired and overstimulated by a glossy screen.",
+  "social": "Look studious and professional using a paper-like device instead of a flashy iPad."
+ },
+ "forces": {
+  "push": [
+   "Glossy tablet screens cause distracting reflections indoors and outdoors.",
+   "PWM dimming causes invisible flicker leading to eye muscle fatigue.",
+   "Standard backlights disrupt sleep cycles when reading at night."
+  ],
+  "pull": [
+   "Matte, paper-like screen eliminates reflections.",
+   "TÜV-certified low blue light and flicker-free technology.",
+   "Large 14-inch screen allows split-screen productivity in a portable form factor."
+  ],
+  "anxieties": [
+   "Is the matte screen only a gimmick? Will it look washed out or low-res?",
+   "A 14-inch tablet might be too heavy to hold for reading in bed.",
+   "Battery might drain quickly with max brightness."
+  ],
+  "habits": [
+   "Buyers instinctively compare any tablet to the baseline iPad screen clarity.",
+   "Users rarely manually enable 'Reading Mode' or 'Eye Comfort Shield' every time they read.",
+   "Users hold tablets in one hand while lying on the sofa."
+  ]
+ },
+ "categoryEntryPoints": [
+  {
+   "cep": "Why",
+   "w": "Screen gives me a headache after 2 hours",
+   "hookIdea": "Your tablet screen is flickering, and you can't even see it."
+  },
+  {
+   "cep": "Where",
+   "w": "By the sunny window or in bed at night",
+   "hookIdea": "Finally, a screen you can read in direct sunlight without blinding glare."
+  },
+  {
+   "cep": "Feeling",
+   "w": "Tired, strained eyes at the end of the day",
+   "hookIdea": "This screen tech literally pays your eyes back for the screen time."
+  }
+ ],
+ "bigIdea": {
+  "proposition": "The 14-inch matte tablet that looks like paper, even in sunlight.",
+  "alternates": [
+   "Swap your Kindle and iPad for this single e-ink alternative.",
+   "A massive, kid-safe tablet that mimics real paper for homework and doodling.",
+   "Why this tablet has zero glare (proof inside)."
+  ]
+ },
+ "sellingPoints": [
+  {
+   "id": "sp-03",
+   "claim": "TÜV Rheinland Low Blue Light and Flicker Free certified.",
+   "advantage": "Hardware-level reduction of blue light and elimination of PWM flicker.",
+   "benefit": "Binge-read or work late without the invisible flicker that triggers eye fatigue and headaches.",
+   "proofVisual": {
+    "device": "High-speed camera + Smartphone",
+    "shot": "split_screen",
+    "overlayText": "iPhone Slow-Mo: Flicker vs No Flicker",
+    "durationSec": 6
+   },
+   "sourceEvidence": [
+    {
+     "type": "product_page",
+     "quote": "TÜV Rheinland Low Blue Light and Flicker Free certified",
+     "location": "TCL US Product Page"
+    }
+   ],
+   "evidenceStrength": "claimed",
+   "driver": "Screen (eye comfort/matte)",
+   "awarenessStage": "Problem aware",
+   "competitorUsage": false,
+   "uniqueness": 0.5,
+   "scores": {
+    "buyerImportance": 0.95,
+    "evidenceStrength": 0.85,
+    "differentiation": 0.9,
+    "visualizability": 0.95,
+    "emotionalPull": 0.9
+   },
+   "priority": 1,
+   "compliance": {
+    "claimType": "Certification",
+    "riskLevel": "low",
+    "safeWording": "TÜV Rheinland Low Blue Light and Flicker Free certified"
+   },
+   "priorityScore": 0.91
+  },
+  {
+   "id": "sp-01",
+   "claim": "NXTPAPER 3.0 matte display eliminates glare.",
+   "advantage": "Multi-layer matte etching diffuses ambient light.",
+   "benefit": "Read or work comfortably right by a sunny window or outdoors without squinting.",
+   "proofVisual": {
+    "device": "Ring light / Desk lamp + Smartphone",
+    "shot": "comparison_chart",
+    "overlayText": "NXTPAPER vs Glossy iPad",
+    "durationSec": 6
+   },
+   "sourceEvidence": [
+    {
+     "type": "product_page",
+     "quote": "NXTPAPER 3.0",
+     "location": "TCL US Product Page"
+    }
+   ],
+   "evidenceStrength": "claimed",
+   "driver": "Screen (eye comfort/matte)",
+   "awarenessStage": "Problem aware",
+   "competitorUsage": false,
+   "uniqueness": 0.5,
+   "scores": {
+    "buyerImportance": 0.95,
+    "evidenceStrength": 0.5,
+    "differentiation": 0.9,
+    "visualizability": 0.95,
+    "emotionalPull": 0.85
+   },
+   "priority": 2,
+   "compliance": {
+    "claimType": "Feature",
+    "riskLevel": "low",
+    "safeWording": "Matte screen diffuses light"
+   },
+   "priorityScore": 0.817
+  },
+  {
+   "id": "sp-02",
+   "claim": "Paper-like color mode for reading.",
+   "advantage": "Monochrome-like mode with soft warm light.",
+   "benefit": "Reading books feels just like paper, reducing the 'digital' feeling that strains eyes at night.",
+   "proofVisual": {
+    "device": "Smartphone",
+    "shot": "macro_texture",
+    "overlayText": "Zoomed real-time text 'Paper Mode'",
+    "durationSec": 5
+   },
+   "sourceEvidence": [
+    {
+     "type": "product_page",
+     "quote": "NXTPAPER 3.0",
+     "location": "TCL US Product Page tech details"
+    }
+   ],
+   "evidenceStrength": "claimed",
+   "driver": "Screen (eye comfort/matte)",
+   "awarenessStage": "Solution aware",
+   "competitorUsage": false,
+   "uniqueness": 0.5,
+   "scores": {
+    "buyerImportance": 0.85,
+    "evidenceStrength": 0.4,
+    "differentiation": 0.85,
+    "visualizability": 0.8,
+    "emotionalPull": 0.8
+   },
+   "priority": 3,
+   "compliance": {
+    "claimType": "Feature",
+    "riskLevel": "low",
+    "safeWording": "Paper-like color mode"
+   },
+   "priorityScore": 0.725
+  },
+  {
+   "id": "sp-04",
+   "claim": "Up to 10 hours reading time.",
+   "advantage": "Large 10,000mAh battery optimized for low-power paper mode.",
+   "benefit": "Get through a full day of school or work commutes without hunting for a charger.",
+   "proofVisual": {
+    "device": "Smartphone",
+    "shot": "time_lapse",
+    "overlayText": "8:00 AM - 8:00 PM Battery %",
+    "durationSec": 8
+   },
+   "sourceEvidence": [
+    {
+     "type": "product_page",
+     "quote": "Up to 10 hours reading time",
+     "location": "TCL US Product Page"
+    }
+   ],
+   "evidenceStrength": "claimed",
+   "driver": "Battery life",
+   "awarenessStage": "Problem aware",
+   "competitorUsage": false,
+   "uniqueness": 0.5,
+   "scores": {
+    "buyerImportance": 0.7,
+    "evidenceStrength": 0.4,
+    "differentiation": 0.3,
+    "visualizability": 0.85,
+    "emotionalPull": 0.5
+   },
+   "priority": 4,
+   "compliance": {
+    "claimType": "Spec",
+    "riskLevel": "medium",
+    "safeWording": "Up to 10 hours reading time",
+    "requiredDisclosure": "Battery life varies by use. Reading time based on internal testing in Paper Mode at 150 nits."
+   },
+   "priorityScore": 0.548
+  },
+  {
+   "id": "sp-06",
+   "claim": "Split-screen multitasking for work and study.",
+   "advantage": "14-inch screen provides enough pixel density for two full-sized apps side-by-side.",
+   "benefit": "Watch a lecture on one side while scribbling notes on the other without tiny, cramped windows.",
+   "proofVisual": {
+    "device": "Smartphone",
+    "shot": "screen_recording",
+    "overlayText": "YouTube + OneNote Live",
+    "durationSec": 5
+   },
+   "sourceEvidence": [
+    {
+     "type": "product_page",
+     "quote": "Productivity taking to the next level",
+     "location": "TCL US Product Page context (productivity text)"
+    }
+   ],
+   "evidenceStrength": "claimed",
+   "driver": "Performance/Productivity",
+   "awarenessStage": "Solution aware",
+   "competitorUsage": false,
+   "uniqueness": 0.5,
+   "scores": {
+    "buyerImportance": 0.6,
+    "evidenceStrength": 0.4,
+    "differentiation": 0.3,
+    "visualizability": 0.9,
+    "emotionalPull": 0.45
+   },
+   "priority": 5,
+   "compliance": {
+    "claimType": "Feature",
+    "riskLevel": "low",
+    "safeWording": "Split-screen multitasking",
+    "requiredDisclosure": "App compatibility varies."
+   },
+   "priorityScore": 0.52
+  },
+  {
+   "id": "sp-05",
+   "claim": "14-inch large display, lightweight design.",
+   "advantage": "Massive screen real estate for multitasking in a body weighing under 800g.",
+   "benefit": "Split-screen a textbook and notes app without feeling like you are holding a laptop.",
+   "proofVisual": {
+    "device": "Kitchen scale + Smartphone",
+    "shot": "scale_reference",
+    "overlayText": "XX g (as specified on page) vs iPad 10.9\"",
+    "durationSec": 5
+   },
+   "sourceEvidence": [
+    {
+     "type": "product_page",
+     "quote": "14\" large display",
+     "location": "TCL US Product Page"
+    }
+   ],
+   "evidenceStrength": "claimed",
+   "driver": "Weight/Portability",
+   "awarenessStage": "Solution aware",
+   "competitorUsage": false,
+   "uniqueness": 0.5,
+   "scores": {
+    "buyerImportance": 0.65,
+    "evidenceStrength": 0.3,
+    "differentiation": 0.45,
+    "visualizability": 0.8,
+    "emotionalPull": 0.3
+   },
+   "priority": 6,
+   "compliance": {
+    "claimType": "Spec",
+    "riskLevel": "low",
+    "safeWording": "14-inch lightweight tablet"
+   },
+   "priorityScore": 0.51
+  }
+ ],
+ "objections": [
+  {
+   "objection": "Matte screens look hazy and reduced sharpness compared to glossy.",
+   "source": "General market assumption for anti-glare coatings",
+   "answer": "NXTPAPER 3.0 uses advanced nano-etching to diffuse glare without the 'oil slick' rainbow grain seen in matte screen protectors.",
+   "bustingVisual": "Macro_lens: Slide between glossy iPad (reflection) and NXTPAPER (matte but crisp text). Overlay: 'Same resolution, zero grain'."
+  },
+  {
+   "objection": "14-inch is too big and heavy to hold comfortably.",
+   "source": "Habit of reading on smaller Kindles/iPad Minis",
+   "answer": "True holding comfort depends on weight distribution and thickness, not just screen size. This sits in the lap or case stand for extended reading.",
+   "bustingVisual": "POV_use: Lying on sofa, tablet rests on lap/knees, clear view of large text."
+  },
+  {
+   "objection": "Battery won't last a full day of work/classes.",
+   "source": "Anxiety about Android tablet battery optimization",
+   "answer": "E-ink-like 'Paper Mode' drastically cuts display power draw compared to standard LCD. Full-day reading is achievable at medium brightness.",
+   "bustingVisual": "Time_lapse: Start with 100%, fast forward through 8 hours of page-turning, end at 15%+."
+  }
+ ],
+ "competitorGaps": [
+  {
+   "gap": "iPad lacks a true matte screen option without a sticky, low-quality screen protector.",
+   "evidence": "Apple iPad Nano-texture glass only available on $2000+ iPad Pro 13-inch.",
+   "ourProof": "NXTPAPER 14 offers matte display natively at $349."
+  },
+  {
+   "gap": "E-Ink tablets (Kindle Scribe, Remarkable) have slow refresh rates and cannot play video.",
+   "evidence": "E-Ink devices struggle with color accuracy and dynamic content.",
+   "ourProof": "NXTPAPER 14 plays smooth, full-color video while still mimicking paper for reading."
+  }
+ ],
+ "keywords": [
+  {
+   "term": "tablet for reading",
+   "type": "search",
+   "intent": "commercial",
+   "score": 0.95,
+   "placement": [
+    "hook_text",
+    "seo"
+   ]
+  },
+  {
+   "term": "eye care tablet",
+   "type": "search",
+   "intent": "commercial",
+   "score": 0.9,
+   "placement": [
+    "vo"
+   ]
+  },
+  {
+   "term": "e ink alternative",
+   "type": "search",
+   "intent": "transactional",
+   "score": 0.85,
+   "placement": [
+    "caption",
+    "hashtag"
+   ]
+  },
+  {
+   "term": "best budget tablet",
+   "type": "search",
+   "intent": "commercial",
+   "score": 0.8,
+   "placement": [
+    "caption"
+   ]
+  },
+  {
+   "term": "nxtpaper",
+   "type": "brand",
+   "intent": "navigational",
+   "score": 1,
+   "placement": [
+    "hashtag"
+   ]
+  },
+  {
+   "term": "tablet with matte screen",
+   "type": "search",
+   "intent": "transactional",
+   "score": 0.8,
+   "placement": [
+    "vo"
+   ]
+  },
+  {
+   "term": "no glare tablet",
+   "type": "search",
+   "intent": "transactional",
+   "score": 0.75,
+   "placement": [
+    "hook_text"
+   ]
+  },
+  {
+   "term": "tablet for kids",
+   "type": "search",
+   "intent": "commercial",
+   "score": 0.7,
+   "placement": [
+    "hashtag"
+   ]
+  },
+  {
+   "term": "tablet with pen",
+   "type": "search",
+   "intent": "commercial",
+   "score": 0.7,
+   "placement": [
+    "caption"
+   ]
+  },
+  {
+   "term": "#studytok",
+   "type": "hashtag",
+   "intent": "trending",
+   "score": 0.9,
+   "placement": [
+    "hashtag"
+   ]
+  },
+  {
+   "term": "#booktok",
+   "type": "hashtag",
+   "intent": "trending",
+   "score": 0.9,
+   "placement": [
+    "hashtag"
+   ]
+  },
+  {
+   "term": "#ereader",
+   "type": "hashtag",
+   "intent": "niche",
+   "score": 0.8,
+   "placement": [
+    "hashtag"
+   ]
+  },
+  {
+   "term": "#notetaking",
+   "type": "hashtag",
+   "intent": "niche",
+   "score": 0.8,
+   "placement": [
+    "hashtag"
+   ]
+  },
+  {
+   "term": "#tech",
+   "type": "hashtag",
+   "intent": "broad",
+   "score": 0.7,
+   "placement": [
+    "hashtag"
+   ]
+  },
+  {
+   "term": "#tcl",
+   "type": "hashtag",
+   "intent": "broad",
+   "score": 0.5,
+   "placement": [
+    "hashtag"
+   ]
+  },
+  {
+   "term": "Upgrade your reading setup",
+   "type": "cta",
+   "intent": "engagement",
+   "score": 0.9,
+   "placement": [
+    "vo"
+   ]
+  },
+  {
+   "term": "Link in bio to get yours",
+   "type": "cta",
+   "intent": "conversion",
+   "score": 0.9,
+   "placement": [
+    "caption"
+   ]
+  },
+  {
+   "term": "Save your eyes, tap to shop",
+   "type": "cta",
+   "intent": "conversion",
+   "score": 0.85,
+   "placement": [
+    "caption"
+   ]
+  }
+ ],
+ "complianceNotes": [
+  {
+   "issue": "List Price vs Sale Price",
+   "rule": "Strike-through price ($469.99) must have been a genuine, non-transient former price.",
+   "action": "Verify the duration and history of the $469.99 listing price before publishing. Do not use 'Was $469.99' if it was only sold at this price for a few seconds during launch."
+  },
+  {
+   "issue": "Health Implication (Eye Strain)",
+   "rule": "Do not claim 'prevents eye strain' or 'eliminates headaches'. Use safe, certifiable language.",
+   "action": "Strictly stick to 'TÜV Rheinland Low Blue Light and Flicker Free certified' and 'diffuses glare' without making medical guarantees."
+  },
+  {
+   "issue": "Battery Life Test Conditions",
+   "rule": "'Up to 10 hours' needs qualifying conditions to avoid misrepresentation.",
+   "action": "Mandatory visual disclaimer or voiceover clarification: 'Battery life varies. 10 hours based on internal TCL testing using Paper Mode at 150 nits.'"
+  }
+ ],
+ "beatMap": {
+  "durationSec": 15,
+  "beats": [
+   {
+    "t": "0-3s",
+    "purpose": "Hook - Visual proof of no glare",
+    "sellingPointId": "sp-01",
+    "visual": "Split screen under harsh studio light. Left: iPad shows blinding reflection. Right: NXTPAPER 14 shows clear, matte text.",
+    "overlayText": "Glossy vs. NXTPAPER (No Glare)",
+    "vo": "Hate this blinding glare when trying to read? This is the NXTPAPER 14."
+   },
+   {
+    "t": "3-8s",
+    "purpose": "Demo - Paper-like Color & Eye Comfort",
+    "sellingPointId": "sp-02",
+    "visual": "Close up macro shot panning over text, switching from standard color to Paper Mode, then camera pulls back to show flicker-free test in slow-mo.",
+    "overlayText": "Paper-Like Color. No flicker.",
+    "vo": "A 14-inch matte screen that mimics real paper. It's TÜV certified low blue light and flicker-free, so it won't fry your eyes at night."
+   },
+   {
+    "t": "8-11s",
+    "purpose": "Proof - Battery and Weight Busting",
+    "sellingPointId": "sp-04",
+    "visual": "Time-lapse of a day: person reading on commute (8am, 100% batt), then splitscreen studying at library (2pm, 65% batt), finishing book in bed (10pm, 15% batt).",
+    "overlayText": "10 AM - 10 PM Batt Test",
+    "vo": "With up to 10 hours of reading time, it lasts all day. And it weighs practically nothing."
+   },
+   {
+    "t": "11-13s",
+    "purpose": "Objection Bust - Clarity",
+    "sellingPointId": "sp-02",
+    "visual": "Extreme macro zoom on the screen surface. No rainbow/anti-glare grain visible. Back to reading happy.",
+    "overlayText": "Zero Grain. Pure Crispness.",
+    "vo": "Worried matte means blurry? Look at that sharp text. No grainy screen protectors needed."
+   },
+   {
+    "t": "13-15s",
+    "purpose": "Brand & CTA",
+    "visual": "Hero shot of the TCL NXTPAPER 14 on a clean desk. Logo animates in.",
+    "overlayText": "TCL NXTPAPER 14. $349.99 Sale.",
+    "vo": "Save $120 on the NXTPAPER 14. Link in bio to upgrade your reading setup."
+   }
+  ]
+ },
+ "gaps": [
+  "RAM and internal storage specifications were not provided.",
+  "Processor model was not provided.",
+  "Weight in grams (only described as 'lightweight') was not provided, making the kitchen scale overlay risky without a hard number.",
+  "Pen compatibility/inclusion status was not confirmed.",
+  "Real customer reviews are missing, forcing reliance primarily on spec claims and inferred market objections."
+ ]
+}

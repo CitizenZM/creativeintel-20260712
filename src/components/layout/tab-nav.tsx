@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Film, Lightbulb, Wand2, Palette, PackageCheck, Library, Check } from "lucide-react";
+import { LayoutDashboard, Film, Lightbulb, Wand2, Palette, PackageCheck, Library, Check, Compass } from "lucide-react";
 import { useProjectStages } from "./use-project-stages";
 import type { ProjectStage } from "@/services/project-stages";
 
@@ -11,10 +11,12 @@ interface TabNavProps {
   projectId: string;
 }
 
-const tabs: { segment: string; label: string; icon: typeof Film; alsoMatches: string[]; stage: ProjectStage["id"] }[] = [
+// `stage` is omitted for tabs that are tools rather than pipeline steps: no step number, no done/todo tone.
+const tabs: { segment: string; label: string; icon: typeof Film; alsoMatches: string[]; stage?: ProjectStage["id"] }[] = [
   { segment: "overview", label: "Setup", icon: LayoutDashboard, alsoMatches: [], stage: "setup" },
   { segment: "content", label: "Research", icon: Film, alsoMatches: ["research"], stage: "research" },
   { segment: "insights", label: "Insights", icon: Lightbulb, alsoMatches: ["competitors"], stage: "insights" },
+  { segment: "planning", label: "Planning", icon: Compass, alsoMatches: [] },
   { segment: "creative", label: "Creative", icon: Wand2, alsoMatches: [], stage: "creative" },
   { segment: "studio", label: "Studio", icon: Palette, alsoMatches: [], stage: "studio" },
   { segment: "deliver", label: "Deliver", icon: PackageCheck, alsoMatches: [], stage: "deliver" },
@@ -23,7 +25,9 @@ const tabs: { segment: string; label: string; icon: typeof Film; alsoMatches: st
 export function TabNav({ projectId }: TabNavProps) {
   const pathname = usePathname();
   const { data } = useProjectStages(projectId);
-  const stateOf = (id: ProjectStage["id"]) => data?.stages.find((s) => s.id === id)?.state;
+  const stateOf = (id?: ProjectStage["id"]) => (id ? data?.stages.find((s) => s.id === id)?.state : undefined);
+  // Step numbers count pipeline stages only, so Studio stays "Step 5" with Planning in the bar.
+  const stepOf = (i: number) => (tabs[i].stage ? tabs.slice(0, i + 1).filter((t) => t.stage).length : null);
 
   return (
     <div className="border-b border-border bg-background sticky top-14 lg:top-0 z-30">
@@ -58,7 +62,7 @@ export function TabNav({ projectId }: TabNavProps) {
                     : cn("border-transparent hover:text-foreground", tone || "text-muted-foreground")
                 )}
               >
-                <span className="text-[10px] font-semibold opacity-70">{i + 1}</span>
+                {stepOf(i) !== null && <span className="text-[10px] font-semibold opacity-70">{stepOf(i)}</span>}
                 {state === "done" ? (
                   <Check className="h-4 w-4" strokeWidth={2.25} />
                 ) : (
