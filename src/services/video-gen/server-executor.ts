@@ -246,7 +246,9 @@ export async function tickRun(
     const urls = (names: string[]) => names.map((r) => urlOf(r)).filter((u): u is string => !!u);
     // Loaded on demand: the scorer pulls in sharp and the vision client.
     const { scoreFrame } = await import("./consistency/score");
-    const result = await scoreFrame(
+    const refCount = refNames.length;
+    // The vision rubric is a paid call: under the spend guard; over budget the keyframe is kept unscored.
+    const result = await guardQc(run, j, refCount, () => scoreFrame(
       url,
       {
         cast: urls(refNames.filter((r) => r === "CAST")).map((image) => ({ image })),
@@ -259,7 +261,8 @@ export async function tickRun(
         shotType: isShotType(s.qcShotType) ? s.qcShotType : undefined,
         productSpec: s.productSpec,
       }
-    );
+    ));
+    if (!result) return url;
     const attempts = s.qcAttempts ?? 0;
     const d = decideKeyframe(url, result, { attempts, previous: s.qcCandidates }, { productSpec: s.productSpec });
     if (d.action === "reroll") {

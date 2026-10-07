@@ -113,7 +113,16 @@ export const openrouterAdapter: EngineAdapter = {
     const buffer = await downloadOpenRouterVideo(taskId);
     // Drift check on the clip we already hold: sample 0 / 50 / 100 %, score against cast + product refs (free when "pixel").
     const mode = clipDriftMode();
-    const drift = mode === "off" ? null : await (await import("./consistency/drift")).clipDriftForJob(buffer, ctx.consistency, ctx.settings, { mode });
+    const runDrift = async () => (await import("./consistency/drift")).clipDriftForJob(buffer, ctx.consistency, ctx.settings, { mode });
+    let drift: Awaited<ReturnType<typeof runDrift>> | null = null;
+    if (mode !== "off") {
+      try {
+        // Vision drift scoring is 3 paid calls: under the project's spend guard (advisory — skipped when over budget).
+        drift = mode === "pixel" ? await runDrift() : await (await import("@/services/ops/spend")).guardLlm({ projectId: ctx.projectId, runId: ctx.runId, kind: "vision_qc" }, { inTokens: 3 * 2500, outTokens: 3 * 600 }, runDrift);
+      } catch (err) {
+        console.warn(`[drift] ${ctx.nodeName}: skipped —`, err instanceof Error ? err.message.slice(0, 200) : err);
+      }
+    }
     const up = await uploadBuffer({ buffer, filename: `${ctx.nodeName}.mp4`, contentType: "video/mp4", folder: `openrouter-runs/${ctx.runId}` });
     if (up.provider === "inline") throw new Error("No asset storage configured — set BLOB_READ_WRITE_TOKEN or CLOUDINARY_URL");
     const costUsd = task.costUsd ?? (ctx.creditsEstimated ?? 0) / 100;
