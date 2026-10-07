@@ -292,8 +292,8 @@ const render = async (ctx: StepContext): Promise<StepOutcome> => {
 };
 
 /**
- * Pre-flight creative score: renders through edit v2 carry it on qcReport.preflight when the
- * pre-flight module is deployed; otherwise this step is recorded as skipped.
+ * Pre-flight creative score: edit-v2 renders carry it on qcReport.preflight; otherwise the master is
+ * scored here (free, local). A failure is recorded as skipped — it never blocks the report.
  */
 const preflight = async (ctx: StepContext): Promise<StepOutcome> => {
   const runId = ctx.state.runId;
@@ -304,7 +304,14 @@ const preflight = async (ctx: StepContext): Promise<StepOutcome> => {
     const score = typeof pf.score === "number" ? pf.score : typeof pf.total === "number" ? pf.total : null;
     return { kind: "done", state: { preflight: { status: "scored", score } }, note: score != null ? `pre-flight ${score}/100` : "pre-flight scored" };
   }
-  return { kind: "done", state: { preflight: { status: "skipped", note: "no pre-flight score on this render" } } };
+  // Not scored at render time: score the master now (local ffmpeg, free). Advisory — never blocks the report.
+  try {
+    const { preflightRun } = await import("@/services/video-gen/preflight/run");
+    const { score, verdict } = await preflightRun(ctx.state.projectId ?? "", runId);
+    return { kind: "done", state: { preflight: { status: "scored", score, verdict } }, note: `pre-flight ${score}/100 (${verdict})` };
+  } catch (err) {
+    return { kind: "done", state: { preflight: { status: "skipped", note: `pre-flight failed: ${err instanceof Error ? err.message.slice(0, 120) : String(err)}` } } };
+  }
 };
 
 const report = async (ctx: StepContext): Promise<StepOutcome> => {

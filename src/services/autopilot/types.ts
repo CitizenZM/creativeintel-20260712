@@ -92,7 +92,7 @@ export interface AutopilotState {
   awaiting?: AutopilotAwaiting | null;
   renderStartedAt?: string;
   masterUrl?: string | null;
-  preflight?: { status: "scored" | "skipped"; score?: number | null; note?: string };
+  preflight?: { status: "scored" | "skipped"; score?: number | null; verdict?: string; note?: string };
   report?: { htmlUrl?: string; docxUrl?: string; skipped?: string };
   /** Failed attempts per step (cap: MAX_STEP_ATTEMPTS). */
   attempts?: Partial<Record<AutopilotStepName, number>>;
