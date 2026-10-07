@@ -217,11 +217,15 @@ export function bhattacharyya(p: Float64Array, q: Float64Array): number {
  * padded with `margin` (fraction of the device size per side) of surrounding
  * background, so the silhouette edge is always inside. On each side: the
  * edge-energy profile from the border inward; the first strong peak is the
- * silhouette, the next one the bezel's inner edge. Median of the sides; null
- * when no inner edge shows (dark screen, no frame at all).
+ * silhouette, the next one the bezel's inner edge. A real bezel is a uniform
+ * band: when the band holds picture detail instead, the picture starts at the
+ * rim (a hair-thin edge) and that side counts as 0; no inner edge within reach
+ * counts as 0 too. Median of the sides; null when no silhouette shows (body and
+ * background alike).
  */
 export function bezelWidth(g: Float64Array, w: number, h: number, margin = 0.08, maxFrac = 0.22): number | null {
   const mag = sobel(g, w, h);
+  const sideIndex = (si: number, d: number, t: number) => (si === 0 ? d * w + t : si === 1 ? (h - 1 - d) * w + t : si === 2 ? t * w + d : t * w + (w - 1 - d));
   const short = Math.min(w, h) / (1 + 2 * margin);
   const depth = Math.min(Math.floor(Math.min(w, h) / 2) - 1, Math.round(Math.min(w, h) * margin + short * maxFrac));
   const widths: number[] = [];
@@ -252,15 +256,27 @@ export function bezelWidth(g: Float64Array, w: number, h: number, margin = 0.08,
     while (i < prof.length && prof[i] <= prof[i - 1]) i++;
     for (; i < prof.length; i++) {
       if (prof[i] >= 0.25 * prof[p1] && isPeak(i)) {
-        widths.push((i - p1) / short);
+        // Uniform band between the silhouette and this edge (profile index k = depth k + 1)?
+        const mid = Math.round((p1 + i) / 2) + 1;
+        let m = 0, v = 0;
+        for (let t = from; t < to; t++) m += g[sideIndex(si, mid, t)];
+        m /= to - from;
+        for (let t = from; t < to; t++) v += (g[sideIndex(si, mid, t)] - m) ** 2;
+        widths.push(Math.sqrt(v / (to - from)) <= BEZEL_UNIFORM_STD ? (i - p1) / short : 0);
         return;
       }
     }
+    // No inner edge within reach: no band distinct from the picture — a hair-thin edge (TVs whose picture
+    // runs to the rim). Limitation: a thick bezel next to a black picture edge also reads 0 here.
+    widths.push(0);
   });
   if (widths.length < 2) return null;
   widths.sort((a, b) => a - b);
   return widths[Math.floor(widths.length / 2)];
 }
+
+/** Max along-side intensity std (contrast-normalised, std 50) of a bezel band. */
+export const BEZEL_UNIFORM_STD = 20;
 
 /** Product crops ready to compare: tight (layout, hashes, colour) and padded (bezel). */
 export interface PreparedCrop {
@@ -322,13 +338,21 @@ export interface PixelMetrics {
 
 export interface PixelWeights {
   aspect: number;
+  /** Bezel width match (dropped when it cannot be measured). */
+  bezel: number;
   hash: number;
   histogram: number;
+  /** Layout: grayscale SSIM, edge SSIM, edge density. */
   structure: number;
 }
 
-/** Geometry dominates: colour and hashes move with whatever is on the product's screen. */
-export const DEFAULT_PIXEL_WEIGHTS: PixelWeights = { aspect: 0.25, hash: 0.1, histogram: 0.1, structure: 0.55 };
+/**
+ * Geometry dominates. Calibrated on real TCL photos: the layout, hash and
+ * colour terms move with whatever is on the product's screen (official angled
+ * shots of the same tablet score only ~0.3 layout vs the front photo), while
+ * proportions and bezel width are what the AI gets wrong.
+ */
+export const DEFAULT_PIXEL_WEIGHTS: PixelWeights = { aspect: 0.35, bezel: 0.25, hash: 0.1, histogram: 0.1, structure: 0.2 };
 
 const S = 64; // structure resolution
 const B = 192; // bezel resolution
@@ -403,17 +427,12 @@ export async function compareProductPixels(
     const bezelScore =
       bezelF !== null && bezelR !== null ? clamp01(Math.exp(-1.5 * Math.abs(Math.log((bezelF * 100 + 1) / (bezelR * 100 + 1))))) : null;
 
-    const parts: [number, number][] = [
-      [clamp01(ssimGray), 0.35],
-      [clamp01(edgeSsim), 0.35],
-      [densitySim, 0.1],
-      ...(bezelScore !== null ? ([[bezelScore, 0.2]] as [number, number][]) : []),
-    ];
-    const structureScore = parts.reduce((s, [v, wt]) => s + v * wt, 0) / parts.reduce((s, [, wt]) => s + wt, 0);
+    const structureScore = (0.4 * clamp01(ssimGray) + 0.4 * clamp01(edgeSsim) + 0.2 * densitySim) / 1;
 
-    const total = weights.aspect + weights.hash + weights.histogram + weights.structure;
+    const bw = bezelScore === null ? 0 : weights.bezel;
+    const total = weights.aspect + bw + weights.hash + weights.histogram + weights.structure;
     const score =
-      (weights.aspect * aspectScore + weights.hash * hashScore + weights.histogram * bc + weights.structure * structureScore) / (total || 1);
+      (weights.aspect * aspectScore + bw * (bezelScore ?? 0) + weights.hash * hashScore + weights.histogram * bc + weights.structure * structureScore) / (total || 1);
     return {
       aspect: { frame: r3(fAspect), ref: r3(rAspect), deviation: r3(deviation), rotated, score: r3(aspectScore) },
       hash: { dHashDistance: dDist, pHashDistance: pDist, score: r3(hashScore) },

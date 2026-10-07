@@ -23,11 +23,11 @@ export interface Thresholds {
 }
 
 export const SHOT_THRESHOLDS: Record<ShotType, Thresholds> = {
-  "product-closeup": { pass: 0.78, productMin: 0.78, productPixelMin: 0.55, castMin: 0.6, weights: { product: 0.85, cast: 0.15 }, pixelBlend: 0.45 },
-  product: { pass: 0.72, productMin: 0.72, productPixelMin: 0.45, castMin: 0.65, weights: { product: 0.7, cast: 0.3 }, pixelBlend: 0.35 },
-  "people-product": { pass: 0.7, productMin: 0.65, productPixelMin: 0.35, castMin: 0.72, weights: { product: 0.5, cast: 0.5 }, pixelBlend: 0.3 },
-  "people-wide": { pass: 0.68, productMin: 0.55, productPixelMin: 0.25, castMin: 0.75, weights: { product: 0.3, cast: 0.7 }, pixelBlend: 0.2 },
-  people: { pass: 0.7, productMin: 0.5, productPixelMin: 0.2, castMin: 0.75, weights: { product: 0.2, cast: 0.8 }, pixelBlend: 0.15 },
+  "product-closeup": { pass: 0.78, productMin: 0.78, productPixelMin: 0.45, castMin: 0.6, weights: { product: 0.85, cast: 0.15 }, pixelBlend: 0.45 },
+  product: { pass: 0.72, productMin: 0.72, productPixelMin: 0.4, castMin: 0.65, weights: { product: 0.7, cast: 0.3 }, pixelBlend: 0.35 },
+  "people-product": { pass: 0.7, productMin: 0.65, productPixelMin: 0.3, castMin: 0.72, weights: { product: 0.5, cast: 0.5 }, pixelBlend: 0.3 },
+  "people-wide": { pass: 0.68, productMin: 0.55, productPixelMin: 0.2, castMin: 0.75, weights: { product: 0.3, cast: 0.7 }, pixelBlend: 0.2 },
+  people: { pass: 0.7, productMin: 0.5, productPixelMin: 0.15, castMin: 0.75, weights: { product: 0.2, cast: 0.8 }, pixelBlend: 0.15 },
 };
 
 const CLOSE = /\b(close[- ]?up|macro|detail|corner|edge|side[- ]profile|profile view|tight|extreme close)\b/i;

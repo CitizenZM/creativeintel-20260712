@@ -81,24 +81,36 @@ export interface ConsistencyScore {
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
 
-/** Defects the pixel metrics can name on their own (geometry the vision model may shrug off). */
-export function pixelDefects(m: PixelMetrics): { issue: string; major: boolean }[] {
+/**
+ * Defects the pixel metrics can name on their own (geometry the vision model
+ * may shrug off). Calibrated on real TCL photos: an official 25°-yaw view
+ * deviates 0.21 in aspect from the front photo, a 30 % squash 0.36; the
+ * official tablet bezel measures 4.4 % and a doubled one ~10 %.
+ * `view` (from the vision model) relaxes the aspect check for angled/side views.
+ */
+export function pixelDefects(m: PixelMetrics, view?: string | null): { issue: string; major: boolean }[] {
   const out: { issue: string; major: boolean }[] = [];
-  if (m.aspect.deviation > 0.2) {
+  const frontish = !view || view === "front" || view === "none";
+  const dev = m.aspect.deviation;
+  if (dev > (frontish ? 0.25 : 0.6)) {
     const elongated = m.aspect.frame > m.aspect.ref;
     out.push({
-      issue: `${elongated ? "body too thin (stick-like)" : "aspect ratio wrong"}: proportions ${m.aspect.frame}:1 vs ${m.aspect.ref}:1 in the product photo`,
-      major: m.aspect.deviation > 0.4,
+      issue: `${elongated && dev > 0.6 ? "body too thin (stick-like)" : "aspect ratio wrong"}: proportions ${m.aspect.frame}:1 vs ${m.aspect.ref}:1 in the product photo`,
+      major: dev > (frontish ? 0.3 : 0.9),
     });
   }
   const s = m.structure;
-  if (s.bezelScore !== null && s.bezelFrame !== null && s.bezelRef !== null && s.bezelScore < 0.5) {
-    out.push({
-      issue: `${s.bezelFrame > s.bezelRef ? "bezel thicker" : "bezel thinner"}: ${pct(s.bezelFrame)} of the short side vs ${pct(s.bezelRef)} in the product photo`,
-      major: s.bezelScore < 0.3,
-    });
+  if (s.bezelFrame !== null && s.bezelRef !== null) {
+    // Ratio of widths in % of the short side, +1 % so two hair-thin edges never look far apart.
+    const r = (s.bezelFrame * 100 + 1) / (s.bezelRef * 100 + 1);
+    if (r > 1.35 || r < 1 / 1.6) {
+      out.push({
+        issue: `${r > 1 ? "bezel thicker" : "bezel thinner"}: ${pct(s.bezelFrame)} of the short side vs ${pct(s.bezelRef)} in the product photo`,
+        major: r > 1.6,
+      });
+    }
   }
-  if (s.score < 0.45) out.push({ issue: `product warped: shape and edge layout differ from the product photo (structure ${s.score})`, major: false });
+  if (s.score < 0.15 && m.aspect.score < 0.5) out.push({ issue: `product warped: shape and edge layout differ from the product photo (structure ${s.score})`, major: false });
   return out;
 }
 
@@ -149,7 +161,7 @@ export async function scoreFrame(frame: ImageSource, refs: ConsistencyRefs, opts
         reasons.push(`pixel metrics failed: ${err instanceof Error ? err.message.slice(0, 80) : err}`);
         return null;
       });
-      if (pixel) defects.push(...pixelDefects(pixel));
+      if (pixel) defects.push(...pixelDefects(pixel, vp?.view));
     }
     const visionScore = vp && report ? vp.score : null;
     let score: number;
