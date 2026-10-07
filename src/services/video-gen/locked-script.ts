@@ -17,6 +17,10 @@
  *            K<n>E is edited from the approved start keyframe + cast + product refs, and the clip is
  *            generated between the two, sized so the whole clip fills the frame and ends on the anchor
  *   endState   what the end keyframe shows (default: the end of the motion prompt)
+ *   qcShotType consistency-gate thresholds (product-closeup | product | people-product | people-wide | people;
+ *            default: inferred from the prompt)
+ *   productSpec facts the product must show, fed into the QC rubric and re-roll corrections
+ *            (e.g. "6.6 mm thick side profile, hair-thin bezel")
  * No director rewrite, no comparison LLM split, no cast-lock heuristics.
  */
 import type { CompiledJobDraft } from "./libtv-compile";
@@ -37,6 +41,10 @@ export interface LockedBlock {
   fine?: string;
   anchorEnd?: boolean;
   endState?: string;
+  /** Consistency-gate shot type (thresholds); inferred from the prompt when absent. */
+  qcShotType?: "product-closeup" | "product" | "people-product" | "people-wide" | "people";
+  /** Facts the product must show, for the QC rubric and re-roll corrections. */
+  productSpec?: string;
   /** CTA frame: end-card template (creative library E01–E12) and its live facts (pct, code, price…). */
   endCard?: { id: string; data?: Record<string, unknown> };
 }
@@ -140,6 +148,7 @@ export function lockedDrafts(
       });
     } else {
       const r = refsFor(L.refs);
+      const qc = { ...(L.qcShotType ? { qcShotType: L.qcShotType } : {}), ...(L.productSpec?.trim() ? { productSpec: L.productSpec.trim() } : {}) };
       if (L.refImageUrl) {
         // The shot's own reference replaces the kit packshot (a shot with no product ref gains one).
         const ref = `REF-${n}`;
@@ -157,7 +166,7 @@ export function lockedDrafts(
         leftRefs: r.leftRefs,
         prompt: f.imagePrompt ?? "",
         modelName: opts.imageModel,
-        settings: { ...opts.imgSettings, ...base, directed: 1, directedKeyframe: f.imagePrompt ?? "", ...(r.editFrom ? { editFrom: r.editFrom } : {}) },
+        settings: { ...opts.imgSettings, ...base, directed: 1, directedKeyframe: f.imagePrompt ?? "", ...(r.editFrom ? { editFrom: r.editFrom } : {}), ...qc },
         sourceUrl: null,
         creditsEstimated: opts.imageCredits,
       });
@@ -179,7 +188,7 @@ export function lockedDrafts(
           leftRefs: [`K${n}`, ...(castRef ? [castRef] : []), ...(productRef ? [productRef] : [])],
           prompt: endShot,
           modelName: opts.imageModel,
-          settings: { ...opts.imgSettings, directed: 1, directedKeyframe: endShot, editFrom: "end", endCast: castRef ? 1 : 0, endProduct: productRef ? 1 : 0, endOf: n, frameNumber: null, coversFrames: [] },
+          settings: { ...opts.imgSettings, directed: 1, directedKeyframe: endShot, editFrom: "end", endCast: castRef ? 1 : 0, endProduct: productRef ? 1 : 0, endOf: n, frameNumber: null, coversFrames: [], ...qc },
           sourceUrl: null,
           creditsEstimated: opts.imageCredits,
         });

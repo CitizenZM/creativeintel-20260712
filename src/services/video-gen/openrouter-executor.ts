@@ -16,6 +16,8 @@ import {
   submitOpenRouterVideo,
 } from "@/services/ai/openrouter-media";
 import { negativePromptFor } from "./shot-director";
+import { applyCorrections } from "./consistency/corrections";
+import { clipDriftMode } from "./keyframe-qc";
 import { driveRun, type EngineAdapter, type JobContext, type TaskResult, type TickResult } from "./server-executor";
 
 const DEFAULT_IMAGE = "bytedance-seed/seedream-5-0-flash";
@@ -36,10 +38,12 @@ export async function openrouterKeyframe(prompt: string, ctx: JobContext): Promi
   const model = modelOf(ctx, DEFAULT_IMAGE);
   const fresh = () => generateOpenRouterImage(prompt, { model, aspectRatio: ctx.aspectRatio, projectId: ctx.projectId });
   const shot = typeof ctx.settings?.directedKeyframe === "string" ? ctx.settings.directedKeyframe : prompt;
+  // Consistency-gate re-roll: the previous attempt's defects as explicit corrections (edit prompts truncate the shot, so they go last).
+  const corrections = Array.isArray(ctx.settings?.qcCorrections) ? (ctx.settings.qcCorrections as string[]) : undefined;
   // End keyframe of an anchored segment: edit the approved START frame (image 1) to the end state, re-locked
   // to the cast sheet and the product photo, so both ends of the clip are corrected to the references.
   if (editFrom === "end" && refs.length >= 1) {
-    const out = await generateOpenRouterImage(endFramePrompt(shot, { cast: !!ctx.settings?.endCast, product: !!ctx.settings?.endProduct }), {
+    const out = await generateOpenRouterImage(applyCorrections(endFramePrompt(shot, { cast: !!ctx.settings?.endCast, product: !!ctx.settings?.endProduct }), corrections), {
       model,
       aspectRatio: ctx.aspectRatio,
       referenceUrls: refs.slice(0, 6),
@@ -52,7 +56,7 @@ export async function openrouterKeyframe(prompt: string, ctx: JobContext): Promi
   const usable =
     (editFrom === "cast" || editFrom === "product") && refs.length >= 1 ? editFrom : editFrom === "cast+product" && refs.length >= 2 ? editFrom : null;
   const { buffer, contentType } = usable
-    ? await generateOpenRouterImage(lockedEditPrompt(usable, shot, { maxChars: 1400 }), {
+    ? await generateOpenRouterImage(applyCorrections(lockedEditPrompt(usable, shot, { maxChars: 1400 }), corrections), {
         model,
         aspectRatio: ctx.aspectRatio,
         referenceUrls: usable === "cast+product" ? refs.slice(0, 2) : [refs[0]],
@@ -107,11 +111,19 @@ export const openrouterAdapter: EngineAdapter = {
     if (task.status === "FAIL") return { status: "FAIL", error: task.error ?? "OpenRouter video failed" };
     if (task.status !== "SUCCESS") return { status: "PROCESSING" };
     const buffer = await downloadOpenRouterVideo(taskId);
+    // Drift check on the clip we already hold: sample 0 / 50 / 100 %, score against cast + product refs (free when "pixel").
+    const mode = clipDriftMode();
+    const drift = mode === "off" ? null : await (await import("./consistency/drift")).clipDriftForJob(buffer, ctx.consistency, ctx.settings, { mode });
     const up = await uploadBuffer({ buffer, filename: `${ctx.nodeName}.mp4`, contentType: "video/mp4", folder: `openrouter-runs/${ctx.runId}` });
     if (up.provider === "inline") throw new Error("No asset storage configured — set BLOB_READ_WRITE_TOKEN or CLOUDINARY_URL");
     const costUsd = task.costUsd ?? (ctx.creditsEstimated ?? 0) / 100;
     logAiUsage({ provider: "openrouter", model: modelOf(ctx, DEFAULT_VIDEO), capability: "video", videoSeconds: ctx.durationSec, costUsd, projectId: ctx.projectId });
-    return { status: "SUCCESS", url: up.url, creditsSpent: Math.round(costUsd * 100) };
+    return {
+      status: "SUCCESS",
+      url: up.url,
+      creditsSpent: Math.round(costUsd * 100),
+      ...(drift ? { settingsPatch: { drift: drift.report, driftFlag: drift.report.driftFlag }, regenerate: drift.regenerate } : {}),
+    };
   },
 };
 
