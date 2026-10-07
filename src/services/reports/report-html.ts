@@ -4,7 +4,7 @@
  */
 import type { CampaignReportModel } from "./campaign-report";
 
-const esc = (v: unknown) =>
+export const esc = (v: unknown) =>
   String(v ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

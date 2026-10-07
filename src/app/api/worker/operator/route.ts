@@ -38,6 +38,9 @@
  * POST { action: "ops-health" } / { action: "ops-recover", dryRun? (default true) } — health scan / safe auto-recovery
  * POST { action: "repair-keyframe", projectId, runId, node, bbox?, packshotUrl?, reason?, apply? } — official-packshot repair of a keyframe (local, free)
  * POST { action: "catalog-import" | "catalog-plan" | "catalog-render-images", projectId, … } — catalog ads from a product feed (CatalogRun)
+ * POST { action: "media-plan", projectId, goal, totalBudget, flightStart, flightEnd, targetCpa?, targetRoas?, aov?, markets?, channels?, baseline? } — cross-platform media plan → Project.mediaPlan
+ * POST { action: "report-preview", projectId, since? } — weekly digest payload (built, not sent)
+ * POST { action: "report-delivery-config", projectId, config? } — read / set Project.reportDelivery (disabled by default; sending also needs REPORT_DELIVERY_SEND=on)
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -457,6 +460,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, ...(await store.renderCatalogImages(input)) });
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof store.CatalogError ? err.status : 500 });
+    }
+  }
+
+  if (input.action === "media-plan") {
+    const { createMediaPlan, MediaPlanError } = await import("@/services/strategy/media-plan.store");
+    try {
+      const { action: _a, projectId, narrative, ...req } = input;
+      if (narrative !== false) await loadAiSettings();
+      return NextResponse.json({ ok: true, mediaPlan: await createMediaPlan(projectId, { ...req, narrative }) });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof MediaPlanError ? err.status : 500 });
+    }
+  }
+  if (input.action === "report-preview" || input.action === "report-delivery-config") {
+    const { previewDigest, updateDeliveryConfig, DeliveryError } = await import("@/services/reports/delivery");
+    try {
+      if (input.action === "report-preview") {
+        const payload = await previewDigest(input.projectId, { since: input.since });
+        return NextResponse.json({ ok: true, dryRun: true, subject: payload.subject, markdown: payload.markdown, html: payload.html, feishuCard: payload.feishuCard, digest: payload.digest });
+      }
+      return NextResponse.json({ ok: true, ...(await updateDeliveryConfig(input.projectId, input.config)) });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof DeliveryError ? err.status : 500 });
     }
   }
 
