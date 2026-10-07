@@ -31,6 +31,16 @@ export interface Word {
   durSec: number;
 }
 
+/**
+ * How long a TTS line actually speaks: the end of its last word plus a short release, not the mp3's
+ * length (Edge TTS pads ~0.5–1 s of trailing silence, which made every line get sped up to fit).
+ */
+export function spokenDuration(words: Word[], fileSec: number, releaseSec = 0.12): number {
+  const end = words.reduce((m, w) => Math.max(m, w.startSec + w.durSec), 0);
+  if (!(end > 0)) return fileSec;
+  return fileSec > 0 ? Math.min(fileSec, end + releaseSec) : end + releaseSec;
+}
+
 export interface Placement {
   startSec: number;
   tempo: number;

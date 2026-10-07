@@ -137,3 +137,13 @@ describe("unspaced scripts (ja / zh)", () => {
     expect(joinTokens(["sin", "reflejos."])).toBe("sin reflejos.");
   });
 });
+
+describe("spokenDuration", () => {
+  it("measures speech to the last word, not the padded mp3", async () => {
+    const { spokenDuration } = await import("./voiceover");
+    const words = [{ text: "Twenty", startSec: 0.1, durSec: 0.3 }, { text: "off.", startSec: 0.45, durSec: 0.35 }];
+    expect(spokenDuration(words, 1.9)).toBeCloseTo(0.92, 3);
+    expect(spokenDuration([], 1.9)).toBe(1.9);
+    expect(spokenDuration(words, 0.85)).toBe(0.85);
+  });
+});
