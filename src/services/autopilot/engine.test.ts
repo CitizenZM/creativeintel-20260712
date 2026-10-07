@@ -265,3 +265,66 @@ describe("autopilot state machine", () => {
     expect((await advanceAutopilots(deps(store, steps))).ticked).toBe(0);
   });
 });
+
+describe("owner approval racing a tick", () => {
+  it("an approval sent while a tick runs is not overwritten by the tick's stale state", async () => {
+    const store = new MemoryAutopilotStore();
+    const { steps } = fakeSteps({ highUsd: 3 });
+    const rec = await startAutopilot({ projectId: "p0" }, store);
+    const brief = steps.brief;
+    // The owner approves while the tick is inside the brief step (it holds the lease).
+    steps.brief = async (ctx) => {
+      expect((await approveAutopilot(rec.id, 5, store)).ok).toBe(true);
+      return brief(ctx);
+    };
+    const done = await tickAutopilot(rec.id, deps(store, steps));
+    expect(done?.status).toBe("completed");
+    expect(done?.state.approvedBudgetUsd).toBe(5);
+    expect(done?.state.log?.some((e) => e.event === "approved")).toBe(true);
+  });
+
+  it("an approval that lands while the gate decides re-runs the gate instead of parking", async () => {
+    const store = new MemoryAutopilotStore();
+    const { steps } = fakeSteps({ highUsd: 3 });
+    const rec = await startAutopilot({ projectId: "p0" }, store);
+    let gates = 0;
+    steps.await_budget = async (ctx) => {
+      if (gates++ === 0) await approveAutopilot(rec.id, 4, store); // after the gate read its state
+      return budgetGate(ctx.state);
+    };
+    const done = await tickAutopilot(rec.id, deps(store, steps));
+    expect(gates).toBe(2);
+    expect(done?.status).toBe("completed");
+    expect(done?.state.approvedBudgetUsd).toBe(4);
+  });
+
+  it("an approval never rolls back progress a tick saved meanwhile", async () => {
+    const store = new MemoryAutopilotStore();
+    const { steps, created } = fakeSteps({ highUsd: 3 });
+    const rec = await startAutopilot({ projectId: "p0" }, store);
+    // The approval reads the record, then the tick saves the storyboard id, then the approval writes.
+    const realGet = store.get.bind(store);
+    let stale: Awaited<ReturnType<typeof store.get>> | null = null;
+    const storyboard = steps.storyboard;
+    steps.storyboard = async (ctx) => {
+      stale = await realGet(rec.id);
+      return storyboard(ctx);
+    };
+    await tickAutopilot(rec.id, deps(store, steps)); // parks at the gate with storyboardId saved
+    let first = true;
+    store.get = async (id: string) => {
+      if (first && stale) {
+        first = false;
+        return JSON.parse(JSON.stringify(stale), (k, v) => ((k === "createdAt" || k === "updatedAt") && typeof v === "string" ? new Date(v) : v));
+      }
+      return realGet(id);
+    };
+    expect((await approveAutopilot(rec.id, 3, store)).ok).toBe(true);
+    store.get = realGet;
+    const after = await store.get(rec.id);
+    expect(after?.state.storyboardId).toBe("sb1");
+    expect(after?.state.approvedBudgetUsd).toBe(3);
+    expect((await tickAutopilot(rec.id, deps(store, steps)))?.status).toBe("completed");
+    expect(created.storyboards).toBe(1);
+  });
+});

@@ -16,6 +16,14 @@ const toRecord = (r: Row): AutopilotRecord => ({
   updatedAt: r.updatedAt,
 });
 
+const patchData = (patch: AutopilotPatch) => ({
+  ...(patch.projectId !== undefined ? { projectId: patch.projectId } : {}),
+  ...(patch.status ? { status: patch.status } : {}),
+  ...(patch.step ? { step: patch.step } : {}),
+  ...(patch.state ? { state: patch.state as object } : {}),
+  ...(patch.error !== undefined ? { error: patch.error } : {}),
+});
+
 const SELECT = { id: true, projectId: true, status: true, step: true, input: true, state: true, error: true, createdAt: true, updatedAt: true } as const;
 
 export const prismaAutopilotStore: AutopilotStore = {
@@ -31,18 +39,14 @@ export const prismaAutopilotStore: AutopilotStore = {
     return row ? toRecord(row) : null;
   },
   async save(id, patch: AutopilotPatch) {
-    const row = await prisma.autopilotRun.update({
-      where: { id },
-      data: {
-        ...(patch.projectId !== undefined ? { projectId: patch.projectId } : {}),
-        ...(patch.status ? { status: patch.status } : {}),
-        ...(patch.step ? { step: patch.step } : {}),
-        ...(patch.state ? { state: patch.state as object } : {}),
-        ...(patch.error !== undefined ? { error: patch.error } : {}),
-      },
-      select: SELECT,
-    });
+    const row = await prisma.autopilotRun.update({ where: { id }, data: patchData(patch), select: SELECT });
     return toRecord(row);
+  },
+  async saveIf(id, patch: AutopilotPatch, updatedAt: Date) {
+    const { count } = await prisma.autopilotRun.updateMany({ where: { id, updatedAt }, data: patchData(patch) });
+    if (count !== 1) return null;
+    const row = await prisma.autopilotRun.findUnique({ where: { id }, select: SELECT });
+    return row ? toRecord(row) : null;
   },
   async claim(id, until, now) {
     const { count } = await prisma.autopilotRun.updateMany({
