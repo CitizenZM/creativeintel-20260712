@@ -16,6 +16,7 @@
  * POST { action: "save-structure", projectId, teardownId } / { action: "choose-structure", projectId, structureId|null }
  * POST { action: "product-brief", projectId, reviews?, qa?, price?, … } — sp-1 brief → Project.productBrief
  * POST { action: "select-creative", projectId?, platform, goal, promo? } — 3 hooks + end card
+ * POST { action: "plan-to-storyboard", projectId, platform?, hookId?, cast?, setting?, engine? } — plan script → locked storyboard
  * POST { action: "plan-campaign", projectId, platforms?, goal?, promo?, runDate?, durationSec? } — campaign plan → Project.campaignPlan
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
@@ -280,6 +281,27 @@ export async function POST(request: Request) {
       const status = err instanceof CampaignPlanError ? err.status : 500;
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
     }
+  }
+
+  if (input.action === "plan-to-storyboard") {
+    const { directPlanStoryboard } = await import("@/services/creative/plan-to-storyboard");
+    const project = await prisma.project.findUnique({ where: { id: input.projectId }, select: { campaignPlan: true, productName: true, name: true } });
+    const plan = project?.campaignPlan as { platforms?: import("@/services/creative/campaign-plan.types").PlatformPlan[] } | null;
+    const platformPlan = plan?.platforms?.find((p) => !input.platform || p.platform === input.platform);
+    if (!platformPlan) return NextResponse.json({ error: "No campaign plan for that platform — run plan-campaign first" }, { status: 409 });
+    const out = await directPlanStoryboard({
+      plan: platformPlan,
+      hookId: input.hookId,
+      productName: project?.productName || project?.name || "product",
+      cast: input.cast,
+      setting: input.setting,
+      engine: input.engine,
+    });
+    const sb = await prisma.storyboard.create({
+      data: { projectId: input.projectId, title: out.title, frames: out.frames as unknown as object[], style: "locked-script", frameSeconds: 1 },
+      select: { id: true },
+    });
+    return NextResponse.json({ ok: true, storyboardId: sb.id, frames: out.frames.length, promptSource: out.source, error: out.error }, { status: 201 });
   }
 
   if (input.action === "select-creative") {
