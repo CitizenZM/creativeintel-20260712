@@ -3,7 +3,7 @@
  * every rendered video (master, hook variants, delivery formats, Batch Mode variants) with a thumbnail,
  * per-platform ad copy (copy.csv), Meta + TikTok bulk-upload sheets, a README and manifest.json.
  * Files go to blob storage through the storage helper; a zip of the small files (CSVs, README,
- * manifest, thumbnails, video URL list) is added when jszip is available. Videos stay as URLs (too big
+ * manifest, thumbnails, video URL list) is not built (no zip dependency). Videos stay as URLs (too big
  * to re-zip on a serverless function). The pack's URLs are kept on LibtvRun.qcReport.exportPack.
  */
 import type { BatchMatrix } from "@/services/creative/batch-matrix";
@@ -204,19 +204,7 @@ export async function buildExportPack(runId: string, opts: { platforms?: string[
     notes,
   };
 
-  // Zip of the small files (jszip ships with the app's dependencies; skipped if it can't load).
-  try {
-    const JSZip = (await import("jszip")).default;
-    const zip = new JSZip();
-    for (const f of files) zip.file(f.path, f.body);
-    for (const [name, jpg] of thumbs) zip.file(`thumbnails/${name.replace(/\.mp4$/, ".jpg")}`, jpg);
-    zip.file("manifest.json", JSON.stringify(manifest, null, 2));
-    const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    const up = await uploadBuffer({ buffer, filename: `${fileSafe(campaignName)}.zip`, contentType: "application/zip", folder });
-    manifest.zipUrl = up.provider !== "inline" ? up.url : null;
-  } catch (err) {
-    notes.push(`Zip skipped: ${err instanceof Error ? err.message.slice(0, 160) : String(err)}`);
-  }
+  // No zip: zip is not a direct dependency (pnpm strict build fails on it); the manifest lists every file URL.
 
   const mUp = await uploadBuffer({ buffer: Buffer.from(JSON.stringify(manifest, null, 2), "utf8"), filename: "manifest.json", contentType: "application/json", folder }).catch(() => null);
   const manifestUrl = mUp && mUp.provider !== "inline" ? mUp.url : null;
