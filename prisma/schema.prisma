@@ -235,6 +235,9 @@ model Project {
   // explore / re-test, batch spec and cost. A proposal only; rendering it needs an explicit approval.
   nextRound         Json?
   nextRoundAt       DateTime?
+  // Creative Agent (services/creative/creative-agent.ts): the last 10 states before each chat edit
+  // [{at, message, summary, plan?, storyboard?: {id, frames}}], newest last — popped by undo.
+  creativeEditHistory Json?
 }
 
 model Brand {
@@ -1224,4 +1227,24 @@ model SpendEntry {
   @@index([projectId, createdAt])
   @@index([runId])
   @@index([jobId])
+}
+
+/// URL-to-Video Autopilot (services/autopilot): one resumable state machine per call —
+/// scrape → brief → plan → storyboard → estimate → await_budget → compile → approve → render → preflight → report.
+/// `state` keeps the ids each step produced (project, storyboard, run) so a re-run step reuses them.
+model AutopilotRun {
+  id         String    @id @default(cuid())
+  projectId  String?
+  status     String    @default("running") // running | awaiting_approval | completed | failed
+  step       String    @default("scrape")
+  input      Json
+  state      Json
+  error      String?
+  // Tick lease: one tick per autopilot at a time (cron and operator calls can overlap).
+  leaseUntil DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([status, updatedAt])
+  @@index([projectId])
 }

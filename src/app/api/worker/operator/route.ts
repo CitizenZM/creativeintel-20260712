@@ -30,6 +30,9 @@
  * POST { action: "preflight", projectId, runId, platform?, goal? } — pre-flight creative score → qcReport.preflight
  * POST { action: "hook-trends", projectId, category?, platform?, windowDays?, llm? } — rising / saturated competitor hooks + recommendations
  * POST { action: "next-round", projectId, platform? } — proposed next test round + cost → Project.nextRound (never spends)
+ * POST { action: "autopilot-start", url | projectId, platforms?, goal?, promo?, cast?, setting?, ctaButton?, approvedBudgetUsd? } — URL-to-video autopilot (202 + autopilotId)
+ * POST { action: "autopilot-approve", autopilotId, approvedBudgetUsd } / { action: "autopilot-status", autopilotId, retry? } — budget gate, status
+ * POST { action: "creative-agent", projectId, message, storyboardId? } / { action: "creative-agent-undo", projectId } — chat edits to the plan / storyboard
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -300,15 +303,15 @@ export async function POST(request: Request) {
   if (input.action === "plan-to-storyboard") {
     const { directPlanStoryboard } = await import("@/services/creative/plan-to-storyboard");
     const project = await prisma.project.findUnique({ where: { id: input.projectId }, select: { campaignPlan: true, productName: true, name: true } });
-    const plan = project?.campaignPlan as { platforms?: import("@/services/creative/campaign-plan.types").PlatformPlan[] } | null;
+    const plan = project?.campaignPlan as { platforms?: import("@/services/creative/campaign-plan.types").PlatformPlan[]; cast?: string; setting?: string } | null;
     const platformPlan = plan?.platforms?.find((p) => !input.platform || p.platform === input.platform);
     if (!platformPlan) return NextResponse.json({ error: "No campaign plan for that platform — run plan-campaign first" }, { status: 409 });
     const out = await directPlanStoryboard({
       plan: platformPlan,
       hookId: input.hookId,
       productName: project?.productName || project?.name || "product",
-      cast: input.cast,
-      setting: input.setting,
+      cast: input.cast ?? plan?.cast,
+      setting: input.setting ?? plan?.setting,
       engine: input.engine,
       ctaButton: input.ctaButton,
     });
@@ -484,6 +487,14 @@ export async function POST(request: Request) {
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof PreflightError ? err.status : 500 });
     }
+  }
+
+  if (input.action === "autopilot-start" || input.action === "autopilot-approve" || input.action === "autopilot-status") {
+    return opsReply(await (await import("@/services/autopilot/operator-actions")).autopilotAction(input, (task) => after(() => task().then(() => undefined))));
+  }
+  if (input.action === "creative-agent" || input.action === "creative-agent-undo") {
+    const { creativeAgentTurn, undoCreativeEdit } = await import("@/services/creative/creative-agent.store");
+    return opsReply(input.action === "creative-agent" ? await creativeAgentTurn(input.projectId, input.message, input.storyboardId) : await undoCreativeEdit(input.projectId));
   }
 
   // approve-run: free server renders only.
