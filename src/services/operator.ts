@@ -193,6 +193,13 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("hook-trends"), projectId: z.string().min(1), category: z.string().max(80).optional(), platform: z.string().max(60).optional(), windowDays: z.number().int().min(7).max(180).optional(), llm: z.boolean().optional() }),
   /** Auto-iteration: propose the next test round (keep / kill / explore / retest / cutdowns + cost) → Project.nextRound. Never renders or spends. */
   z.object({ action: z.literal("next-round"), projectId: z.string().min(1), platform: z.string().max(60).optional() }),
+  /** URL-to-Video Autopilot: url | projectId → finished ad. Stops at awaiting_approval unless approvedBudgetUsd covers the high forecast. */
+  z.object({ action: z.literal("autopilot-start"), url: z.string().url().optional(), projectId: z.string().min(1).optional(), platforms: z.array(z.string().min(1)).max(12).optional(), platform: z.string().optional(), goal: z.string().max(80).optional(), promo: z.object({ pct: z.number().nullable().optional(), price: z.number().nullable().optional(), comparePrice: z.number().nullable().optional(), priceCheckedAt: z.string().nullable().optional(), code: z.string().nullable().optional(), deadline: z.string().nullable().optional() }).optional(), hookId: z.string().optional(), cast: z.string().max(400).optional(), setting: z.string().max(300).optional(), ctaButton: z.string().max(40).optional(), approvedBudgetUsd: z.number().nonnegative().max(10_000).optional(), imageModel: z.string().min(1).optional(), videoModel: z.string().min(1).optional(), engine: z.enum(["kling", "veo", "veo1080"]).optional(), narrative: z.enum(["llm", "template"]).optional() }).refine((v) => !!(v.url || v.projectId), { message: "url or projectId required" }),
+  z.object({ action: z.literal("autopilot-approve"), autopilotId: z.string().min(1), approvedBudgetUsd: z.number().nonnegative().max(10_000) }),
+  z.object({ action: z.literal("autopilot-status"), autopilotId: z.string().min(1), retry: z.boolean().optional() }),
+  /** Creative Agent: one chat instruction → validated edit ops applied to the stored plan (or a storyboard's frames); undo restores the previous version. */
+  z.object({ action: z.literal("creative-agent"), projectId: z.string().min(1), message: z.string().min(2).max(2000), storyboardId: z.string().min(1).optional() }),
+  z.object({ action: z.literal("creative-agent-undo"), projectId: z.string().min(1) }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;

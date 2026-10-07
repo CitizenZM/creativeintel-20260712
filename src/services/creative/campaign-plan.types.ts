@@ -96,4 +96,7 @@ export interface CampaignPlan {
   };
   /** Legal gating was on when this plan was made (default off). */
   strictCompliance?: boolean;
+  /** Lead cast / shared set for plan-to-storyboard (Creative Agent setCast / setSetting). */
+  cast?: string;
+  setting?: string;
 }
