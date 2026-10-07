@@ -233,3 +233,10 @@ describe("estimateRunCost: clip drift QC, drift re-generations and clip retries"
     expect(driftLine(f)).toBeUndefined();
   });
 });
+
+describe("Veo native audio price", () => {
+  it("prices a talking-head clip with audio at the measured rate", () => {
+    expect(videoCostUsd(DEFAULT_PRICES, "google/veo-3.1-lite", 6, null, true).usd!).toBeCloseTo(0.297, 3);
+    expect(videoCostUsd(DEFAULT_PRICES, "google/veo-3.1-lite", 6).usd!).toBeCloseTo(0.18, 3);
+  });
+});

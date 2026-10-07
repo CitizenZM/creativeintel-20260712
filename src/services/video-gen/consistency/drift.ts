@@ -53,7 +53,12 @@ export async function sampleClipFrames(clip: Buffer | string, fractions: number[
       } else {
         await run(ff, ["-y", "-v", "error", "-ss", (dur * at).toFixed(3), "-i", file, "-frames:v", "1", "-q:v", "3", jpg], { timeout: 60_000 });
       }
-      out.push({ at, t: Math.round(dur * Math.min(1, at) * 1000) / 1000, image: await readFile(jpg) });
+      // A seek past the last decodable frame (short clips, late fractions) writes nothing: take the last frame.
+      const image = await readFile(jpg).catch(async () => {
+        await run(ff, ["-y", "-v", "error", "-sseof", "-0.5", "-i", file, "-update", "1", "-q:v", "3", jpg], { timeout: 60_000 });
+        return readFile(jpg);
+      });
+      out.push({ at, t: Math.round(dur * Math.min(1, at) * 1000) / 1000, image });
     }
     file = "";
     return out;
@@ -98,7 +103,9 @@ export interface DriftReport {
 export async function checkClipDrift(clip: Buffer | string, refs: DriftRefs, opts: DriftOptions): Promise<DriftReport> {
   const deps = opts.deps ?? {};
   const sim = deps.similarity ?? frameSimilarity;
-  const samples = await (deps.sample ?? sampleClipFrames)(clip, [0, 0.5, 1]);
+  // 0.97, not 1: generated clips often dissolve or fade on their very last frames (a live talking-head clip's
+  // tablet ghosted out in its last 0.1 s), which read as "product / cast missing" at the true last frame.
+  const samples = await (deps.sample ?? sampleClipFrames)(clip, [0, 0.5, 0.97]);
   const [first, mid, last] = samples;
   const reasons: string[] = [];
 
