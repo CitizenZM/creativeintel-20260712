@@ -99,3 +99,13 @@ describe("parseOperatorAction (session routes)", () => {
     expect(parseOperatorAction("set-budget", { projectId: "p", usd: 20_000 }).ok).toBe(false);
   });
 });
+
+describe("operatorActionSchema — covers / auto-fix", () => {
+  it("accepts covers for a run (optionally forced) and an auto-fix with an optional platform", () => {
+    expect(operatorActionSchema.safeParse({ action: "covers", projectId: "p", runId: "r" }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "covers", projectId: "p", runId: "r", force: true }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "covers", projectId: "p" }).success).toBe(false);
+    expect(operatorActionSchema.safeParse({ action: "auto-fix", projectId: "p", runId: "r", platform: "tiktok" }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "auto-fix", projectId: "p", runId: "r", platform: "myspace" }).success).toBe(false);
+  });
+});

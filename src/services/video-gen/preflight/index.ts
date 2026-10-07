@@ -40,19 +40,25 @@ export async function preflightForEdit(input: {
   master: string;
   dir: string;
   aspectRatio: string;
+  /** The platform the edit was laid out for (default: by aspect ratio). */
+  platform?: PlatformId | null;
   canvas: { w: number; h: number };
   plan: import("./plan").EditPlanLike;
   frames: { startSec: number; endSec: number; voiceover?: string | null }[];
-  overlays: { file: string; y: number; startSec: number; endSec: number }[];
+  /** `cx`: the layer's horizontal centre (px) when laid out in a platform safe box; `role` overrides the file-name guess. */
+  overlays: { file: string; y: number; startSec: number; endSec: number; cx?: number; role?: string }[];
   captions: { text: string; startSec: number; endSec: number }[];
   captionCoverage: number | null;
   known: { loudnessLufs?: number | null; truePeakDb?: number | null; cutsSec?: number[] };
 }): Promise<PreflightReport> {
   const { layersFromOverlays, planFromEdit } = await import("./plan");
   const layers = await layersFromOverlays(
-    input.overlays.map((o) => ({ ...o, role: ROLE_BY_FILE.find(([re]) => re.test(o.file))?.[1] ?? "text" })),
+    // Scrims and sparkle layers are not readable text: they are full-frame by design.
+    input.overlays
+      .map((o) => ({ ...o, role: o.role ?? ROLE_BY_FILE.find(([re]) => re.test(o.file))?.[1] ?? "text" }))
+      .filter((o) => o.role !== "backdrop" && o.role !== "decor"),
     input.canvas
   );
   const plan = planFromEdit(input.plan, input.frames, { layers, captionCoverage: input.captionCoverage, captions: input.captions });
-  return runPreflight({ file: input.master, dir: input.dir, plan, aspectRatio: input.aspectRatio, known: input.known });
+  return runPreflight({ file: input.master, dir: input.dir, plan, aspectRatio: input.aspectRatio, platform: input.platform ?? null, known: input.known });
 }

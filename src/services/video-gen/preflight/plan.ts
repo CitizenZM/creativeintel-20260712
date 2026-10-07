@@ -85,13 +85,14 @@ export async function inkBox(png: Buffer | string): Promise<{ left: number; top:
   return x1 < 0 ? null : { left: x0, top: y0, width: x1 - x0 + 1, height: y1 - y0 + 1, fullW: info.width, fullH: info.height };
 }
 
-/** Readable overlay boxes of an edit-v2 render (centred horizontally, `y` is the centre share of the height), trimmed to ink. */
-export async function layersFromOverlays(overlays: { file: string | Buffer; y: number; startSec: number; endSec: number; role?: string }[], canvas: { w: number; h: number }): Promise<PlanLayer[]> {
+/** Readable overlay boxes of an edit-v2 render (centred horizontally on the frame or `cx`, `y` is the centre share of the height), trimmed to ink. */
+export async function layersFromOverlays(overlays: { file: string | Buffer; y: number; startSec: number; endSec: number; role?: string; cx?: number }[], canvas: { w: number; h: number }): Promise<PlanLayer[]> {
   const out: PlanLayer[] = [];
   for (const o of overlays) {
     const b = await inkBox(o.file).catch(() => null);
     if (!b) continue;
-    const left = Math.round((canvas.w - b.fullW) / 2);
+    // Centred on the frame, or on `cx` when the edit laid it out in a platform safe box.
+    const left = Math.round((o.cx ?? canvas.w / 2) - b.fullW / 2);
     const top = Math.round(canvas.h * o.y - b.fullH / 2);
     out.push({ role: o.role ?? "text", x: left + b.left, y: top + b.top, w: b.width, h: b.height, startSec: o.startSec, endSec: o.endSec });
   }

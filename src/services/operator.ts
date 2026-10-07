@@ -8,6 +8,9 @@
 import { z } from "zod";
 import { appendFrameHistory } from "@/services/creative-library";
 import { LOCALES } from "@/services/video-gen/localize";
+import { PLATFORM_PROFILES } from "@/services/creative/platforms.data";
+
+const PLATFORM_IDS = PLATFORM_PROFILES.map((p) => p.id) as [string, ...string[]];
 
 export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("approve-frames"), projectId: z.string().min(1), storyboardId: z.string().min(1) }),
@@ -200,6 +203,10 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   /** Creative Agent: one chat instruction → validated edit ops applied to the stored plan (or a storyboard's frames); undo restores the previous version. */
   z.object({ action: z.literal("creative-agent"), projectId: z.string().min(1), message: z.string().min(2).max(2000), storyboardId: z.string().min(1).optional() }),
   z.object({ action: z.literal("creative-agent-undo"), projectId: z.string().min(1) }),
+  /** Cover frames (9:16 / 1:1 / 4:5) for the master and each variant / export without them (all with force) → qcReport.covers. */
+  z.object({ action: z.literal("covers"), projectId: z.string().min(1), runId: z.string().min(1), force: z.boolean().optional() }),
+  /** Pre-flight auto-fix: one free re-edit with the corrections for fixable QC / pre-flight issues → qcReport.autofix. */
+  z.object({ action: z.literal("auto-fix"), projectId: z.string().min(1), runId: z.string().min(1), platform: z.enum(PLATFORM_IDS).optional() }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;

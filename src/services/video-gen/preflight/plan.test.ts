@@ -60,3 +60,21 @@ describe("defaultPlatform", () => {
     expect(defaultPlatform("16:9")).toBe("youtube_instream_skippable");
   });
 });
+
+describe("layersFromOverlays", () => {
+  it("places a layer on its safe-box centre (cx) instead of the frame centre", async () => {
+    const sharp = (await import("sharp")).default;
+    const png = await sharp({ create: { width: 800, height: 100, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } } }).png().toBuffer();
+    const { layersFromOverlays } = await import("./plan");
+    const [centred, inBox] = await layersFromOverlays(
+      [
+        { file: png, y: 0.5, startSec: 0, endSec: 1 },
+        { file: png, y: 0.5, startSec: 0, endSec: 1, cx: 502 },
+      ],
+      { w: 1080, h: 1920 }
+    );
+    expect(centred.x).toBe(140);
+    expect(inBox.x).toBe(102);
+    expect(inBox.x + inBox.w).toBeLessThanOrEqual(940);
+  });
+});

@@ -857,8 +857,10 @@ export function layerInputArgs(file: string, anim: LayerAnim | undefined, totalS
  * itself (pop / slam / pulse / wipe / fade) and positions to the overlay (bounce / bob / rise / drift).
  * Times are absolute (the looped PNG input runs from t = 0).
  */
-export function layerFilter(k: number, anim: LayerAnim, y: number, t0: number, t1: number, from: string, to: string): string[] {
+export function layerFilter(k: number, anim: LayerAnim, y: number, t0: number, t1: number, from: string, to: string, cx?: number): string[] {
   const T = t0.toFixed(3);
+  // Horizontal centre: the frame's, or the platform safe box's (safe-layout.ts).
+  const X = cx === undefined ? "(W-w)/2" : `${Math.round(cx)}-w/2`;
   const enable = `enable='between(t,${T},${t1.toFixed(3)})'`;
   const scaleExpr =
     anim === "pop" ? `if(lt(t,${T}+0.18),0.6+0.48*(t-${T})/0.18,if(lt(t,${T}+0.28),1.08-0.8*(t-${T}-0.18),1))`
@@ -875,18 +877,18 @@ export function layerFilter(k: number, anim: LayerAnim, y: number, t0: number, t
     return [
       // Clamped: before t0 the envelope runs negative (the layer is disabled then, but scale still runs).
       `[${k}:v]format=rgba,scale=w='max(2,trunc(iw*max(0.1,${scaleExpr})/2)*2)':h=-2:eval=frame[ly${k}]`,
-      `${from}[ly${k}]overlay=x=(W-w)/2:y=${yExpr}:eval=frame:${enable}${to}`,
+      `${from}[ly${k}]overlay=x=${X}:y=${yExpr}:eval=frame:${enable}${to}`,
     ];
   }
   if (anim === "wipe") {
     // The bar grows out from its centre over 0.3 s (height fixed).
     return [
       `[${k}:v]format=rgba,scale=w='max(2,trunc(iw*min(1,max(0.02,(t-${T})/0.3))/2)*2)':h=ih:eval=frame[ly${k}]`,
-      `${from}[ly${k}]overlay=x=(W-w)/2:y=${yExpr}:eval=frame:${enable}${to}`,
+      `${from}[ly${k}]overlay=x=${X}:y=${yExpr}:eval=frame:${enable}${to}`,
     ];
   }
   if (anim === "fade") {
-    return [`[${k}:v]format=rgba,fade=t=in:st=${T}:d=0.25:alpha=1[ly${k}]`, `${from}[ly${k}]overlay=x=(W-w)/2:y=${yExpr}:eval=init:${enable}${to}`];
+    return [`[${k}:v]format=rgba,fade=t=in:st=${T}:d=0.25:alpha=1[ly${k}]`, `${from}[ly${k}]overlay=x=${X}:y=${yExpr}:eval=init:${enable}${to}`];
   }
-  return [`${from}[${k}:v]overlay=x=(W-w)/2:y=${yExpr}:eval=frame:${enable}${to}`];
+  return [`${from}[${k}:v]overlay=x=${X}:y=${yExpr}:eval=frame:${enable}${to}`];
 }

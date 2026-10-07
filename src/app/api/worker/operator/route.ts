@@ -33,6 +33,8 @@
  * POST { action: "autopilot-start", url | projectId, platforms?, goal?, promo?, cast?, setting?, ctaButton?, approvedBudgetUsd? } — URL-to-video autopilot (202 + autopilotId)
  * POST { action: "autopilot-approve", autopilotId, approvedBudgetUsd } / { action: "autopilot-status", autopilotId, retry? } — budget gate, status
  * POST { action: "creative-agent", projectId, message, storyboardId? } / { action: "creative-agent-undo", projectId } — chat edits to the plan / storyboard
+ * POST { action: "covers", projectId, runId, force? } — cover frames (9:16 / 1:1 / 4:5) for the master + variants / exports → qcReport.covers
+ * POST { action: "auto-fix", projectId, runId, platform? } — re-edit once with pre-flight corrections (free) → qcReport.autofix
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -495,6 +497,27 @@ export async function POST(request: Request) {
   if (input.action === "creative-agent" || input.action === "creative-agent-undo") {
     const { creativeAgentTurn, undoCreativeEdit } = await import("@/services/creative/creative-agent.store");
     return opsReply(input.action === "creative-agent" ? await creativeAgentTurn(input.projectId, input.message, input.storyboardId) : await undoCreativeEdit(input.projectId));
+  }
+
+  if (input.action === "covers") {
+    const { coversForRun, CoversError } = await import("@/services/video-gen/covers-run");
+    try {
+      return NextResponse.json({ ok: true, covers: await coversForRun(input.projectId, input.runId, { force: input.force }) });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof CoversError ? err.status : 500 });
+    }
+  }
+
+  if (input.action === "auto-fix") {
+    // One re-edit (~2–3 min) from the same clips; synchronous like render-export.
+    const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId }, select: { id: true } });
+    if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    const { autoFixRender, prismaDeps } = await import("@/services/video-gen/autofix");
+    try {
+      return NextResponse.json({ ok: true, autofix: await autoFixRender(run.id, prismaDeps({ platform: (input.platform as import("@/services/creative/types").PlatformId | undefined) ?? null })) });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+    }
   }
 
   // approve-run: free server renders only.

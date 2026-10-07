@@ -34,6 +34,23 @@ export interface QcReport {
   hookStyle?: string;
   /** Pre-flight creative score (thumb-stop predictor, preflight/): optional extra section. */
   preflight?: import("../preflight/types").PreflightReport;
+  /** The safe box the text was laid out in: the target platform (null = frame-centred) and the extra inset. */
+  layout?: { platform: string | null; inset: number };
+  /** Auto-fix corrections this render had (autofix.ts). */
+  fixes?: import("./render-v2").EditFixes;
+  /** Cover frames (9:16 / 1:1 / 4:5), uploaded (covers.ts). */
+  covers?: CoverSet;
+}
+
+/** A video's chosen cover frame and its composed covers. */
+export interface CoverSet {
+  frameSec: number;
+  score: number;
+  headline: string | null;
+  items: { aspect: string; url: string; w: number; h: number }[];
+  /** The runners-up (time, score), best first. */
+  candidates: { t: number; score: number }[];
+  createdAt: string;
 }
 
 export interface QcInput {
