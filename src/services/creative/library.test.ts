@@ -40,24 +40,44 @@ describe("selectCreative", () => {
     expect(ids.some((id) => id === "H06" || id === "H24" || id === "H16")).toBe(true);
     expect(c.endCard.id).toBe("E08");
     expect(c.alternates.map((e) => e.id)).toContain("E04");
-    expect(c.labels.join(" ")).toContain("AI-generated");
+    expect(c.labels).toEqual([]); // compliance off by default: no AI-content label
+    const strict = selectCreative({ category: "electronics", platform: "tiktok", goal: "promo", runDate: "2026-11-27T12:00:00Z", promo: { price: 999.99, comparePrice: 1499.99, priceCheckedAt: now }, strictCompliance: true });
+    expect(strict.labels.join(" ")).toContain("AI-generated");
   });
 
-  it("refuses price cards and the deal slam without a fresh, verified compare-at price", () => {
+  it("strict: refuses price cards and the deal slam without a fresh, verified compare-at price", () => {
     const stale = new Date(Date.now() - 3 * 86_400_000).toISOString();
-    const c = selectCreative({ category: "electronics", platform: "meta_feed", goal: "retarget", runDate: "2026-03-10", promo: { price: 999, comparePrice: 1499, priceCheckedAt: stale } });
+    const c = selectCreative({ category: "electronics", platform: "meta_feed", goal: "retarget", runDate: "2026-03-10", promo: { price: 999, comparePrice: 1499, priceCheckedAt: stale }, strictCompliance: true });
     expect(c.hooks.map((h) => h.hook.id)).not.toContain("H16");
     expect([c.endCard.id, ...c.alternates.map((e) => e.id)]).not.toContain("E04");
     expect(c.notes.join(" ")).toMatch(/E04 .* skipped/);
   });
 
-  it("drops face-heavy creator hooks without real footage, and result claims for health", () => {
+  it("default: a compare-at price renders the price card whatever its age; the numbers must still exist", () => {
+    const stale = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    const c = selectCreative({ category: "electronics", platform: "meta_feed", goal: "retarget", runDate: "2026-03-10", promo: { price: 999, comparePrice: 1499, priceCheckedAt: stale } });
+    expect([c.endCard.id, ...c.alternates.map((e) => e.id)]).toContain("E04");
+    const none = selectCreative({ category: "electronics", platform: "meta_feed", goal: "retarget", runDate: "2026-03-10", promo: { price: 999 } });
+    expect([none.endCard.id, ...none.alternates.map((e) => e.id)]).not.toContain("E04");
+    expect(none.hooks.map((h) => h.hook.id)).not.toContain("H16");
+  });
+
+  it("drops face-heavy creator hooks without real footage (creative fit, always)", () => {
     const beauty = selectCreative({ category: "beauty", platform: "tiktok", goal: "cold", runDate: "2026-03-10" });
     expect(beauty.hooks.map((h) => h.hook.id)).not.toContain("H17");
     expect(beauty.notes.join(" ")).toContain("H17");
-    const health = selectCreative({ category: "health", platform: "instagram_reels", goal: "cold", runDate: "2026-03-10", assets: { creatorFootage: true } });
+  });
+
+  it("strict only: drops result claims for health and torture tests without real footage", () => {
+    const health = selectCreative({ category: "health", platform: "instagram_reels", goal: "cold", runDate: "2026-03-10", assets: { creatorFootage: true }, strictCompliance: true });
     expect(health.hooks.map((h) => h.hook.id)).not.toEqual(expect.arrayContaining(["H10"]));
     expect(health.hooks.map((h) => h.hook.id)).not.toContain("H15");
+    const open = selectCreative({ category: "health", platform: "instagram_reels", goal: "cold", runDate: "2026-03-10", assets: { creatorFootage: true } });
+    expect(open.notes.join(" ")).not.toMatch(/restricted for health/);
+    const camera = selectCreative({ category: "camera", platform: "youtube_shorts", goal: "cold", runDate: "2026-03-10" });
+    expect(camera.notes.join(" ")).not.toMatch(/torture-test/);
+    const cameraStrict = selectCreative({ category: "camera", platform: "youtube_shorts", goal: "cold", runDate: "2026-03-10", strictCompliance: true });
+    expect(cameraStrict.hooks.map((h) => h.hook.id)).not.toContain("H22");
   });
 
   it("uses a coupon ticket only with a live code, a QR card only for CTV, app card only for installs", () => {

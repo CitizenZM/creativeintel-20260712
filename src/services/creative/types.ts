@@ -109,6 +109,13 @@ export interface CreativeInputs {
   runDate?: string;
   /** Placements beyond the phone feed (CTV, desktop). */
   ctv?: boolean;
+  /**
+   * Legacy legal/compliance gating (health-category hook drops, verified + fresh compare-at prices,
+   * real test footage for torture tests, AI-content labels). Off by default: the brand owner runs
+   * the boldest creative the real facts support. Data presence (a % / code / price to render) is
+   * always required.
+   */
+  strictCompliance?: boolean;
 }
 
 export interface CreativeChoice {

@@ -23,17 +23,29 @@ describe("prompt blocks", () => {
     expect(goalFromText("brand launch")).toBe("awareness");
   });
 
-  it("carries the platform rules, the ranked proof shots with safe wording, and the chosen hooks + end card", () => {
+  it("carries the platform rules, the ranked proof shots with their facts, the playbook and the chosen hooks + end card", () => {
     const { text, choice, platform } = creativeBlock({ brief, platform: "tiktok", goalText: "Black Friday deal", runDate: "2026-11-27T12:00:00Z" });
     expect(platform).toBe("tiktok");
     expect(text).toContain("PLATFORM tiktok");
     expect(text).toContain("proof shot: sun-glare split vs old TV");
-    expect(text).toContain("safe wording: up to 3,000 nits peak");
+    expect(text).toContain('fact: "up to 3,000 nits"');
     expect(text).toContain("bust it with: installers mount it in 1 s");
     expect(text).toMatch(/OPENING HOOKS[\s\S]*1\. H\d\d/);
     expect(text).toContain(`END CARD: ${choice!.endCard.id}`);
     expect(text).toContain("sale pitch");
-    expect(text.length).toBeLessThan(4000);
+    expect(text).toContain("CATEGORY PLAYBOOK — TVs");
+    expect(text).toContain("Sale pitch (first 3 s)");
+    expect(text).toMatch(/sell hard/i);
+    // Compliance off by default: no safe wording, disclosures or compliance lines.
+    expect(text).not.toMatch(/safe wording|disclosure:|COMPLIANCE|compliance still win/);
+    expect(text.length).toBeLessThan(9000);
+  });
+
+  it("strict mode restores safe wording, disclosures and the compliance header", () => {
+    const { text } = creativeBlock({ brief, platform: "tiktok", goalText: "Black Friday deal", runDate: "2026-11-27T12:00:00Z", strictCompliance: true });
+    expect(text).toContain("safe wording: up to 3,000 nits peak");
+    expect(text).toContain("disclosure: Peak brightness on a 10% window");
+    expect(text).toContain("brand truth and compliance still win");
   });
 
   it("still gives platform rules without a brief", () => {

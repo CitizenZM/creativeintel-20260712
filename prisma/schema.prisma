@@ -185,6 +185,8 @@ model Project {
   productPageText   String? @db.Text // scraped product description from productUrl
   productBrief      Json? // sp-1 product brief: ranked filmable selling points, keywords, objections, compliance (services/creative/product-brief.ts)
   productBriefAt    DateTime?
+  campaignPlan      Json? // per-platform hooks, end card, beats and scripts (services/creative/campaign-plan.types.ts)
+  campaignPlanAt    DateTime?
   userProductImages Json? // [{url, caption, uploadedAt}] user-uploaded reference photos
   // Set once a person has checked the product details (scraped details start
   // unconfirmed; every script and render is held to them).

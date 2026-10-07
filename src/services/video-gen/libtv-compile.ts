@@ -368,7 +368,7 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
   const [project, storyboard, kit] = await Promise.all([
     prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, brandName: true, productName: true, libtvCanvasUuid: true },
+      select: { id: true, brandName: true, productName: true, libtvCanvasUuid: true, productBrief: true, campaignGoal: true, goalType: true },
     }),
     prisma.storyboard.findUnique({ where: { id: storyboardId } }),
     prisma.brandKit.findUnique({
@@ -555,12 +555,18 @@ export async function compileRunFromStoryboard(input: CompileRunInput): Promise<
         brand: project.brandName,
         product: project.productName || project.brandName,
         productFacts: brandTruth,
-        sellingBrief: await (async () => {
-          const b = (project as { productBrief?: unknown }).productBrief as import("@/services/creative/product-brief").ProductBrief | null;
-          if (!b?.sellingPoints?.length) return undefined;
-          const { briefBlock } = await import("@/services/creative/prompt-blocks");
-          return briefBlock(b, 4);
-        })(),
+        ...(await (async () => {
+          // The sp-1 brief's ranked proof shots + the built-in playbook (category proof shots, platform grammar).
+          const b = project.productBrief as import("@/services/creative/product-brief").ProductBrief | null;
+          const { briefBlock, campaignToPlatform, goalFromText } = await import("@/services/creative/prompt-blocks");
+          const { playbookSlice } = await import("@/services/creative/playbooks");
+          const sel = await prisma.campaignSelection.findUnique({ where: { projectId }, select: { platform: true } }).catch(() => null);
+          const strictCompliance = process.env.CREATIVE_STRICT_COMPLIANCE === "true";
+          return {
+            sellingBrief: b?.sellingPoints?.length ? briefBlock(b, 4, { strictCompliance }) : undefined,
+            playbook: playbookSlice({ category: b?.category, platform: campaignToPlatform(sel?.platform), goal: goalFromText([project.campaignGoal, project.goalType].filter(Boolean).join(" ")), forDirector: true, maxWords: 250 }),
+          };
+        })()),
         scale,
         aspectRatio,
         clipSeconds: clipDurationSec,

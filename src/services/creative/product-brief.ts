@@ -1,11 +1,13 @@
 /**
  * Product brief ("sp-1") — one LLM pass that turns a product page (+ reviews, Q&A, competitors,
- * keyword data) into a ranked, compliant, filmable brief: category, audience, primary job, one big
- * idea, 5–8 selling points (claim → benefit → proof → proof VISUAL), objections, keywords and a beat
- * map. Research: out/research/ad-research/01-selling-points.md §4.
+ * keyword data) into a ranked, filmable brief: category, audience, primary job, one big idea, 5–8
+ * selling points (claim → benefit → proof → proof VISUAL), objections, keywords and a beat map.
+ * Research: out/research/ad-research/01-selling-points.md §4.
  *
  * The LLM writes the content; ranking is recomputed here from its 0–1 sub-scores (models are bad at
- * arithmetic), high-risk claims without on-page substantiation are discounted, blocked claims dropped.
+ * arithmetic). Default mode spends no tokens on legal analysis and ranks purely on persuasion; with
+ * `strictCompliance` the extractor also tags claim risk, unsubstantiated high-risk claims are
+ * discounted ×0.6 and blocked claims dropped.
  */
 import { z } from "zod";
 import { CATEGORY_PACKS } from "./category-packs.data";
@@ -106,6 +108,7 @@ const sellingPointSchema = z.object({
   uniqueness: num01,
   scores: z.object({ buyerImportance: num01, evidenceStrength: num01, differentiation: num01, visualizability: num01, emotionalPull: num01 }).partial().catch({}),
   priority: z.coerce.number().catch(99),
+  /** Optional: only written in strict mode (older briefs carry it). */
   compliance: z
     .object({
       claimType: z.string().catch("puffery"),
@@ -138,16 +141,25 @@ export type BriefSellingPoint = ProductBrief["sellingPoints"][number] & { priori
 
 const EVIDENCE_WEIGHT: Record<string, number> = { certified: 1, measured_spec: 0.8, review_consensus: 0.6, claimed: 0.3 };
 
-/** priorityScore = .30·BI + .25·ES + .20·D + .15·V + .10·EP; ×0.6 for unsubstantiated high risk; blocked dropped. */
-export function rankSellingPoints(points: ProductBrief["sellingPoints"], max = 8): BriefSellingPoint[] {
+export interface BriefOptions {
+  /** Legal gating: risk tagging in the prompt, ×0.6 for unsubstantiated high risk, blocked dropped. Default off. */
+  strictCompliance?: boolean;
+}
+
+/**
+ * priorityScore = .30·BI + .25·ES + .20·D + .15·V + .10·EP. Unfilmable claims are always dropped;
+ * strict mode also discounts unsubstantiated high-risk claims ×0.6 and drops blocked ones.
+ */
+export function rankSellingPoints(points: ProductBrief["sellingPoints"], max = 8, opts: BriefOptions = {}): BriefSellingPoint[] {
+  const strict = !!opts.strictCompliance;
   const ranked = points
-    .filter((p) => p.compliance.riskLevel !== "blocked" && p.proofVisual?.shot?.trim() && p.claim.trim())
+    .filter((p) => (!strict || p.compliance.riskLevel !== "blocked") && p.proofVisual?.shot?.trim() && p.claim.trim())
     .map((p) => {
       const s = p.scores ?? {};
       const es = s.evidenceStrength ?? EVIDENCE_WEIGHT[p.evidenceStrength] ?? 0.3;
       let score = 0.3 * (s.buyerImportance ?? 0.5) + 0.25 * es + 0.2 * (s.differentiation ?? p.uniqueness ?? 0.3) + 0.15 * (s.visualizability ?? 0.5) + 0.1 * (s.emotionalPull ?? 0.5);
       const substantiated = p.sourceEvidence.some((e) => ["spec", "certification", "page_copy"].includes(e.type));
-      if (p.compliance.riskLevel === "high" && !substantiated) score *= 0.6;
+      if (strict && p.compliance.riskLevel === "high" && !substantiated) score *= 0.6;
       return { ...p, priorityScore: Math.round(score * 1000) / 1000 };
     })
     .sort((a, b) => b.priorityScore - a.priorityScore)
@@ -155,7 +167,27 @@ export function rankSellingPoints(points: ProductBrief["sellingPoints"], max = 8
   return ranked.map((p, i) => ({ ...p, id: p.id || `sp${i + 1}`, priority: i + 1 }));
 }
 
-export const BRIEF_SYSTEM = `You are CreativeIntel's Selling-Point Extractor. You turn one product page (plus optional reviews, Q&A, competitor pages and keyword data) into a ranked, compliant, FILMABLE brief for a 15–30 s vertical video ad (TikTok, Reels, Shorts, Meta, YouTube). Output ONLY valid JSON matching schema "sp-1".
+/** Default extractor prompt: persuasion only, no legal analysis (the brand owner carries that). */
+export const BRIEF_SYSTEM = `You are CreativeIntel's Selling-Point Extractor. You turn one product page (plus optional reviews, Q&A, competitor pages and keyword data) into a ranked, FILMABLE, hard-selling brief for a 15–30 s vertical video ad (TikTok, Reels, Shorts, Meta, YouTube). Output ONLY valid JSON matching schema "sp-1".
+
+PRINCIPLES
+1. Every selling point = Feature → Advantage → Benefit → Proof → Proof VISUAL (a concrete shot that proves it on a phone screen in ≤ 8 s: split_screen, measurement_overlay, time_lapse, torture_test, pov_use, scale_reference, unbox_setup, before_after, macro_texture, screen_recording, comparison_chart). Can't film it → low visualizability.
+2. Facts first: quote the exact page text, spec, certification or review snippet in sourceEvidence, and put the real numbers in the claim. Never invent numbers, tests, awards, reviews or testimonials. Missing data goes in "gaps".
+3. Sell hard: write each claim and benefit in the boldest, most concrete, most desirable wording the evidence supports — buyer language from reviews/Q&A, superlatives where the facts carry them. 2–4★ = real tradeoffs, 1–2★ = anxieties, 5★ = aha moments.
+4. Jobs-to-be-Done: primaryJob "When…, I want to…, so I can…" (functional, emotional, social) + Four Forces (push, pull, anxieties, habits). Anxieties/habits become objections with a busting visual.
+5. Category Entry Points (why/when/where/with whom/while/with what/feeling): 3–5 buying situations usable as hooks.
+6. One big idea: a single-minded proposition ≤ 12 words on the #1 selling point, plus 3 alternate hero angles (different pain, persona or format) for separate ad variants.
+7. Hook rule: the hero proof is visible in seconds 0–3 and readable with sound off (≤ 6-word overlay); brand by 3–5 s; clear CTA at the end.
+8. Scores 0–1: buyerImportance (category driver weight × review mention share), evidenceStrength (certified 1, measured spec .8, review consensus .6, claimed .3), differentiation (vs competitors; table stakes ≈ .2), visualizability, emotionalPull. Return 5–8 selling points.
+9. Keywords: 10–15 search keywords, 5–8 hashtags (2 broad, 3–4 niche, 1–2 trending), 3 CTA phrases, each with placement (hook_text / voiceover / caption / hashtag / seo).
+10. Beat map: 15 s (or 30 s if asked) beats hook / demo / proof / objection / brand_cta.
+
+SCHEMA sp-1 (keys): version, product{name,brand,model,price}, category, audience{primary,secondary[],awarenessStage}, primaryJob{statement,functional,emotional,social}, forces{push[],pull[],anxieties[],habits[]}, categoryEntryPoints[{cep,w,hookIdea}], bigIdea{proposition,alternates[3]}, sellingPoints[{id,claim,advantage,benefit,proofVisual{device,shot,overlayText,durationSec},sourceEvidence[{type,quote,location}],evidenceStrength,driver,awarenessStage,competitorUsage,uniqueness,scores{buyerImportance,evidenceStrength,differentiation,visualizability,emotionalPull},priority}], objections[{objection,source,answer,bustingVisual}], competitorGaps[{gap,evidence,ourProof}], keywords[{term,type,intent,score,placement[]}], beatMap{durationSec,beats[{t,purpose,sellingPointId,visual,overlayText,vo}]}, gaps[].
+
+SELF-CHECK: each selling point has sourceEvidence and proofVisual.shot; no number that is not in the inputs; JSON only, no prose.`;
+
+/** Strict (legal-gated) extractor prompt — the pre-2026-10-06 behaviour, kept for strictCompliance. */
+export const BRIEF_SYSTEM_STRICT = `You are CreativeIntel's Selling-Point Extractor. You turn one product page (plus optional reviews, Q&A, competitor pages and keyword data) into a ranked, compliant, FILMABLE brief for a 15–30 s vertical video ad (TikTok, Reels, Shorts, Meta, YouTube). Output ONLY valid JSON matching schema "sp-1".
 
 PRINCIPLES
 1. Every selling point = Feature → Advantage → Benefit → Proof → Proof VISUAL (a concrete shot that proves it on a phone screen in ≤ 8 s: split_screen, measurement_overlay, time_lapse, torture_test, pov_use, scale_reference, unbox_setup, before_after, macro_texture, screen_recording, comparison_chart). Can't film it → low visualizability.
@@ -185,10 +217,18 @@ export function stratifyReviews(reviews: { stars: number; text: string }[] = [],
   return [...band(5, 5), ...band(3, 4), ...band(1, 2)];
 }
 
-export function buildBriefPrompts(input: ProductPageInput): { system: string; user: string; guessedCategory: SpCategory } {
+/** Drop a category pack's "Compliance traps" section (default mode doesn't spend tokens on it). */
+export function stripComplianceTraps(pack: string): string {
+  return pack.replace(/\n- \*\*Compliance traps[\s\S]*$/, "").trimEnd();
+}
+
+export function buildBriefPrompts(input: ProductPageInput, opts: BriefOptions = {}): { system: string; user: string; guessedCategory: SpCategory } {
   const guessedCategory = classifyProduct([input.title, input.description, ...(input.bullets ?? [])].join(" "));
   const pack = CATEGORY_PACKS[guessedCategory] ?? "";
-  const system = `${BRIEF_SYSTEM}\n\nCATEGORY PACK (pre-classified as "${guessedCategory}" — override the category if clearly wrong):\n${pack}\n\nCROSS-CATEGORY RULES:\n${CATEGORY_PACKS.compliance_all ?? ""}`;
+  const head = `CATEGORY PACK (pre-classified as "${guessedCategory}" — override the category if clearly wrong):`;
+  const system = opts.strictCompliance
+    ? `${BRIEF_SYSTEM_STRICT}\n\n${head}\n${pack}\n\nCROSS-CATEGORY RULES:\n${CATEGORY_PACKS.compliance_all ?? ""}`
+    : `${BRIEF_SYSTEM}\n\n${head}\n${stripComplianceTraps(pack)}`;
   const page = {
     url: input.url ?? undefined,
     title: input.title,
@@ -210,22 +250,22 @@ export function buildBriefPrompts(input: ProductPageInput): { system: string; us
 }
 
 /** Normalise a raw model answer into a ranked brief (also used by tests with fixture JSON). */
-export function finalizeBrief(raw: unknown, guessedCategory: SpCategory = "other"): ProductBrief & { sellingPoints: BriefSellingPoint[] } {
+export function finalizeBrief(raw: unknown, guessedCategory: SpCategory = "other", opts: BriefOptions = {}): ProductBrief & { sellingPoints: BriefSellingPoint[] } {
   const parsed = productBriefSchema.parse(raw);
   const category = parsed.category === "other" && guessedCategory !== "other" ? guessedCategory : parsed.category;
-  const sellingPoints = rankSellingPoints(parsed.sellingPoints);
+  const sellingPoints = rankSellingPoints(parsed.sellingPoints, 8, opts);
   const keep = new Set(sellingPoints.map((p) => p.id));
-  const blocked = new Set(parsed.sellingPoints.filter((p) => p.compliance.riskLevel === "blocked").map((p) => p.id));
+  const blocked = new Set(opts.strictCompliance ? parsed.sellingPoints.filter((p) => p.compliance.riskLevel === "blocked").map((p) => p.id) : []);
   const beats = parsed.beatMap.beats.filter((b) => !b.sellingPointId || (keep.has(b.sellingPointId) && !blocked.has(b.sellingPointId)));
   const gaps = [...parsed.gaps];
-  if (!(parsed.sellingPoints.length && sellingPoints.length)) gaps.push("no filmable, non-blocked selling points returned");
+  if (!(parsed.sellingPoints.length && sellingPoints.length)) gaps.push(opts.strictCompliance ? "no filmable, non-blocked selling points returned" : "no filmable selling points returned");
   return { ...parsed, category, sellingPoints, beatMap: { ...parsed.beatMap, beats }, gaps };
 }
 
 /** One structured LLM call (deep tier) → ranked brief. */
-export async function extractProductBrief(input: ProductPageInput) {
+export async function extractProductBrief(input: ProductPageInput, opts: BriefOptions = {}) {
   const { analyzeWithClaude } = await import("@/services/ai/claude-client");
-  const { system, user, guessedCategory } = buildBriefPrompts(input);
+  const { system, user, guessedCategory } = buildBriefPrompts(input, opts);
   const raw = await analyzeWithClaude({ systemPrompt: system, userPrompt: user, responseSchema: z.unknown(), maxTokens: 7000, tier: "deep" });
-  return finalizeBrief(raw, guessedCategory);
+  return finalizeBrief(raw, guessedCategory, opts);
 }
