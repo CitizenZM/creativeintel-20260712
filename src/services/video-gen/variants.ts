@@ -26,6 +26,8 @@ export interface VariantEntry {
   createdAt: string;
   /** A/B-ready ad name, e.g. TCL_TclQm7lSeriesTv_20s_HookC. */
   adName?: string;
+  /** Feed / Reels cover frames (9:16, 1:1, 4:5). */
+  covers?: import("./edit/qc").CoverSet;
 }
 
 type Qc = Record<string, unknown> & { variants?: VariantEntry[]; variantsPending?: Record<string, string> };
@@ -91,6 +93,7 @@ export async function renderVariantForRun(runId: string, style: HookStyle, hookT
       passed: v.qc.passed,
       total: v.qc.total,
       createdAt: new Date().toISOString(),
+      ...(v.covers ? { covers: v.covers } : {}),
     };
     const fresh = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true } });
     const qc = qcOf(fresh ?? { qcReport: null });

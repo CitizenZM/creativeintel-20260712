@@ -15,13 +15,15 @@
  * Every step is deterministic given the clips, so a re-assembly is identical.
  */
 import { execFile } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
 import { pMap } from "@/lib/parallel";
 import { FPS } from "./beat-grid";
-import { planEdit, type EditPlan, type HookStyle, type PlanInputSegment, type Shot } from "./edit-plan";
+import { CTA_BUTTON_SEC, planEdit, type EditPlan, type HookStyle, type PlanInputSegment, type Shot } from "./edit-plan";
+import { fitLayerPng, layoutBox, separateCaptions, textCanvas } from "./safe-layout";
+import type { PlatformId } from "@/services/creative/types";
 import { synthesizeMusic, toWav } from "./music-synth";
 import { bestWindow, motionScores } from "./motion";
 import { detectBeats, trackWindowStart } from "./beat-detect";
@@ -38,6 +40,23 @@ const run = promisify(execFile);
 
 type Canvas = { w: number; h: number };
 
+/**
+ * Corrections the pre-flight auto-fix loop (autofix.ts) re-renders with — re-edit only, nothing is
+ * generated. Every field is optional; none set = the normal edit.
+ */
+export interface EditFixes {
+  /** Tighten the platform safe box by this share of the width on every side. */
+  layoutInset?: number;
+  /** A dark opener: measure the first clip and start 0.1–0.3 s in, on its first bright frame. */
+  brightOpen?: boolean;
+  /** loudnorm integrated target (default −14 LUFS) — offsets a mix that measured off target. */
+  loudnessTarget?: number;
+  /** Caption every spoken group, even one repeating an on-screen card (captions coverage). */
+  allCaptions?: boolean;
+  /** Always hold the CTA button over the last second (no CTA frame, or an end card that hides it). */
+  forceCta?: boolean;
+}
+
 export interface EditV2Result {
   masterFile: string;
   previewFile: string;
@@ -46,6 +65,8 @@ export interface EditV2Result {
   srt: string | null;
   qc: QcReport;
   plan: EditPlan;
+  /** Local cover files (9:16 / 1:1 / 4:5) from the best frame; null when cover making failed. */
+  covers: (import("./covers").CoversResult & { headline: string | null }) | null;
 }
 
 const f3 = (n: number) => n.toFixed(3);
@@ -167,17 +188,31 @@ function shotBaseFilter(shot: Shot, canvas: Canvas): string {
   ].join(";");
 }
 
+/** Drop flashes: a short light pop on the hook → body cut (the only brightness envelope). */
+function flashes(plan: EditPlan): number[] {
+  return plan.boundaries.filter((b) => b.transition === "flash").map((b) => b.atSec);
+}
+
 /**
- * Beat accents and boundary transitions as light / blur / scale envelopes over
- * the already-cut picture (a transition never swaps content — the cut does).
+ * The brightness offset fxFilter applies at time t (same envelope, evaluated). Never negative: no fade
+ * up from black (frame 1 is the thumbnail and must be full brightness — pre-flight measured luma 0.03
+ * on the faded-in masters) and no fade-out over the CTA's last second.
+ */
+export function brightnessAt(plan: EditPlan, t: number): number {
+  return flashes(plan).reduce((n, at) => n + (t >= at - 0.004 ? 0.35 * Math.exp(-(t - at) * 28) : 0), 0);
+}
+
+/**
+ * Beat accents and boundary transitions as light / blur envelopes over the already-cut picture (a
+ * transition never swaps content — the cut does).
  */
 export function fxFilter(plan: EditPlan, canvas: Canvas): string {
   // No scale envelopes at all: per-beat zoom pulses, zoom-transition punches and the zoom-through
-  // opener made the whole picture shake (Barron, 2026-10-04). What stays: a fast fade up from dark on
-  // the first frames, the drop flash, and a three-frame motion blur into each whip cut.
+  // opener made the whole picture shake (Barron, 2026-10-04). No fade up from dark either: the first
+  // frame opens at full brightness. What stays: the drop flash and a three-frame motion blur into each whip cut.
   void canvas;
-  const flashes = plan.boundaries.filter((b) => b.transition === "flash").map((b) => `0.35*gte(t,${f3(b.atSec - 0.004)})*exp(-(t-${f3(b.atSec)})*28)`);
-  const parts = [`eq=brightness='${[`-0.55*exp(-t*16)`, ...flashes].join("+")}':eval=frame`];
+  const flash = flashes(plan).map((at) => `0.35*gte(t,${f3(at - 0.004)})*exp(-(t-${f3(at)})*28)`);
+  const parts = flash.length ? [`eq=brightness='${flash.join("+")}':eval=frame`] : [];
   const fr = 1 / FPS;
   for (const b of plan.boundaries) {
     if (b.transition === "whip") {
@@ -191,6 +226,40 @@ export function fxFilter(plan: EditPlan, canvas: Canvas): string {
   return parts.join(",");
 }
 
+/** Overlay x: centred on the frame, or on the platform safe box's centre `cx` (px). */
+export function overlayX(cx: number | undefined): string {
+  return cx === undefined ? "(W-w)/2" : `${Math.round(cx)}-w/2`;
+}
+
+/** Luma a frame needs to read as a lit thumbnail (pre-flight passes ≥ 0.30). */
+export const BRIGHT_LUMA = 0.3;
+
+/**
+ * Where to start a dark opener: 0 when frame 1 is bright enough, else the first offset in 0.1–0.3 s
+ * that is, else the brightest of those when it beats frame 1 by a visible margin. Pure.
+ */
+export function openerTrim(samples: { offset: number; luma: number }[]): number {
+  const at0 = samples.find((x) => x.offset === 0)?.luma ?? 0;
+  if (at0 >= BRIGHT_LUMA) return 0;
+  const later = samples.filter((x) => x.offset >= 0.1 - 1e-9 && x.offset <= 0.3 + 1e-9).sort((a, b) => a.offset - b.offset);
+  const bright = later.find((x) => x.luma >= BRIGHT_LUMA);
+  if (bright) return bright.offset;
+  const best = later.reduce<{ offset: number; luma: number } | null>((b, x) => (!b || x.luma > b.luma ? x : b), null);
+  return best && best.luma >= at0 + 0.03 ? best.offset : 0;
+}
+
+/** Mean luma (0–1) of one frame of a clip at `sec` (a 32 px grey decode). */
+export async function frameLuma(file: string, sec: number): Promise<number | null> {
+  if (!ffmpegPath) return null;
+  const out = await run(ffmpegPath, ["-v", "error", "-ss", f3(sec), "-i", file, "-frames:v", "1", "-vf", "scale=32:32,format=gray", "-f", "rawvideo", "pipe:1"], { encoding: "buffer", timeout: 30_000, maxBuffer: 1 << 20 })
+    .then((r) => r.stdout as Buffer)
+    .catch(() => null);
+  if (!out?.length) return null;
+  let n = 0;
+  for (const v of out) n += v;
+  return n / out.length / 255;
+}
+
 interface Overlay {
   file: string;
   startSec: number;
@@ -201,6 +270,10 @@ interface Overlay {
   bounce?: boolean;
   /** End-card template animation (pop / slam / pulse / bob / wipe / fade / rise / drift). */
   anim?: LayerAnim;
+  /** Horizontal centre (px) inside the platform safe box; default the frame's centre. */
+  cx?: number;
+  /** Layer role for the safe-zone fit and the pre-flight layer list ("backdrop" / "decor" are not text). */
+  role?: string;
 }
 
 /** Holiday / gift copy picks the seasonal music bed. */
@@ -243,8 +316,22 @@ export async function renderEditV2(input: {
   brand?: BrandStyle;
   /** Music bed override (Batch Mode); default: picked from the copy. */
   musicMood?: "pop" | "holiday";
+  /**
+   * Target platform: every readable layer fits its safe zone (TikTok's right rail, Reels' bottom UI).
+   * Default (none): today's frame-centred layout.
+   */
+  platform?: PlatformId | null;
+  /** Pre-flight auto-fix corrections (autofix.ts). */
+  fixes?: EditFixes;
+  /** Voiceover override (tests / offline validation); default: Edge TTS via speakVoiceover. */
+  speak?: typeof speakVoiceover;
 }): Promise<EditV2Result> {
   const look = input.brand ?? DEFAULT_STYLE;
+  const fixes = input.fixes ?? {};
+  const fitToBox = !!input.platform || (fixes.layoutInset ?? 0) > 0;
+  const box = layoutBox(input.canvas, input.platform ?? null, fixes.layoutInset ?? 0);
+  // Text renderers wrap to the safe box width (absent on the full-frame default).
+  const tc = textCanvas(input.canvas, box);
   if (!ffmpegPath) throw new Error("ffmpeg is not available on this server");
   const ff = ffmpegPath;
   const { dir, canvas } = input;
@@ -328,6 +415,21 @@ export async function renderEditV2(input: {
     prevHook = { url: shot.url, from: shot.srcFrom, to: shot.srcFrom + len };
   }
 
+  // 1c. A dark opener (auto-fix): start 0.1–0.3 s into the first clip, on its first bright frame.
+  const opener = plan.shots[0];
+  if (fixes.brightOpen && opener?.kind === "clip") {
+    const src = input.sources.get(opener.url);
+    if (src) {
+      const samples: { offset: number; luma: number }[] = [];
+      for (const offset of [0, 0.1, 0.2, 0.3]) {
+        const luma = await frameLuma(src, opener.srcFrom + offset);
+        if (luma !== null) samples.push({ offset, luma });
+      }
+      const trim = openerTrim(samples);
+      if (trim > 0) opener.srcFrom = Math.round((opener.srcFrom + trim) * 1000) / 1000;
+    }
+  }
+
   // 2. Shots, a few at a time.
   const shotFiles = await pMap(
     plan.shots,
@@ -366,7 +468,7 @@ export async function renderEditV2(input: {
   await run(ff, ["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", body], { timeout: 90_000 });
 
   // 4a. Voice, captions, music, SFX.
-  const vo = await speakVoiceover({ dir, frames: input.frames, totalSec: total, voice: input.voice }).catch((err) => {
+  const vo = await (input.speak ?? speakVoiceover)({ dir, frames: input.frames, totalSec: total, voice: input.voice }).catch((err) => {
     console.warn(`[edit-v2] voiceover failed for ${input.runId}:`, err instanceof Error ? err.message.slice(0, 200) : err);
     return null;
   });
@@ -386,15 +488,15 @@ export async function renderEditV2(input: {
     return !!said && plan.cards.some((c) => (c.role === "hook" || c.role === "claim") && c.startSec < win.endSec && c.endSec > win.startSec && bare(c.text).includes(said));
   };
   for (const [i, win] of windows.entries()) {
-    if (repeatsCard(win)) continue;
+    if (!fixes.allCaptions && repeatsCard(win)) continue;
     const file = path.join(dir, `v2cap${String(i).padStart(3, "0")}.png`);
-    await writeFile(file, await kineticCaptionPng(groups[win.group].map((x) => x.text), win.word, canvas, look));
-    overlays.push({ file, startSec: win.startSec, endSec: win.endSec, y: slots.caption });
+    await writeFile(file, await kineticCaptionPng(groups[win.group].map((x) => x.text), win.word, tc, look));
+    overlays.push({ file, startSec: win.startSec, endSec: win.endSec, y: slots.caption, role: "caption" });
   }
   // End-card template (creative library E01–E12) from the CTA frame; facts missing → the default close.
   const ecFrame = input.frames.find((f) => f.endCard?.id);
   const template = ecFrame?.endCard && plan.ctaSec !== null && (RENDERABLE_END_CARDS as string[]).includes(ecFrame.endCard.id)
-    ? await endCardLayers(ecFrame.endCard.id as EndCardTemplate, { headline: plan.cards.find((c) => c.role === "offer")?.text ?? null, ...ecFrame.endCard.data }, canvas, look, { durationSec: total - (plan.ctaSec ?? total) }).catch((err) => {
+    ? await endCardLayers(ecFrame.endCard.id as EndCardTemplate, { headline: plan.cards.find((c) => c.role === "offer")?.text ?? null, ...ecFrame.endCard.data }, tc, look, { durationSec: total - (plan.ctaSec ?? total) }).catch((err) => {
         console.warn(`[edit-v2] end card ${ecFrame.endCard?.id} failed, using the default close:`, err instanceof Error ? err.message.slice(0, 160) : err);
         return null;
       })
@@ -405,7 +507,7 @@ export async function renderEditV2(input: {
       await writeFile(file, l.png);
       // Frame sequences (star fill, carousel, shine) end on their own; everything else holds to the end.
       const endSec = l.durSec !== undefined ? Math.min(total, plan.ctaSec + l.delaySec + l.durSec) : total;
-      overlays.push({ file, startSec: plan.ctaSec + l.delaySec, endSec, y: l.y, anim: l.anim === "bounce" ? undefined : l.anim, bounce: l.anim === "bounce" });
+      overlays.push({ file, startSec: plan.ctaSec + l.delaySec, endSec, y: l.y, anim: l.anim === "bounce" ? undefined : l.anim, bounce: l.anim === "bounce", role: l.role === "backdrop" || l.role === "decor" ? l.role : "endcard" });
     }
   }
   for (const [i, card] of plan.cards.entries()) {
@@ -413,24 +515,26 @@ export async function renderEditV2(input: {
     const file = path.join(dir, `v2card${i}.png`);
     const png =
       card.role === "hook"
-        ? await hookHeadlinePng(card.text, canvas, look)
+        ? await hookHeadlinePng(card.text, tc, look)
         : card.role === "offer"
-          ? await offerCardPng(card.text, canvas, look)
+          ? await offerCardPng(card.text, tc, look)
           : card.role === "fine"
-            ? await finePrintPng(card.text, canvas, look)
-            : await claimChipPng(card.text, canvas, look);
+            ? await finePrintPng(card.text, tc, look)
+            : await claimChipPng(card.text, tc, look);
     await writeFile(file, png);
     // A hook over a person sits in the lower half, off the face (AI director finding).
     const hookOverPerson = card.role === "hook" && input.frames.some((f) => (f.segment ?? "").toUpperCase() === "HOOK" && f.hasPerson);
     // During a comparison shot a claim belongs to our half (under its label), not over the other side.
     const overCompare = card.role === "claim" && plan.shots.some((s) => s.compare && s.startSec < card.endSec && s.endSec > card.startSec);
     const y = card.role === "fine" ? (template?.fineY ?? slots.fine) : card.role === "offer" ? slots.headline : card.role === "claim" ? (overCompare ? Math.min(0.6, 0.63) : 0.3) : hookOverPerson ? 0.52 : 0.22;
-    overlays.push({ file, startSec: card.startSec, endSec: card.endSec, y });
+    overlays.push({ file, startSec: card.startSec, endSec: card.endSec, y, role: card.role });
   }
-  if (plan.ctaButton && !template?.hideButton) {
+  // Auto-fix: a CTA must hold the last second even without a CTA frame or when the end card hides the button.
+  if (!plan.ctaButton && fixes.forceCta) plan.ctaButton = { text: "Shop now", startSec: Math.round(Math.max(0, total - CTA_BUTTON_SEC) * 1000) / 1000 };
+  if (plan.ctaButton && (!template?.hideButton || fixes.forceCta)) {
     const file = path.join(dir, "v2cta.png");
-    await writeFile(file, await ctaButtonPng(input.brand ? look.ctaText : plan.ctaButton.text, canvas, template?.look ?? look));
-    overlays.push({ file, startSec: plan.ctaButton.startSec, endSec: total, y: slots.button, bounce: true });
+    await writeFile(file, await ctaButtonPng(input.brand ? look.ctaText : plan.ctaButton.text, tc, template?.look ?? look));
+    overlays.push({ file, startSec: plan.ctaButton.startSec, endSec: total, y: slots.button, bounce: true, role: "cta" });
   }
   // End card branding: the logo lands with the CTA, the domain under the button.
   if (plan.ctaSec !== null) {
@@ -438,14 +542,31 @@ export async function renderEditV2(input: {
     if (logo) {
       const file = path.join(dir, "v2logo.png");
       await writeFile(file, logo);
-      overlays.push({ file, startSec: plan.ctaSec, endSec: total, y: slots.logo });
+      overlays.push({ file, startSec: plan.ctaSec, endSec: total, y: slots.logo, role: "logo" });
     }
     // On 9:16 the domain would fall under the platform UI; the offer line / button carry it there.
     if (look.domain && !vertical) {
       const file = path.join(dir, "v2domain.png");
-      await writeFile(file, await domainPng(look.domain, canvas, look));
-      overlays.push({ file, startSec: plan.ctaButton?.startSec ?? plan.ctaSec, endSec: total, y: 0.8 });
+      await writeFile(file, await domainPng(look.domain, tc, look));
+      overlays.push({ file, startSec: plan.ctaButton?.startSec ?? plan.ctaSec, endSec: total, y: 0.8, role: "domain" });
     }
+  }
+
+  // Platform safe box: every readable layer shrinks to fit and centres in the box (TikTok: x 64–940).
+  if (fitToBox) {
+    const heights = new Map<Overlay, number>();
+    for (const o of overlays) {
+      if (o.role === "backdrop" || o.role === "decor") continue;
+      const png = await readFile(o.file);
+      const fit = await fitLayerPng(png, o.y, box, canvas);
+      if (fit.png !== png) await writeFile(o.file, fit.png);
+      o.cx = fit.cx;
+      o.y = fit.y;
+      heights.set(o, (await (await import("sharp")).default(fit.png).metadata()).height ?? 0);
+    }
+    // A caption never lands on a hook headline / claim on screen at the same time.
+    const placed = [...heights.keys()];
+    separateCaptions(placed.map((o) => ({ role: o.role, y: o.y, h: heights.get(o)!, startSec: o.startSec, endSec: o.endSec })), canvas, box).forEach((y, i) => (placed[i].y = y));
   }
 
   const musicFile = path.join(dir, "v2music.wav");
@@ -470,23 +591,25 @@ export async function renderEditV2(input: {
   overlays.forEach((o, i) => {
     const from = i === 0 ? "[fx]" : `[o${i - 1}]`;
     if (o.anim && o.anim !== "none" && o.anim !== "bounce") {
-      video.push(...layerFilter(firstOverlay + i, o.anim, o.y, o.startSec, o.endSec, from, `[o${i}]`));
+      video.push(...layerFilter(firstOverlay + i, o.anim, o.y, o.startSec, o.endSec, from, `[o${i}]`, o.cx));
       return;
     }
     // A bouncing overlay falls from 9% of the height and bounces to rest (decaying |cos|).
     const y = o.bounce ? `'H*${o.y}-h/2-H*0.09*abs(cos(2*PI*1.6*(t-${f3(o.startSec)})))*exp(-3.2*(t-${f3(o.startSec)}))'` : `H*${o.y}-h/2`;
-    video.push(`${from}[${firstOverlay + i}:v]overlay=x=(W-w)/2:y=${y}:eval=${o.bounce ? "frame" : "init"}:enable='between(t,${f3(o.startSec)},${f3(o.endSec)})'[o${i}]`);
+    video.push(`${from}[${firstOverlay + i}:v]overlay=x=${overlayX(o.cx)}:y=${y}:eval=${o.bounce ? "frame" : "init"}:enable='between(t,${f3(o.startSec)},${f3(o.endSec)})'[o${i}]`);
   });
   const lastV = overlays.length ? `[o${overlays.length - 1}]` : "[fx]";
   video.push(`${lastV}format=yuv420p[v]`);
+  // The loudness target (auto-fix nudges it when the measured mix landed off −14 LUFS).
+  const lufs = Math.min(-9, Math.max(-20, fixes.loudnessTarget ?? -14)).toFixed(1);
   const audio = vo
     ? [
         `[${voIdx}:a]aresample=44100,asplit=2[vo][vosc]`,
         `[${musicIdx}:a]volume=0.26[mus]`,
         `[mus][vosc]sidechaincompress=threshold=0.02:ratio=6:attack=15:release=350[duck]`,
-        `[duck][vo][${sfxIdx}:a]amix=inputs=3:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=7,alimiter=limit=0.79:attack=2:release=40:level=disabled,atrim=0:${f3(total)}[a]`,
+        `[duck][vo][${sfxIdx}:a]amix=inputs=3:normalize=0,loudnorm=I=${lufs}:TP=-1.5:LRA=7,alimiter=limit=0.79:attack=2:release=40:level=disabled,atrim=0:${f3(total)}[a]`,
       ]
-    : [`[${musicIdx}:a]volume=0.6[mus]`, `[mus][${sfxIdx}:a]amix=inputs=2:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=7,alimiter=limit=0.79:attack=2:release=40:level=disabled,atrim=0:${f3(total)}[a]`];
+    : [`[${musicIdx}:a]volume=0.6[mus]`, `[mus][${sfxIdx}:a]amix=inputs=2:normalize=0,loudnorm=I=${lufs}:TP=-1.5:LRA=7,alimiter=limit=0.79:attack=2:release=40:level=disabled,atrim=0:${f3(total)}[a]`];
   const master = path.join(dir, "v2master.mp4");
   await run(
     ff,
@@ -517,10 +640,12 @@ export async function renderEditV2(input: {
     captionCoverage: spokenBeforeCta.length ? covered / Math.max(0.01, wordSpan) : input.frames.some((f) => f.voiceover?.trim()) ? 0 : null,
     ctaSec: plan.ctaSec,
   });
+  qc.layout = { platform: input.platform ?? null, inset: fixes.layoutInset ?? 0 };
+  if (Object.keys(fixes).length) qc.fixes = fixes;
   // Pre-flight creative score as an extra QC section (preflight/); never blocks the render.
   const cov = qc.checks.find((c) => c.key === "caption_coverage")?.value;
   qc.preflight = await import("../preflight")
-    .then((m) => m.preflightForEdit({ master, dir, aspectRatio: input.aspectRatio, canvas, plan, frames: input.frames, overlays, captions: windows.map((w) => ({ text: groups[w.group].map((x) => x.text).join(" "), startSec: w.startSec, endSec: w.endSec })), captionCoverage: typeof cov === "number" ? cov / 100 : null, known: measured }))
+    .then((m) => m.preflightForEdit({ master, dir, aspectRatio: input.aspectRatio, platform: input.platform ?? null, canvas, plan, frames: input.frames, overlays, captions: windows.map((w) => ({ text: groups[w.group].map((x) => x.text).join(" "), startSec: w.startSec, endSec: w.endSec })), captionCoverage: typeof cov === "number" ? cov / 100 : null, known: measured }))
     .catch((err) => (console.warn(`[edit-v2] preflight skipped for ${input.runId}:`, err instanceof Error ? err.message.slice(0, 160) : err), undefined));
 
   const previewFile = path.join(dir, "v2preview.mp4");
@@ -531,5 +656,11 @@ export async function renderEditV2(input: {
   const srt = vo
     ? toSrt(vo.words.flatMap((w, i) => subtitleCues(w, vo.placements[i], 32, vo.lines[i].text)).map((c) => ({ ...c, endSec: Math.min(c.endSec, total) })).filter((c) => c.endSec - c.startSec > 0.2))
     : null;
-  return { masterFile: master, previewFile, contactSheetFile, voiceoverFile: vo?.voiceoverFile ?? null, srt, qc, plan };
+  // Cover frames: the best-scoring frame of the clean cut (no captions / cards burned in yet) with the hook
+  // headline, for feed and Reels covers (local, never blocks).
+  const headline = plan.cards.find((c) => c.role === "hook")?.text ?? null;
+  const covers = await import("./covers")
+    .then(async (m) => ({ ...(await m.makeCovers({ file: body, dir, headline, plan: { durationSec: total, ctaSec: plan.ctaSec, cutsSec: plan.boundaries.map((b) => b.atSec), shots: m.coverShots(plan, input.frames) }, look })), headline }))
+    .catch((err) => (console.warn(`[edit-v2] covers skipped for ${input.runId}:`, err instanceof Error ? err.message.slice(0, 160) : err), null));
+  return { masterFile: master, previewFile, contactSheetFile, voiceoverFile: vo?.voiceoverFile ?? null, srt, qc, plan, covers };
 }

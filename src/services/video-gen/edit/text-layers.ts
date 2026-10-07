@@ -21,7 +21,33 @@ const RTL_TEXT = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 export const withBaseDirection = (markup: string) => (RTL_TEXT.test(markup) ? `\u200F${markup}` : markup);
 
 
-type Canvas = { w: number; h: number };
+/** `safeW`: the platform safe box's width (safe-layout.ts) — every wrap width stays inside it. */
+type Canvas = { w: number; h: number; safeW?: number };
+
+/** Wrap width for a layer: `pct` of the frame, capped by the safe width minus the layer's own padding on both sides. */
+export function wrapWidth(c: Canvas, pct: number, pad: number): number {
+  const w = Math.round(c.w * pct);
+  return Math.max(10, c.safeW ? Math.min(w, Math.round(c.safeW - 2 * pad)) : w);
+}
+
+/**
+ * Type size that keeps `markup` within `maxLines` at `width`: a long line wraps first, then the type
+ * steps down (to 60 % at most) instead of growing a tall block.
+ */
+export async function fittedSize(markup: string, opts: { family: string; fontFile: string; size: number; width: number }, maxLines: number): Promise<number> {
+  const sharp = await sharpLib();
+  let size = opts.size;
+  for (let i = 0; i < 5; i++) {
+    const [all, one] = await Promise.all([renderMarkup(markup, { ...opts, size }), renderMarkup("<span>Ag</span>", { ...opts, size })]);
+    const h = (await sharp(all).metadata()).height ?? 0;
+    const h1 = (await sharp(one).metadata()).height ?? 1;
+    const gap = Math.round(size * 0.15);
+    const lines = Math.round((h + gap) / (h1 + gap));
+    if (lines <= maxLines || size <= opts.size * 0.6) break;
+    size = Math.max(Math.round(opts.size * 0.6), Math.round(size * 0.88));
+  }
+  return size;
+}
 
 /** Type scales with the frame's short side, so 4:5 / 1:1 / 16:9 exports read like the 9:16 master. */
 const unit = (c: Canvas) => Math.min(c.w, c.h);
@@ -77,7 +103,10 @@ export function kineticCaptionPng(words: string[], active: number, canvas: Canva
     .map((w, i) => `${i ? sepBetween(words[i - 1], w) : ""}<span foreground="${i === active ? look.highlight : "white"}">${pangoEscape(w.toUpperCase())}</span>`)
     .join("");
   const plain = `<span foreground="black">${pangoEscape(joinTokens(words).toUpperCase())}</span>`;
-  return shadowed(markup, plain, { family: look.body.family, fontFile: look.body.file, size, width: Math.round(canvas.w * 0.86) });
+  const width = wrapWidth(canvas, 0.86, Math.round(size * 0.4));
+  const opts = { family: look.body.family, fontFile: look.body.file, size, width };
+  // A caption is a 2–3 word phrase: in a safe box it steps its type down to stay on one line.
+  return (canvas.safeW ? fittedSize(plain, opts, 1) : Promise.resolve(size)).then((s) => shadowed(markup, plain, { ...opts, size: s }));
 }
 
 /** The hook headline: big headline face, last word highlighted. */
@@ -87,18 +116,19 @@ export function hookHeadlinePng(text: string, canvas: Canvas, look: Look = DEFAU
   const last = w.pop() ?? "";
   const markup = `<span foreground="white">${pangoEscape(w.join(" ").toUpperCase())}</span>${w.length ? " " : ""}<span foreground="${look.highlight}">${pangoEscape(last.toUpperCase())}</span>`;
   const plain = `<span foreground="black">${pangoEscape(text.toUpperCase())}</span>`;
-  return shadowed(markup, plain, { family: look.headline.family, fontFile: look.headline.file, size, width: Math.round(canvas.w * 0.84) });
+  const opts = { family: look.headline.family, fontFile: look.headline.file, size, width: wrapWidth(canvas, 0.84, Math.round(size * 0.4)) };
+  return (canvas.safeW ? fittedSize(plain, opts, 3) : Promise.resolve(size)).then((s) => shadowed(markup, plain, { ...opts, size: s }));
 }
 
 /** A pill: text on a rounded rectangle. */
-export async function pill(text: string, canvas: Canvas, style: { size: number; fg: string; bg: string; family: string; fontFile: string; widthPct: number }): Promise<Buffer> {
+export async function pill(text: string, canvas: Canvas, style: { size: number; fg: string; bg: string; family: string; fontFile: string; widthPct: number; maxLines?: number }): Promise<Buffer> {
   const sharp = await sharpLib();
-  const fg = await renderMarkup(`<span foreground="${style.fg}">${pangoEscape(text)}</span>`, {
-    family: style.family,
-    fontFile: style.fontFile,
-    size: style.size,
-    width: Math.round(canvas.w * style.widthPct),
-  });
+  const markup = `<span foreground="${style.fg}">${pangoEscape(text)}</span>`;
+  const base = { family: style.family, fontFile: style.fontFile, size: style.size, width: wrapWidth(canvas, style.widthPct, Math.round(style.size * 0.7)) };
+  // Inside a platform safe box, a long pill wraps to two lines and then steps its type down.
+  if (canvas.safeW) base.size = await fittedSize(markup, base, style.maxLines ?? 2);
+  style = { ...style, size: base.size };
+  const fg = await renderMarkup(markup, base);
   const { width = 1, height = 1 } = await sharp(fg).metadata();
   const padX = Math.round(style.size * 0.7);
   const padY = Math.round(style.size * 0.35);
@@ -147,7 +177,7 @@ export function finePrintPng(text: string, canvas: Canvas, look: Look = DEFAULT_
     family: look.body.family,
     fontFile: look.body.file,
     size,
-    width: Math.round(canvas.w * 0.86),
+    width: wrapWidth(canvas, 0.86, Math.round(size * 0.4)),
   });
 }
 
@@ -158,7 +188,7 @@ export function domainPng(domain: string, canvas: Canvas, look: Look = DEFAULT_S
     family: look.body.family,
     fontFile: look.body.file,
     size,
-    width: Math.round(canvas.w * 0.8),
+    width: wrapWidth(canvas, 0.8, Math.round(size * 0.4)),
   });
 }
 

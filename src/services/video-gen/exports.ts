@@ -34,6 +34,8 @@ export interface ExportEntry {
   total: number;
   adName: string;
   createdAt: string;
+  /** Feed / Reels cover frames (9:16, 1:1, 4:5). */
+  covers?: import("./edit/qc").CoverSet;
 }
 
 type Qc = Record<string, unknown> & { exports?: ExportEntry[]; exportsPending?: Record<string, string> };
@@ -77,6 +79,7 @@ export async function renderExportForRun(runId: string, format: ExportFormat): P
       total: v.qc.total,
       adName: `${variantAdName({ brand: project?.brandName, title: script?.title?.replace(/^⚠\s*/, ""), durationSec: v.durationSec, hookStyle: "q" })}_${format.replace(":", "x")}`,
       createdAt: new Date().toISOString(),
+      ...(v.covers ? { covers: v.covers } : {}),
     };
     await patchQc(runId, (qc) => {
       const pending = { ...(qc.exportsPending ?? {}) };

@@ -277,6 +277,8 @@ export async function assembleGlmMaster(input: {
   jobs: LibtvJob[];
   /** Edge TTS voice; defaults to TTS_VOICE or a US English neural voice. */
   voice?: string;
+  /** Target platform: text laid out in its safe zone (default: frame-centred, as before). */
+  platform?: import("@/services/creative/types").PlatformId | null;
 }): Promise<AssembledMaster> {
   if (!ffmpegPath) throw new Error("ffmpeg is not available on this server");
   const segments = planSegments(input.frames, input.jobs);
@@ -308,7 +310,7 @@ export async function assembleGlmMaster(input: {
         // The master leads with the hook style real A/B results favour (question by default).
         const { winningHookStyle } = await import("@/services/performance/store");
         const hookStyle = await winningHookStyle(input.projectId).catch(() => "q" as const);
-        const v2 = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice, brand, hookStyle });
+        const v2 = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice, brand, hookStyle, platform: input.platform ?? null });
         const up = (buffer: Buffer, filename: string, contentType: string) => uploadBuffer({ buffer, filename, contentType, folder: "glm-masters" });
         const [m, p, c, vo, srt] = await Promise.all([
           up(await readFile(v2.masterFile), `master-${input.runId}.mp4`, "video/mp4"),
@@ -319,7 +321,9 @@ export async function assembleGlmMaster(input: {
         ]);
         if (m.provider === "inline") throw new Error("No asset storage configured for the master video");
         const url = (x: { provider: string; url: string } | null) => (x && x.provider !== "inline" ? x.url : null);
-        return { masterUrl: m.url, voiceoverUrl: url(vo), subtitlesUrl: url(srt), previewUrl: url(p), contactSheetUrl: url(c), qcReport: { ...v2.qc, hookStyle } };
+        const { uploadCovers } = await import("./covers-run");
+        const covers = v2.covers ? await uploadCovers(v2.covers, `master-${input.runId}`).catch(() => undefined) : undefined;
+        return { masterUrl: m.url, voiceoverUrl: url(vo), subtitlesUrl: url(srt), previewUrl: url(p), contactSheetUrl: url(c), qcReport: { ...v2.qc, hookStyle, ...(covers?.items.length ? { covers } : {}) } };
       } catch (err) {
         // Keep the real cause: the ffmpeg command line fills the message, the reason is in stderr / the signal.
         const e = err as { message?: string; stderr?: string; signal?: string | null; killed?: boolean; code?: number | string };
@@ -421,7 +425,11 @@ export async function renderFromRun(input: {
   tag: string;
   /** Overrides on the Brand Kit look (localized versions: caption fonts with the script's glyphs, translated CTA). */
   brandPatch?: Partial<import("./edit/brand-style").BrandStyle>;
-}): Promise<{ hookText: string | null; masterUrl: string; previewUrl: string | null; durationSec: number; qc: QcReport; srt?: string | null }> {
+  /** Target platform: text laid out in its safe zone (default: frame-centred, as before). */
+  platform?: import("@/services/creative/types").PlatformId | null;
+  /** Pre-flight auto-fix corrections (autofix.ts). */
+  fixes?: import("./edit/render-v2").EditFixes;
+}): Promise<{ hookText: string | null; masterUrl: string; previewUrl: string | null; durationSec: number; qc: QcReport; srt?: string | null; covers?: import("./edit/qc").CoverSet }> {
   const { cutdownFrames } = await import("./edit/cutdown");
   const frames = input.cutdownSec ? cutdownFrames(input.frames, input.cutdownSec) : input.frames;
   const segments = planSegments(frames, input.jobs);
@@ -440,13 +448,15 @@ export async function renderFromRun(input: {
     const { renderEditV2 } = await import("./edit/render-v2");
     const { loadBrandStyle } = await import("./edit/brand-style");
     const brand = { ...(await loadBrandStyle(input.projectId)), ...(input.ctaText ? { ctaText: input.ctaText } : {}), ...input.brandPatch };
-    const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText, brand, musicMood: input.musicMood });
+    const v = await renderEditV2({ dir, runId: input.runId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText, brand, musicMood: input.musicMood, platform: input.platform ?? null, fixes: input.fixes });
     const tag = `${input.tag}-${Date.now().toString(36)}`;
     const [m, p] = await Promise.all([
       uploadBuffer({ buffer: await readFile(v.masterFile), filename: `${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
       uploadBuffer({ buffer: await readFile(v.previewFile), filename: `${tag}-preview-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
     ]);
     if (m.provider === "inline") throw new Error("No asset storage configured for this version");
+    const { uploadCovers } = await import("./covers-run");
+    const covers = v.covers ? await uploadCovers(v.covers, `${tag}-${input.runId}`).catch(() => undefined) : undefined;
     return {
       hookText: v.plan.cards.find((c) => c.role === "hook")?.text ?? null,
       masterUrl: m.url,
@@ -454,6 +464,7 @@ export async function renderFromRun(input: {
       durationSec: v.plan.durationSec,
       qc: v.qc,
       srt: v.srt,
+      ...(covers?.items.length ? { covers } : {}),
     };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -470,9 +481,9 @@ export async function renderHookVariant(input: {
   hookStyle: "q" | "c" | "p";
   hookText?: string | null;
   voice?: string;
-}): Promise<{ hookStyle: string; hookText: string | null; masterUrl: string; previewUrl: string | null; qc: QcReport }> {
+}): Promise<{ hookStyle: string; hookText: string | null; masterUrl: string; previewUrl: string | null; qc: QcReport; covers?: import("./edit/qc").CoverSet }> {
   const v = await renderFromRun({ ...input, tag: `variant-${input.hookStyle}` });
-  return { hookStyle: input.hookStyle, hookText: v.hookText, masterUrl: v.masterUrl, previewUrl: v.previewUrl, qc: v.qc };
+  return { hookStyle: input.hookStyle, hookText: v.hookText, masterUrl: v.masterUrl, previewUrl: v.previewUrl, qc: v.qc, ...(v.covers ? { covers: v.covers } : {}) };
 }
 
 export interface SpokenVoiceover {
