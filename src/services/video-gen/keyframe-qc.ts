@@ -21,6 +21,27 @@ export function keyframeQcEnabled(): boolean {
   return process.env.KEYFRAME_QC !== "off" && !process.env.VITEST;
 }
 
+/**
+ * Keyframes edited from references (cast sheet, product photo, start frame) go
+ * through the numeric consistency gate (consistency/): vision rubric + local
+ * pixel metrics, defects fed back as corrections, best-of after the re-rolls.
+ * CONSISTENCY_QC=off falls back to the yes/no identity review below.
+ */
+export function consistencyGateEnabled(): boolean {
+  return keyframeQcEnabled() && process.env.CONSISTENCY_QC !== "off";
+}
+
+/**
+ * Clip drift check after a clip downloads: "on" (vision + pixels on 3 sampled
+ * frames), "pixel" (free local checks only) or "off". CLIP_DRIFT_QC overrides;
+ * by default it follows the keyframe QC switch.
+ */
+export function clipDriftMode(): "on" | "pixel" | "off" {
+  const v = process.env.CLIP_DRIFT_QC;
+  if (v === "on" || v === "pixel" || v === "off") return v;
+  return keyframeQcEnabled() ? "on" : "off";
+}
+
 export const KEYFRAME_QC_SYSTEM = `You are the quality-control reviewer for AI-generated video-ad keyframes. Reject an image ONLY for clear production defects a viewer would notice on a phone:
 - a deformed, melted or asymmetric face; wrong eyes or teeth
 - hands with missing, extra or fused fingers; extra or missing limbs

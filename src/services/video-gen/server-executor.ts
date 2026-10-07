@@ -18,14 +18,26 @@ import { jobDone, jobFailed, runDone, runFailed } from "./libtv-queue";
 import { assembleGlmMaster, type AssembleFrame } from "./glm-assemble";
 import type { ServerEngine } from "./libtv-pricing";
 import { cleanFramePrompt, hasPeople, motionSafePrompt } from "./prompt-safety";
-import { keyframeQcEnabled, MAX_KEYFRAME_REROLLS, reviewKeyframe, shouldReroll } from "./keyframe-qc";
+import { consistencyGateEnabled, keyframeQcEnabled, MAX_KEYFRAME_REROLLS, reviewKeyframe, shouldReroll } from "./keyframe-qc";
+import { applyCorrections, correctionsFor } from "./consistency/corrections";
+import { consistencyRecord, decideKeyframe, type KeyframeCandidate } from "./consistency/gate";
+import { isShotType } from "./consistency/thresholds";
 import { finishDirectedMotion, finishDirectedStill } from "./shot-director";
 
 export type TickResult = "idle" | "running" | "done" | "failed";
 
 export type TaskResult =
   | { status: "PROCESSING" }
-  | { status: "SUCCESS"; url: string; remoteUrl?: string; creditsSpent?: number }
+  | {
+      status: "SUCCESS";
+      url: string;
+      remoteUrl?: string;
+      creditsSpent?: number;
+      /** Merged into the job's settings (e.g. the clip drift report). */
+      settingsPatch?: Record<string, unknown>;
+      /** Re-queue the job instead of completing it (auto re-generation on drift). */
+      regenerate?: boolean;
+    }
   | { status: "FAIL"; error: string };
 
 export interface JobContext {
@@ -40,6 +52,18 @@ export interface JobContext {
   creditsEstimated?: number;
   /** Finished reference images (cast lock: the CAST image or the packshot). */
   referenceUrls?: string[];
+  /** Clips: the segment's keyframes and the references they were edited from (drift check). */
+  consistency?: ClipConsistencyRefs;
+}
+
+export interface ClipConsistencyRefs {
+  start?: string;
+  end?: string;
+  cast: string[];
+  product: string[];
+  shot: string;
+  shotType?: string;
+  productSpec?: string;
 }
 
 /** What an engine must provide; the graph walking is shared. */
@@ -118,7 +142,22 @@ function errorText(err: unknown): string {
 
 async function applyTaskResult(adapter: EngineAdapter, job: LibtvJob, result: TaskResult) {
   if (result.status === "SUCCESS") {
-    await jobDone({ jobId: job.id, resultUrl: result.url, remoteUrl: result.remoteUrl, creditsSpent: result.creditsSpent ?? 0 });
+    const s = (job.settings ?? {}) as Record<string, unknown>;
+    const prior = Number(s.priorCreditsSpent) || 0;
+    if (result.regenerate) {
+      // Drift: keep the rejected clip on record and run the clip once more (its cost still counts).
+      await prisma.libtvJob.update({
+        where: { id: job.id },
+        data: {
+          status: "queued",
+          nodeId: null,
+          settings: { ...s, ...result.settingsPatch, driftRegens: (Number(s.driftRegens) || 0) + 1, driftRejectedUrl: result.url, priorCreditsSpent: prior + (result.creditsSpent ?? 0) } as never,
+        },
+      });
+      return;
+    }
+    if (result.settingsPatch) await prisma.libtvJob.update({ where: { id: job.id }, data: { settings: { ...s, ...result.settingsPatch } as never } });
+    await jobDone({ jobId: job.id, resultUrl: result.url, remoteUrl: result.remoteUrl, creditsSpent: (result.creditsSpent ?? 0) + prior });
   } else if (result.status === "FAIL") {
     await jobFailed(job.id, result.error);
   }
@@ -167,7 +206,77 @@ export async function tickRun(
       settings: (j.settings ?? {}) as Record<string, unknown>,
       creditsEstimated: j.creditsEstimated ?? 0,
       referenceUrls: ((j.leftRefs as string[] | null) ?? []).map((r) => urlOf(r)).filter((u): u is string => !!u),
+      ...(j.kind === "video" ? { consistency: clipRefs(j) } : {}),
     };
+  };
+  // A clip's keyframes and the cast / product references they were edited from.
+  const clipRefs = (j: LibtvJob): ClipConsistencyRefs | undefined => {
+    const [kRef, eRef] = (j.leftRefs as string[] | null) ?? [];
+    const k = kRef ? byName.get(refName(kRef)) : undefined;
+    if (!k) return undefined;
+    const ks = (k.settings ?? {}) as { directedKeyframe?: string; qcShotType?: string; productSpec?: string };
+    const refs = (k.leftRefs as string[] | null) ?? [];
+    const urls = (names: string[]) => names.map((r) => urlOf(r)).filter((u): u is string => !!u);
+    return {
+      start: k.resultUrl ?? undefined,
+      end: eRef ? (byName.get(refName(eRef))?.resultUrl ?? undefined) : undefined,
+      cast: urls(refs.filter((r) => r === "CAST")),
+      product: urls(refs.filter((r) => r !== "CAST" && !/^K\d+/.test(r))),
+      shot: ks.directedKeyframe ?? k.prompt,
+      shotType: ks.qcShotType,
+      productSpec: ks.productSpec,
+    };
+  };
+
+  /**
+   * Consistency gate for a keyframe edited from references: score it, re-queue it with
+   * corrections while re-rolls remain, else keep the best attempt. Returns the URL to keep, or null when re-queued.
+   */
+  const gateKeyframe = async (j: LibtvJob, url: string, refNames: string[]): Promise<string | null> => {
+    const s = (j.settings ?? {}) as Record<string, unknown> & {
+      qcAttempts?: number;
+      qcCandidates?: KeyframeCandidate[];
+      directedKeyframe?: string;
+      editFrom?: string;
+      qcShotType?: string;
+      productSpec?: string;
+    };
+    const urls = (names: string[]) => names.map((r) => urlOf(r)).filter((u): u is string => !!u);
+    // Loaded on demand: the scorer pulls in sharp and the vision client.
+    const { scoreFrame } = await import("./consistency/score");
+    const result = await scoreFrame(
+      url,
+      {
+        cast: urls(refNames.filter((r) => r === "CAST")).map((image) => ({ image })),
+        product: urls(refNames.filter((r) => r !== "CAST" && !/^K\d+/.test(r))).map((image) => ({ image })),
+        start: urls(refNames.filter((r) => /^K\d+$/.test(r)))[0],
+      },
+      {
+        shot: s.directedKeyframe ?? j.prompt,
+        kind: s.editFrom === "end" ? "end" : "start",
+        shotType: isShotType(s.qcShotType) ? s.qcShotType : undefined,
+        productSpec: s.productSpec,
+      }
+    );
+    const attempts = s.qcAttempts ?? 0;
+    const d = decideKeyframe(url, result, { attempts, previous: s.qcCandidates }, { productSpec: s.productSpec });
+    if (d.action === "reroll") {
+      await prisma.libtvJob.update({
+        where: { id: j.id },
+        data: {
+          status: "queued",
+          settings: { ...s, qcAttempts: attempts + 1, qcCandidates: d.candidates, qcCorrections: d.corrections, qcIssues: result.defects.slice(0, 5), qcRejectedUrl: url } as never,
+        },
+      });
+      return null;
+    }
+    const { qcCorrections: _drop, ...rest } = s;
+    void _drop;
+    await prisma.libtvJob.update({
+      where: { id: j.id },
+      data: { settings: { ...rest, qcOk: d.chosen.pass, qcIssues: d.chosen.defects.slice(0, 5), consistency: consistencyRecord(result, d, attempts) } as never },
+    });
+    return d.url;
   };
   const byName = new Map(run.jobs.map((j) => [j.nodeName, j]));
   const urlOf = (ref: string) => byName.get(refName(ref))?.resultUrl ?? byName.get(refName(ref))?.sourceUrl ?? null;
@@ -218,7 +327,9 @@ export async function tickRun(
         }
         // A directed keyframe already carries its own camera, light and surface detail: only the realism block is added.
         const stillPrompt = settings.directed ? finishDirectedStill(j.prompt) : cleanFramePrompt(j.prompt);
-        const out = await adapter.generateImage(withNoText(stillPrompt, "image"), ctxFor(j));
+        // A re-roll carries the previous attempt's QC defects as explicit corrections.
+        const corrections = (j.settings as { qcCorrections?: string[] } | null)?.qcCorrections;
+        const out = await adapter.generateImage(applyCorrections(withNoText(stillPrompt, "image"), corrections), ctxFor(j));
         if ("url" in out) {
           // AI keyframe QC: send a visibly broken keyframe back once before a clip is made from it.
           const s = (j.settings ?? {}) as { qcAttempts?: number; castSheet?: unknown };
@@ -226,6 +337,11 @@ export async function tickRun(
             // Keyframes edited from references are also checked for identity against them (strict: 2 re-rolls).
             const editFrom = (j.settings as { editFrom?: string } | null)?.editFrom;
             const refNames = editFrom ? ((j.leftRefs as string[] | null) ?? []) : [];
+            if (refNames.length && consistencyGateEnabled()) {
+              const keep = await gateKeyframe(j, out.url, refNames);
+              if (keep) await jobDone({ jobId: j.id, resultUrl: keep, creditsSpent: 0 });
+              return;
+            }
             const label = (r: string) => (r === "CAST" ? "casting sheet" : /^K\d+$/.test(r) ? "start frame of this shot" : "official product photo");
             const refImages = refNames.map((r) => ({ label: label(r), url: urlOf(r) })).filter((x): x is { label: string; url: string } => !!x.url);
             const verdict = await reviewKeyframe(out.url, j.prompt, refImages.length ? { images: refImages } : undefined);
@@ -233,7 +349,10 @@ export async function tickRun(
             if (shouldReroll(verdict, attempts, refImages.length ? Math.max(2, MAX_KEYFRAME_REROLLS) : MAX_KEYFRAME_REROLLS)) {
               await prisma.libtvJob.update({
                 where: { id: j.id },
-                data: { status: "queued", settings: { ...s, qcAttempts: attempts + 1, qcIssues: verdict!.issues.slice(0, 5), qcRejectedUrl: out.url } as never },
+                data: {
+                  status: "queued",
+                  settings: { ...s, qcAttempts: attempts + 1, qcIssues: verdict!.issues.slice(0, 5), qcCorrections: correctionsFor(verdict!.issues), qcRejectedUrl: out.url } as never,
+                },
               });
               return;
             }
@@ -269,7 +388,7 @@ export async function tickRun(
     if (ref?.status === "failed") continue; // the run fails on the keyframe; don't add a second error
     const imageUrl = ref?.resultUrl ?? undefined;
     // First + last frame anchoring: the clip also waits for its end keyframe (K<n>E).
-    const vs = (j.settings ?? {}) as { anchorEnd?: number; seed?: number };
+    const vs = (j.settings ?? {}) as { anchorEnd?: number; seed?: number; driftRegens?: number };
     const endRef = vs.anchorEnd ? byNameFresh.get(refName(((j.leftRefs as string[] | null) ?? [])[1] ?? "")) : undefined;
     if (endRef && !TERMINAL_JOB.has(endRef.status)) continue;
     const lastImageUrl = endRef?.status === "completed" ? (endRef.resultUrl ?? undefined) : undefined;
@@ -290,7 +409,9 @@ export async function tickRun(
       // smooth motion", "cinematic film still, sharp focus") is what made clips static and plastic.
       const directed = !!(j.settings as { directed?: number } | null)?.directed;
       const clipPrompt = directed ? finishDirectedMotion(j.prompt) : motionSafePrompt(cleanFramePrompt(j.prompt));
-      const taskId = await adapter.submitVideo({ prompt: withNoText(clipPrompt, "video"), imageUrl, lastImageUrl, seed: vs.seed }, ctxFor(j));
+      // A drift re-generation takes a new seed (the same seed would reproduce the drifted take).
+      const seed = vs.seed !== undefined ? vs.seed + 101 * (vs.driftRegens ?? 0) : undefined;
+      const taskId = await adapter.submitVideo({ prompt: withNoText(clipPrompt, "video"), imageUrl, lastImageUrl, seed }, ctxFor(j));
       await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: taskId } });
       inFlight++;
     } catch (err) {

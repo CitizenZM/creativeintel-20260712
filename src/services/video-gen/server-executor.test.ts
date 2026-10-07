@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Job = {
   id: string;
@@ -104,6 +104,12 @@ const assemble = vi.hoisted(() =>
   vi.fn(async () => ({ masterUrl: "https://cdn/master.mp4", voiceoverUrl: "https://cdn/vo.mp3", subtitlesUrl: "https://cdn/subs.srt" }))
 );
 vi.mock("./glm-assemble", () => ({ assembleGlmMaster: assemble }));
+
+const consistency = vi.hoisted(() => ({ scoreFrame: vi.fn() }));
+vi.mock("./consistency/score", async (orig) => ({ ...(await orig<typeof import("./consistency/score")>()), scoreFrame: consistency.scoreFrame }));
+// The yes/no reviewer never reaches a model in tests.
+const review = vi.hoisted(() => ({ reviewKeyframe: vi.fn(async () => null) }));
+vi.mock("./keyframe-qc", async (orig) => ({ ...(await orig<typeof import("./keyframe-qc")>()), reviewKeyframe: review.reviewKeyframe }));
 
 import { advanceActiveRuns, driveRun, NO_TEXT_IMAGE, NO_TEXT_VIDEO, tickRun, type EngineAdapter, type TaskResult } from "./server-executor";
 
@@ -390,5 +396,104 @@ describe("face-safe clips", () => {
     expect(animateStill).toHaveBeenCalledWith("https://cdn/K1.png", expect.objectContaining({ nodeName: "V1" }));
     expect(store.jobs.find((j) => j.id === "v1")!.resultUrl).toBe("https://cdn/still-V1.mp4");
     vi.doUnmock("./animatic-executor");
+  });
+});
+
+describe("consistency gate (keyframes edited from references)", () => {
+  const verdict = (score: number, pass: boolean, defects: string[] = []) => ({
+    score, pass, reviewed: true, shotType: "product-closeup", product: null, cast: [], defects, reasons: pass ? [] : [`score ${score} < 0.78`], majorDefects: pass ? 0 : 1, sceneConsistent: null,
+  });
+  const settingsOf = (id: string) => store.jobs.find((j) => j.id === id)!.settings as Record<string, unknown>;
+
+  function seedGated() {
+    seed();
+    const k1 = store.jobs.find((j) => j.id === "k1")!;
+    k1.settings = { coversFrames: [1, 2], editFrom: "product", directedKeyframe: "Close-up of the tablet on a walnut desk", productSpec: "6.6 mm thick" };
+  }
+  function countingAdapter() {
+    let n = 0;
+    return fakeAdapter({ generateImage: vi.fn(async (_p: string, ctx) => ({ url: `https://cdn/${ctx.nodeName}-${n++}.png` })) });
+  }
+
+  beforeEach(() => {
+    process.env.KEYFRAME_QC = "on";
+    consistency.scoreFrame.mockReset();
+  });
+  afterEach(() => {
+    delete process.env.KEYFRAME_QC;
+  });
+
+  it("re-queues a failing keyframe with its defects as corrections, then records the passing score", async () => {
+    seedGated();
+    consistency.scoreFrame.mockResolvedValueOnce(verdict(0.42, false, ["bezel thicker: 9.4% vs 1.9% of the short side"])).mockResolvedValueOnce(verdict(0.91, true));
+    const adapter = countingAdapter();
+
+    await tickRun(adapter, "run1");
+    expect(consistency.scoreFrame).toHaveBeenCalledWith(
+      "https://cdn/K1-0.png",
+      { cast: [], product: [{ image: "https://cdn/packshot.png" }], start: undefined },
+      expect.objectContaining({ shot: "Close-up of the tablet on a walnut desk", kind: "start", productSpec: "6.6 mm thick" })
+    );
+    expect(statusOf("k1")).toBe("queued");
+    expect(settingsOf("k1")).toMatchObject({ qcAttempts: 1, qcRejectedUrl: "https://cdn/K1-0.png", qcCorrections: [expect.stringMatching(/bezel must be thin/)] });
+    expect(adapter.submitVideo).not.toHaveBeenCalled();
+
+    await tickRun(adapter, "run1");
+    const prompt = (adapter.generateImage as ReturnType<typeof vi.fn>).mock.calls[1][0] as string;
+    expect(prompt).toMatch(/CORRECTIONS .* bezel must be thin and uniform/);
+    expect((adapter.generateImage as ReturnType<typeof vi.fn>).mock.calls[1][1].settings.qcCorrections).toHaveLength(1);
+    expect(statusOf("k1")).toBe("completed");
+    expect(store.jobs.find((j) => j.id === "k1")!.resultUrl).toBe("https://cdn/K1-1.png");
+    expect(settingsOf("k1").qcCorrections).toBeUndefined();
+    expect(settingsOf("k1").consistency).toMatchObject({ score: 0.91, pass: true, attempts: 2, bestOf: false, chosenUrl: "https://cdn/K1-1.png" });
+    // The clip starts off the corrected keyframe.
+    expect(adapter.submitVideo).toHaveBeenCalledWith(expect.objectContaining({ imageUrl: "https://cdn/K1-1.png" }), expect.anything());
+  });
+
+  it("keeps the best-scoring attempt after two re-rolls", async () => {
+    seedGated();
+    consistency.scoreFrame
+      .mockResolvedValueOnce(verdict(0.4, false, ["bezel thicker"]))
+      .mockResolvedValueOnce(verdict(0.62, false, ["aspect ratio wrong"]))
+      .mockResolvedValueOnce(verdict(0.5, false, ["bezel thicker"]));
+    const adapter = countingAdapter();
+    for (let i = 0; i < 3; i++) await tickRun(adapter, "run1");
+    expect(adapter.generateImage).toHaveBeenCalledTimes(3);
+    expect(statusOf("k1")).toBe("completed");
+    expect(store.jobs.find((j) => j.id === "k1")!.resultUrl).toBe("https://cdn/K1-1.png");
+    expect(settingsOf("k1").consistency).toMatchObject({ score: 0.62, pass: false, bestOf: true, attempts: 3, tries: [{ score: 0.4 }, { score: 0.62 }, { score: 0.5 }] });
+  });
+
+  it("leaves keyframes without references on the yes/no review", async () => {
+    seed(); // K1 has leftRefs but no editFrom
+    await tickRun(fakeAdapter(), "run1");
+    expect(consistency.scoreFrame).not.toHaveBeenCalled();
+    expect(review.reviewKeyframe).toHaveBeenCalledWith("https://cdn/K1.png", "K1 prompt", undefined);
+    expect(statusOf("k1")).toBe("completed");
+  });
+});
+
+describe("clip drift results", () => {
+  it("records the drift report, and re-generates once with a new seed when the clip asks for it", async () => {
+    seed();
+    const v1 = store.jobs.find((j) => j.id === "v1")!;
+    v1.settings = { ...v1.settings, seed: 1000, autoRegenOnDrift: 1 };
+    const drift = { driftFlag: true, reasons: ["mid-clip score 0.41 < 0.7"] };
+    const adapter = fakeAdapter();
+    await tickRun(adapter, "run1");
+    adapter.videoTasks.set("task-V1", { status: "SUCCESS", url: "https://cdn/V1-a.mp4", creditsSpent: 20, settingsPatch: { drift, driftFlag: true }, regenerate: true });
+    await tickRun(adapter, "run1");
+    expect(statusOf("v1")).toBe("queued");
+    expect(store.jobs.find((j) => j.id === "v1")!.settings).toMatchObject({ driftRegens: 1, driftRejectedUrl: "https://cdn/V1-a.mp4", priorCreditsSpent: 20, driftFlag: true });
+    await tickRun(adapter, "run1"); // the re-queued clip is submitted on the next tick
+    const submits = (adapter.submitVideo as ReturnType<typeof vi.fn>).mock.calls;
+    expect(submits).toHaveLength(2);
+    expect(submits[0][0].seed).toBe(1000);
+    expect(submits[1][0].seed).toBe(1101);
+
+    adapter.videoTasks.set("task-V1", { status: "SUCCESS", url: "https://cdn/V1-b.mp4", creditsSpent: 20, settingsPatch: { drift: { driftFlag: false, reasons: [] }, driftFlag: false } });
+    expect(await tickRun(adapter, "run1")).toBe("done");
+    expect(store.jobs.find((j) => j.id === "v1")!.settings).toMatchObject({ driftFlag: false, driftRegens: 1 });
+    expect(queue.jobDone).toHaveBeenCalledWith(expect.objectContaining({ jobId: "v1", resultUrl: "https://cdn/V1-b.mp4", creditsSpent: 40 }));
   });
 });

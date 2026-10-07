@@ -185,7 +185,7 @@ describe("frameCopy (director plan over the storyboard)", () => {
     // …but a shot without a keyword keeps the storyboard's on-screen text (the hook headline).
     expect(frameCopy({ vo: "Line.", txt: null }, "Is your TV too dark?", "old line")).toEqual({ text: "Is your TV too dark?", voiceover: "Line." });
     expect(frameCopy(undefined, "old text", "old line")).toEqual({ text: "old text", voiceover: "old line" });
-  });
+  }, 30_000); // cold dynamic import of the executor's module graph
 });
 
 describe("CTA line", () => {
