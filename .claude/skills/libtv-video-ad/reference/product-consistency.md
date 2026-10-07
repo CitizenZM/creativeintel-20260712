@@ -57,3 +57,46 @@ must never be used as the scale reference. Ask for the spec in cm.
 Pack shapes differ inside one product line (MIXIK 80 ml = cone bottle with sphere "gumball" cap;
 30 ml = slim cylinder with a flat cap). Confirm the SKU before generating anything, and cut the
 matching cutout.
+
+## Screen plates (TVs, tablets, monitors — screen content must be real)
+Video models can't render readable or accurate screen content: a Van Gogh on a frame TV, sheet
+music on a tablet or a crisp HDR picture all come out mushy or invented. Don't ask the model for
+the content. Ask for a **flat screen** and let the edit composite the real images onto it, following
+the screen as it moves (`src/services/video-gen/edit/screen-plate.ts`, applied by edit engine v2 before
+reframing, text and the end card).
+
+1. **Video prompt (and both keyframes):** the screen is *"switched on, showing a flat, evenly lit,
+   pure green (#00FF00) image edge to edge, no reflections, no UI, no text"*. Use pure black only when
+   green would spill onto a face or white walls. Keep fingers and hands off the screen, or let them
+   pass **in front** of it. With a green key they stay on top, but with black they would be covered.
+   Keep the whole screen in frame, with no extreme angles (under ~60° off-axis).
+2. **Corners:** state the screen's four inner glass corners (TL, TR, BR, BL, as 0–1 of the frame) on the
+   first and last keyframe → `firstLast`. If they're unknown or the motion isn't linear, use
+   `detect: "key"`. It's free: it finds the green screen every 0.5 s. `detect: "vision"` (one paid vision call
+   on each of the first and last frames, then a free local edge snap) is the fallback for screens that
+   aren't keyed.
+3. **Contents:** list the content images and their switch times in clip seconds (time 0 = the clip's first
+   frame). Use `fade` for a gallery change and `wipe` for a page turn. Give `aspect` (TV 16/9, NXTPAPER 14
+   tablet ≈ 1.6) so the picture isn't stretched, and use `fit: "contain"` when nothing may be cropped
+   (a sheet-music page, a UI screenshot).
+
+```json
+"locked": {
+  "engine": "veo",
+  "screenPlate": {
+    "contents": [
+      { "url": "https://…/sunflowers-vangogh.jpg", "fromSec": 0 },
+      { "url": "https://…/sheet-music.png", "fromSec": 2.0, "transition": "fade" }
+    ],
+    "firstLast": [[[0.12,0.31],[0.86,0.28],[0.88,0.52],[0.10,0.50]],
+                  [[0.19,0.37],[0.92,0.41],[0.89,0.62],[0.16,0.57]]],
+    "key": "#00FF00",
+    "aspect": 1.778
+  }
+}
+```
+Examples: QM8L frame TV = the painting full-screen (`fit: "cover"`). NXTPAPER 14 = a hand drawing,
+then sheet music at the page-turn beat (`wipe`). QM7L = an HDR still or frame from the brand's
+own footage. With a green `key` the screen colour is keyed out and the content sits underneath
+(occlusion-safe). Without one, the content is laid over the stated quad with a 2 px bleed onto the bezel,
+a 1.5 px feathered edge and a faint glass sheen (`glare`, default 0.06).
