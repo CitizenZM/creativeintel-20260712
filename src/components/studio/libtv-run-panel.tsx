@@ -248,6 +248,9 @@ export function LibtvRunPanel({
     }
   }
 
+  // A paid server run's cap (US cents) is its USD spend cap: the approve route requires it.
+  const paidServerRun = !!activeRun && isServerEngine(activeRun.executor) && activeRun.creditsEstimated > 0;
+
   async function approve() {
     if (!activeRun) return;
     setBusy("approve");
@@ -600,7 +603,7 @@ export function LibtvRunPanel({
             <div className="flex flex-wrap items-end gap-2">
               <label className="block">
                 <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Credit cap (optional)
+                  {paidServerRun ? "Spend cap (US cents, required)" : "Credit cap (optional)"}
                 </span>
                 <input
                   type="number"
@@ -613,7 +616,7 @@ export function LibtvRunPanel({
               </label>
               <Button
                 onClick={approve}
-                disabled={busy === "approve" || (!!(brandKit && !brandKit.ready.studio) && activeRun.creditsEstimated > 0)}
+                disabled={busy === "approve" || (!!(brandKit && !brandKit.ready.studio) && activeRun.creditsEstimated > 0) || (paidServerRun && !(Number(creditCap) >= activeRun.creditsEstimated))}
                 size="sm"
                 data-testid="approve-run"
                 className={cn(

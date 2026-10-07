@@ -10,6 +10,7 @@ import { isServerEngine } from "@/services/video-gen/libtv-pricing";
 import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { getBrandKitCompleteness } from "@/services/brand-kit";
+import { serverApprovalBudget } from "@/services/ops/approval-budget";
 
 export const dynamic = "force-dynamic";
 // GLM and ComfyUI runs render on the server right after approval.
@@ -64,7 +65,13 @@ export async function POST(
     );
   }
 
-  const run = await approveRun(runId, cap);
+  // A paid server run's cap (US cents) is its USD spend cap — the number the spend guard enforces.
+  const budget = serverApprovalBudget(existing, cap);
+  if (!budget.ok) {
+    return NextResponse.json({ error: budget.error, creditsEstimated: existing.creditsEstimated }, { status: 409 });
+  }
+
+  const run = await approveRun(runId, cap, { capBudgetUsd: budget.capBudgetUsd });
   if (!run) {
     return NextResponse.json(
       { error: `Run cannot be approved from status "${existing.status}"` },

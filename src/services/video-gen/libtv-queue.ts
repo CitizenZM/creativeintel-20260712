@@ -63,14 +63,29 @@ function orderJobs<T extends { kind: string; shotIndex: number; nodeName: string
 
 // ─── Approval ────────────────────────────────────────────────────────────────
 
-export async function approveRun(runId: string, creditCap?: number | null) {
+/**
+ * `capBudgetUsd` (a paid server run's creditCap in USD — ops/approval-budget.ts) becomes the run's
+ * approvedBudgetUsd, the number the spend guard enforces; an existing lower budget is kept. The
+ * write is conditional on the budget read, so a concurrent set-budget is never overwritten.
+ */
+export async function approveRun(runId: string, creditCap?: number | null, opts: { capBudgetUsd?: number | null } = {}) {
+  let budgetWhere: { approvedBudgetUsd?: number | null } = {};
+  let budgetData: { approvedBudgetUsd?: number } = {};
+  if (opts.capBudgetUsd != null) {
+    const cur = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { approvedBudgetUsd: true } });
+    if (!cur) return null;
+    const { minBudgetUsd } = await import("@/services/ops/approval-budget");
+    budgetWhere = { approvedBudgetUsd: cur.approvedBudgetUsd ?? null };
+    budgetData = { approvedBudgetUsd: minBudgetUsd(cur.approvedBudgetUsd, opts.capBudgetUsd) };
+  }
   const { count } = await prisma.libtvRun.updateMany({
-    where: { id: runId, status: { in: ["draft", "awaiting_approval"] } },
+    where: { id: runId, status: { in: ["draft", "awaiting_approval"] }, ...budgetWhere },
     data: {
       status: "approved",
       approvedAt: new Date(),
       creditCap: creditCap ?? undefined,
       error: null,
+      ...budgetData,
     },
   });
   if (count !== 1) return null;

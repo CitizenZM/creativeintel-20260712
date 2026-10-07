@@ -57,6 +57,7 @@ import { renderExportForRun } from "@/services/video-gen/exports";
 import { storyboardFrames } from "@/services/video-gen/server-executor";
 import { driveServerRun } from "@/services/video-gen/server-engines";
 import { loadAiSettings } from "@/services/settings/ai-settings";
+import { serverApprovalBudget } from "@/services/ops/approval-budget";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -597,7 +598,10 @@ export async function POST(request: Request) {
   }
   const refusal = freeRunRefusal(existing, isServerEngine(existing.executor), input);
   if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
-  const run = await approveRun(input.runId, existing.creditsEstimated > 0 ? (input.creditCap ?? null) : null);
+  // The paid cap (US cents) becomes the run's USD spend cap — the number the spend guard enforces.
+  const budget = serverApprovalBudget(existing, existing.creditsEstimated > 0 ? (input.creditCap ?? null) : null);
+  if (!budget.ok) return NextResponse.json({ error: budget.error }, { status: 403 });
+  const run = await approveRun(input.runId, existing.creditsEstimated > 0 ? (input.creditCap ?? null) : null, { capBudgetUsd: budget.capBudgetUsd });
   if (!run) {
     return NextResponse.json({ error: `Run cannot be approved from status "${existing.status}"` }, { status: 409 });
   }
