@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
+  <channel>
+    <title>Levoit store</title>
+    <link>https://levoit.example</link>
+    <item>
+      <g:id>LV-CORE300</g:id>
+      <title>Levoit Core 300 True HEPA Air Purifier</title>
+      <description><![CDATA[<p>Cleans a 219 sq ft room in 12 minutes.</p><p>24 dB sleep mode &amp; 3-stage filtration.</p>]]></description>
+      <link>https://levoit.example/products/core-300?utm_source=feed</link>
+      <g:image_link>https://levoit.example/img/core300.jpg</g:image_link>
+      <g:additional_image_link>https://levoit.example/img/core300-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://levoit.example/img/core300-3.jpg</g:additional_image_link>
+      <g:price>99.99 USD</g:price>
+      <g:sale_price>79.99 USD</g:sale_price>
+      <g:sale_price_effective_date>2026-11-20T00:00-08:00/2026-11-30T23:59-08:00</g:sale_price_effective_date>
+      <g:brand>Levoit</g:brand>
+      <g:google_product_category>Home &amp; Garden &gt; Household Appliances &gt; Climate Control Appliances &gt; Air Purifiers</g:google_product_category>
+      <g:product_type>Air Purifiers</g:product_type>
+      <g:availability>in stock</g:availability>
+      <g:custom_label_0>bfcm</g:custom_label_0>
+      <g:custom_label_2>hero</g:custom_label_2>
+    </item>
+    <item>
+      <g:id>TCL-85QM8</g:id>
+      <g:title>TCL 85" QM8 Mini LED 4K TV</g:title>
+      <g:description>Up to 5,000 nits peak brightness. 144Hz native refresh.</g:description>
+      <g:link>https://tcl.example/tv/85qm8</g:link>
+      <g:image_link>https://tcl.example/img/qm8.jpg</g:image_link>
+      <g:price>1,299.00 USD</g:price>
+      <g:brand>TCL</g:brand>
+      <g:availability>preorder</g:availability>
+    </item>
+    <item>
+      <g:id>LV-FILTER</g:id>
+      <title>Replacement Filter</title>
+      <g:price>19.99 USD</g:price>
+      <g:availability>out_of_stock</g:availability>
+    </item>
+    <item>
+      <g:id>LV-CORE300</g:id>
+      <title>Duplicate row</title>
+      <g:price>1.00 USD</g:price>
+    </item>
+  </channel>
+</rss>

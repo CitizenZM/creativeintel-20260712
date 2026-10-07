@@ -19,6 +19,7 @@ import { PLATFORM_PROFILES } from "./platforms.data";
 import { personaById, personaCast, pickPersona, type CastingPrefs, type Persona } from "./personas";
 import { speechSec, talkKeyframePrompt, talkVideoPrompt } from "@/services/video-gen/talk-frame";
 import { captionStyleFor } from "@/services/video-gen/edit/caption-style";
+import { platformEnergy, styleForBeat, type VoiceEnergy, type VoiceStyle } from "@/services/video-gen/voice-styles";
 
 export interface PlanStoryboardInput {
   plan: PlatformPlan;
@@ -44,6 +45,9 @@ export interface PlanStoryboardFrame extends LockedFrame {
   textOverlay?: string;
   voiceover?: string;
   sellingPoint?: string;
+  /** VO delivery: the beat purpose's style, shifted by the platform (voice-styles.ts). */
+  voiceStyle?: VoiceStyle;
+  voiceEnergy?: VoiceEnergy;
 }
 
 const PEOPLE = /\b(hands?|person|people|man|woman|mother|mom|father|dad|kid|child|children|family|girl|boy|couple|friends?|she|he|creator|user|customer|student|artist)\b/i;
@@ -338,7 +342,7 @@ export function scaffoldLockedFrames(input: PlanStoryboardInput): PlanStoryboard
       videoPrompt: productShot ? "Slow push-in toward the product, then hold. Natural speed." : "Natural, unhurried movement; gentle handheld drift. Natural speed.",
       locked,
       ...(b.onScreenText ? { textOverlay: b.onScreenText } : {}),
-      ...(b.vo ? { voiceover: b.vo } : {}),
+      ...(b.vo ? { voiceover: b.vo, voiceStyle: styleForBeat(b.purpose, input.plan.platform), ...(platformEnergy(input.plan.platform) ? { voiceEnergy: platformEnergy(input.plan.platform) } : {}) } : {}),
       ...(b.sellingPointId ? { sellingPoint: b.sellingPointId } : {}),
     };
   });

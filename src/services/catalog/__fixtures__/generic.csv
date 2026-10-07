@@ -1,0 +1,4 @@
+Handle,Title,Body (HTML),Vendor,Type,Variant SKU,Variant Price,Variant Compare At Price,Image Src,Currency
+insta360-x5,Insta360 X5 360 Camera,"<p>8K 360 video, invisible selfie stick.</p><ul><li>Waterproof to 15 m</li><li>185 min battery</li></ul>",Insta360,360 Cameras,CINSAAQ,549.99,599.99,https://img.example/x5-front.jpg,USD
+insta360-x5,,,,,,,,https://img.example/x5-back.jpg,
+insta360-go3,Insta360 GO 3S,Tiny thumb-size camera &mdash; 39 g,Insta360,Action Cameras,CINSABK,399.00,,https://img.example/go3.jpg,EUR

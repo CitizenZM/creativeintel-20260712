@@ -1272,3 +1272,20 @@ model CronHeartbeat {
   lastRunAt DateTime @default(now())
   runs      Int      @default(0)
 }
+
+/// Catalog ads (services/catalog): one imported product feed and what was planned / rendered from it.
+/// products = normalized CatalogProduct[]; results = { skipped, warnings, plan?, images?{[sku]} }.
+model CatalogRun {
+  id        String   @id @default(cuid())
+  projectId String
+  source    String // feed URL, or "inline:<format>"
+  format    String? // shopify | google-xml | google-tsv | meta-csv | generic-csv
+  products  Json
+  mode      String   @default("image") // image | video-template | video-full
+  status    String   @default("imported") // imported | planned | rendering | rendered | failed
+  results   Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, createdAt])
+}

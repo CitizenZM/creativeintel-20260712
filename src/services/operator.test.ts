@@ -115,3 +115,15 @@ describe("operatorActionSchema — covers / auto-fix", () => {
     expect(operatorActionSchema.safeParse({ action: "auto-fix", projectId: "p", runId: "r", platform: "myspace" }).success).toBe(false);
   });
 });
+
+describe("catalog actions", () => {
+  it("validates catalog-import / catalog-plan / catalog-render-images", () => {
+    expect(operatorActionSchema.safeParse({ action: "catalog-import", projectId: "p", feedUrl: "https://shop.example/products.json" }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "catalog-import", projectId: "p", feedText: "sku,title\nA,B", format: "generic-csv" }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "catalog-import", projectId: "p", feedUrl: "not a url" }).success).toBe(false);
+    expect(operatorActionSchema.safeParse({ action: "catalog-plan", projectId: "p", catalogRunId: "c", mode: "video-template", platforms: ["tiktok"], promo: { code: "SAVE10" }, maxSkus: 100 }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "catalog-plan", projectId: "p", catalogRunId: "c", mode: "video" }).success).toBe(false);
+    expect(operatorActionSchema.safeParse({ action: "catalog-render-images", projectId: "p", catalogRunId: "c", limit: 5 }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "catalog-render-images", projectId: "p", catalogRunId: "c", limit: 50 }).success).toBe(false);
+  });
+});

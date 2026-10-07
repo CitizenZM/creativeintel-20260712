@@ -1,0 +1,5 @@
+id,title,description,availability,condition,price,link,image_link,brand,sale_price,additional_image_link,fb_product_category,item_group_id,custom_label_0,custom_label_1
+OTT-P3,"Ottocast P3 CarPlay AI Box","Wireless CarPlay & Android Auto, plug-and-play.
+Works with 2016+ factory wired CarPlay cars.",in stock,new,"129.99 USD",https://amazon.example/dp/B0P3,https://img.example/p3.jpg,Ottocast,"99.99 USD","https://img.example/p3-b.jpg,https://img.example/p3-c.jpg",vehicles & parts > car electronics,P3,amazon,"bfcm, top"
+OTT-MINI,"Ottocast Mini Adapter","<b>Tiny</b> wireless adapter",available for order,new,59.99 USD,https://amazon.example/dp/B0MINI,https://img.example/mini.jpg,Ottocast,,,,MINI,amazon,
+OTT-BAD,"","",in stock,new,,,,,,,,,,

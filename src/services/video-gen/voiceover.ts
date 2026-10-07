@@ -8,6 +8,9 @@
  * word timings give the subtitles, so they match the voice exactly.
  */
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
+import { buildVoiceSsml, escapeXml, type SsmlMode, type VoiceDelivery, type VoiceEnergy, type VoiceStyle } from "./voice-styles";
+
+export { escapeXml };
 
 export const DEFAULT_VOICE = "en-US-AndrewMultilingualNeural";
 const MAX_TEMPO = 1.3;
@@ -17,12 +20,17 @@ export interface VoFrame {
   startSec: number;
   endSec: number;
   voiceover?: string | null;
+  /** Delivery of this beat (voice-styles.ts): style from the beat purpose, energy from the platform. */
+  voiceStyle?: VoiceStyle | null;
+  voiceEnergy?: VoiceEnergy | null;
 }
 
 export interface VoLine {
   text: string;
   startSec: number;
   endSec: number;
+  style?: VoiceStyle;
+  energy?: VoiceEnergy;
 }
 
 export interface Word {
@@ -111,7 +119,7 @@ export function planVoiceover(frames: VoFrame[]): VoLine[] {
     if (!text) continue;
     const last = lines[lines.length - 1];
     if (last && last.text === text && Math.abs(last.endSec - f.startSec) < 0.01) last.endSec = f.endSec;
-    else lines.push({ text, startSec: f.startSec, endSec: f.endSec });
+    else lines.push({ text, startSec: f.startSec, endSec: f.endSec, ...(f.voiceStyle ? { style: f.voiceStyle } : {}), ...(f.voiceEnergy != null ? { energy: f.voiceEnergy } : {}) });
   }
   return lines;
 }
@@ -312,18 +320,27 @@ export function toSrt(cues: SubtitleCue[]): string {
   return cues.map((c, i) => `${i + 1}\n${srtTime(c.startSec)} --> ${srtTime(c.endSec)}\n${c.text}\n`).join("\n");
 }
 
-/** Speak one line with Edge TTS; returns the mp3 and its word timings. Retries transient failures. */
-export const escapeXml = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const unescapeXml = (t: string) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
-export async function synthesize(text: string, voice = DEFAULT_VOICE): Promise<{ audio: Buffer; words: Word[] }> {
+/** A style is spoken with the most expressive SSML that works; each failed attempt drops one level. */
+const DOWNGRADE: Record<SsmlMode, SsmlMode> = { "express-as": "prosody", prosody: "plain", plain: "plain" };
+
+/**
+ * Speak one line with Edge TTS; returns the mp3 and its word timings. Retries transient failures.
+ * With a delivery (style / energy) the line goes out as our own SSML (voice-styles.ts: prosody presets
+ * on Edge); a styled request that returns no audio is retried plainer (express-as → prosody at once,
+ * prosody → plain only on the last attempt).
+ */
+export async function synthesize(text: string, voice = DEFAULT_VOICE, delivery?: VoiceDelivery): Promise<{ audio: Buffer; words: Word[] }> {
   let lastErr: unknown;
+  let force: SsmlMode | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
     const tts = new MsEdgeTTS();
+    const styled = delivery && (delivery.style || delivery.energy) ? buildVoiceSsml({ text, voice, ...delivery, force }) : null;
     try {
       await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3, { wordBoundaryEnabled: true });
       // The text goes into SSML unescaped: a bare "&" ("Bang & Olufsen") makes the service return no audio.
-      const { audioStream, metadataStream } = tts.toStream(escapeXml(text));
+      const { audioStream, metadataStream } = styled && styled.mode !== "plain" ? tts.rawToStream(styled.ssml) : tts.toStream(escapeXml(text));
       const chunks: Buffer[] = [];
       const words: Word[] = [];
       metadataStream?.on("data", (d: Buffer) => {
@@ -348,6 +365,9 @@ export async function synthesize(text: string, voice = DEFAULT_VOICE): Promise<{
       return { audio, words };
     } catch (err) {
       lastErr = err;
+      // express-as is dropped at once (Edge rejects it); prosody is kept through one transient retry
+      // (the endpoint resets connections now and then) and only the last attempt goes plain.
+      if (styled) force = styled.mode === "express-as" ? DOWNGRADE["express-as"] : attempt >= 1 ? DOWNGRADE[styled.mode] : force;
       await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
     } finally {
       try {

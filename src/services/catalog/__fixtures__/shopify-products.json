@@ -1,0 +1,43 @@
+{
+  "products": [
+    {
+      "id": 101,
+      "title": "Cosori Pro LE Air Fryer 5 Qt",
+      "handle": "cosori-pro-le-air-fryer",
+      "body_html": "<p>Crispy &amp; golden with up to <strong>85% less oil</strong>.</p><ul><li>5 qt basket fits a 4 lb whole chicken</li><li>Dishwasher-safe, nonstick basket cleans in seconds</li><li>9 one-touch presets &ndash; fries, wings, steak</li></ul>",
+      "vendor": "Cosori",
+      "product_type": "Air Fryers",
+      "tags": ["kitchen", "bestseller"],
+      "variants": [
+        { "id": 1, "sku": "CS-LE-5QT-BLK", "price": "89.99", "compare_at_price": "119.99", "available": true },
+        { "id": 2, "sku": "CS-LE-5QT-WHT", "price": "89.99", "compare_at_price": null, "available": false }
+      ],
+      "images": [
+        { "src": "https://cdn.shopify.com/s/files/1/airfryer-front.jpg", "alt": "front" },
+        { "src": "//cdn.shopify.com/s/files/1/airfryer-side.jpg" }
+      ]
+    },
+    {
+      "id": 102,
+      "title": "Huggie Hoop Earrings",
+      "handle": "huggie-hoop-earrings",
+      "body_html": "Waterproof, tarnish-resistant 18k gold plated stainless steel.",
+      "vendor": "Oufer",
+      "product_type": "Earrings",
+      "tags": "jewelry, gift",
+      "variants": [{ "id": 3, "sku": "", "price": "24.00", "compare_at_price": "24.00", "available": false }],
+      "images": []
+    },
+    {
+      "id": 103,
+      "title": "  Rockbros USB-C Bike Light 1000 Lumens ",
+      "handle": "usb-c-bike-light",
+      "body_html": "<div>IPX6 waterproof. 1000 lumens. 6 hour battery.</div>",
+      "vendor": "Rockbros",
+      "product_type": "",
+      "tags": [],
+      "variants": [{ "id": 4, "sku": "RB-BL-1000", "price": "39.99", "available": true }],
+      "images": [{ "src": "https://cdn.shopify.com/s/files/1/bikelight.png" }]
+    }
+  ]
+}

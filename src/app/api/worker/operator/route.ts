@@ -37,6 +37,7 @@
  * POST { action: "auto-fix", projectId, runId, platform? } — re-edit once with pre-flight corrections (free) → qcReport.autofix
  * POST { action: "ops-health" } / { action: "ops-recover", dryRun? (default true) } — health scan / safe auto-recovery
  * POST { action: "repair-keyframe", projectId, runId, node, bbox?, packshotUrl?, reason?, apply? } — official-packshot repair of a keyframe (local, free)
+ * POST { action: "catalog-import" | "catalog-plan" | "catalog-render-images", projectId, … } — catalog ads from a product feed (CatalogRun)
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -445,6 +446,17 @@ export async function POST(request: Request) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return NextResponse.json({ error: msg }, { status: /not found/i.test(msg) ? 404 : 500 });
+    }
+  }
+
+  if (input.action === "catalog-import" || input.action === "catalog-plan" || input.action === "catalog-render-images") {
+    const store = await import("@/services/catalog/catalog.store");
+    try {
+      if (input.action === "catalog-import") return NextResponse.json({ ok: true, ...(await store.importCatalog(input)) }, { status: 201 });
+      if (input.action === "catalog-plan") return NextResponse.json({ ok: true, ...(await store.planCatalogRun(input)) });
+      return NextResponse.json({ ok: true, ...(await store.renderCatalogImages(input)) });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof store.CatalogError ? err.status : 500 });
     }
   }
 

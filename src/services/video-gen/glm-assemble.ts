@@ -54,6 +54,9 @@ export interface AssembleFrame {
   ttsVoice?: string | null;
   /** Caption look for the whole edit (the first frame that sets it decides). */
   captionStyle?: "native" | "kinetic" | null;
+  /** VO delivery of this beat (voice-styles.ts): purpose style + platform energy. */
+  voiceStyle?: import("./voice-styles").VoiceStyle | null;
+  voiceEnergy?: import("./voice-styles").VoiceEnergy | null;
 }
 
 export const CAPTION_FONT = path.join(process.cwd(), "assets/fonts/Anton-Regular.ttf");
@@ -529,7 +532,8 @@ export async function speakVoiceover(input: {
   const spoken = await pMap(
     lines,
     async (line, i) => {
-      const { audio, words } = await synthesize(spokenForm(line.text), voice);
+      const delivery = line.style || line.energy ? { style: line.style, energy: line.energy } : undefined;
+      const { audio, words } = await synthesize(spokenForm(line.text), voice, delivery);
       const file = path.join(input.dir, `vo${i}.mp3`);
       await writeFile(file, audio);
       return { file, words, duration: spokenDuration(words, await durationOf(file)) || line.endSec - line.startSec };
