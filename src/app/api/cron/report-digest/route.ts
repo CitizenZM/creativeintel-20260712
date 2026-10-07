@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runDigestCron } from "@/services/reports/delivery";
+import { cronHeartbeat } from "@/services/ops/heartbeat";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -18,6 +19,7 @@ export async function GET(request: Request) {
   } else if (process.env.VERCEL === "1") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  await cronHeartbeat("report-digest");
   try {
     const results = await runDigestCron({ budgetMs: 240_000 });
     const counts: Record<string, number> = {};
