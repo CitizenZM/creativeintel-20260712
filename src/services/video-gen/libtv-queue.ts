@@ -422,6 +422,59 @@ export async function jobDone(input: JobDoneInput) {
   });
 }
 
+/**
+ * What a conditional transition re-checks: the job is still in this state (e.g. `running` on the same
+ * task id, at the version the caller claimed it). Overlapping ticks can then never both finish a job.
+ */
+export interface JobGuard {
+  status: string;
+  nodeId?: string | null;
+  updatedAt?: Date;
+}
+
+const guardWhere = (jobId: string, g: JobGuard) => ({
+  id: jobId,
+  status: g.status,
+  ...(g.nodeId !== undefined ? { nodeId: g.nodeId } : {}),
+  ...(g.updatedAt ? { updatedAt: g.updatedAt } : {}),
+});
+
+/** jobDone only while the job still matches `guard`; `settings` replaces the job's settings. False = another tick got there first. */
+export async function jobDoneIf(input: JobDoneInput & { settings?: Record<string, unknown> }, guard: JobGuard): Promise<boolean> {
+  const { count } = await prisma.libtvJob.updateMany({
+    where: guardWhere(input.jobId, guard),
+    data: {
+      status: input.skipped ? "skipped" : "completed",
+      nodeId: input.nodeId ?? undefined,
+      resultUrl: input.resultUrl ?? undefined,
+      remoteUrl: input.remoteUrl ?? undefined,
+      localPath: input.localPath ?? undefined,
+      creditsSpent: input.creditsSpent ?? undefined,
+      ...(input.settings ? { settings: input.settings as never } : {}),
+      error: null,
+      completedAt: new Date(),
+    },
+  });
+  return count === 1;
+}
+
+/** jobFailed only while the job still matches `guard`. False = another tick got there first. */
+export async function jobFailedIf(jobId: string, error: string, guard: JobGuard, settings?: Record<string, unknown>): Promise<boolean> {
+  const job = await prisma.libtvJob.findUnique({ where: { id: jobId }, select: { attempts: true } });
+  if (!job) return false;
+  const terminal = job.attempts >= MAX_JOB_ATTEMPTS;
+  const { count } = await prisma.libtvJob.updateMany({
+    where: guardWhere(jobId, guard),
+    data: {
+      status: terminal ? "failed" : "queued",
+      error: error.slice(0, 2000),
+      completedAt: terminal ? new Date() : null,
+      ...(settings ? { settings: settings as never } : {}),
+    },
+  });
+  return count === 1;
+}
+
 export async function jobFailed(jobId: string, error: string) {
   const job = await prisma.libtvJob.findUnique({ where: { id: jobId } });
   if (!job) return null;
