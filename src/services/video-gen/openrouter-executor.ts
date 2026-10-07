@@ -7,7 +7,7 @@
  */
 import { uploadBuffer } from "@/services/storage";
 import { logAiUsage } from "@/services/ai/usage";
-import { lockedEditPrompt } from "@/services/ai/matrix";
+import { endFramePrompt, lockedEditPrompt } from "@/services/ai/matrix";
 import {
   downloadOpenRouterVideo,
   generateOpenRouterImage,
@@ -35,10 +35,24 @@ export async function openrouterKeyframe(prompt: string, ctx: JobContext): Promi
   const refs = ctx.referenceUrls ?? [];
   const model = modelOf(ctx, DEFAULT_IMAGE);
   const fresh = () => generateOpenRouterImage(prompt, { model, aspectRatio: ctx.aspectRatio, projectId: ctx.projectId });
+  const shot = typeof ctx.settings?.directedKeyframe === "string" ? ctx.settings.directedKeyframe : prompt;
+  // End keyframe of an anchored segment: edit the approved START frame (image 1) to the end state, re-locked
+  // to the cast sheet and the product photo, so both ends of the clip are corrected to the references.
+  if (editFrom === "end" && refs.length >= 1) {
+    const out = await generateOpenRouterImage(endFramePrompt(shot, { cast: !!ctx.settings?.endCast, product: !!ctx.settings?.endProduct }), {
+      model,
+      aspectRatio: ctx.aspectRatio,
+      referenceUrls: refs.slice(0, 6),
+      projectId: ctx.projectId,
+    });
+    const up = await uploadBuffer({ buffer: out.buffer, filename: `${ctx.nodeName}${out.contentType === "image/png" ? ".png" : ".jpg"}`, contentType: out.contentType, folder: `openrouter-runs/${ctx.runId}` });
+    if (up.provider === "inline") throw new Error("No asset storage configured — set BLOB_READ_WRITE_TOKEN or CLOUDINARY_URL");
+    return { url: up.url };
+  }
   const usable =
     (editFrom === "cast" || editFrom === "product") && refs.length >= 1 ? editFrom : editFrom === "cast+product" && refs.length >= 2 ? editFrom : null;
   const { buffer, contentType } = usable
-    ? await generateOpenRouterImage(lockedEditPrompt(usable, typeof ctx.settings?.directedKeyframe === "string" ? ctx.settings.directedKeyframe : prompt, { maxChars: 1400 }), {
+    ? await generateOpenRouterImage(lockedEditPrompt(usable, shot, { maxChars: 1400 }), {
         model,
         aspectRatio: ctx.aspectRatio,
         referenceUrls: usable === "cast+product" ? refs.slice(0, 2) : [refs[0]],
@@ -80,6 +94,8 @@ export const openrouterAdapter: EngineAdapter = {
       negativePrompt: ctx.settings?.directed ? negativePromptFor(model) : undefined,
       prompt: input.prompt,
       imageUrl: input.imageUrl,
+      lastImageUrl: input.lastImageUrl,
+      seed: input.seed,
       aspectRatio: ctx.aspectRatio,
       durationSec: ctx.durationSec,
       resolution,

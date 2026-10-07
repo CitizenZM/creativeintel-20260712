@@ -137,7 +137,8 @@ function shotBaseFilter(shot: Shot, canvas: Canvas): string {
   if (shot.kind === "clip") {
     const z = shot.zoom;
     // Time-remap (the 1-second install): speed the source up and blend frames into motion blur.
-    const remap = (shot.speed ?? 1) > 1 ? `setpts=(PTS-STARTPTS)/${f3(shot.speed!)},tmix=frames=${Math.min(5, Math.ceil(shot.speed!))},` : "";
+    // Frame blending only for real speed ramps (≥ 2×); a gentle fit (an end-anchored clip at 1.3×) stays crisp.
+    const remap = (shot.speed ?? 1) > 1 ? `setpts=(PTS-STARTPTS)/${f3(shot.speed!)},${shot.speed! >= 2 ? `tmix=frames=${Math.min(5, Math.ceil(shot.speed!))},` : ""}` : "";
     return [
       `[0:v]${remap}scale=${Math.round((w * z) / 2) * 2}:${Math.round((h * z) / 2) * 2}:force_original_aspect_ratio=increase`,
       `crop=${w}:${h}:(iw-${w})/2:(ih-${h})*${shot.anchorY}`,

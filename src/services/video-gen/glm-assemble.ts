@@ -242,8 +242,10 @@ export function planSegments(frames: AssembleFrame[], jobs: Pick<LibtvJob, "kind
       const off = s.frameOffsetsSec?.find((o) => o.frameNumber === f.frameNumber);
       const from = off?.clipStartSec ?? 0;
       const len = off ? Math.max(0.5, off.clipEndSec - off.clipStartSec) : length;
-      // A sped-up shot plays `speed` × its length of source in its frame's time.
-      const speed = Math.max(1, f.speed ?? 1);
+      // A sped-up shot plays `speed` × its length of source in its frame's time. An end-anchored clip carries
+      // its own speed: the whole clip (start keyframe → end keyframe) fits the frame, so it ends on its anchor.
+      const anchored = (s as { anchorEnd?: number; speed?: number }).anchorEnd ? (s as { speed?: number }).speed : undefined;
+      const speed = Math.max(1, anchored ?? f.speed ?? 1);
       segments.push({ kind: "clip", url: clip.resultUrl!, from, length: speed > 1 ? length : len, frameNumber: f.frameNumber, text: f.text?.trim() || undefined, compare: compareFor(f.frameNumber, jobs), speed, zoomHit: f.zoomHit ?? null });
       continue;
     }
