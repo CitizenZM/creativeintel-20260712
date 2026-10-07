@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { openrouterAspect, openrouterVideoBody, parseVideoTask } from "./openrouter-media";
+import { openrouterAspect, openrouterVideoBody, parseVideoTask, supportsLastFrame } from "./openrouter-media";
 import { IMAGE_MODELS, VIDEO_MODELS, engineFor, findImageModel, imageSettings, mismatchedImageEngine, videoSettings } from "@/services/video-gen/libtv-pricing";
 import { videoDefaults } from "@/services/settings/ai-settings-core";
 
@@ -70,5 +70,23 @@ describe("OpenRouter catalogue", () => {
       videoModel: "Veo 3.1 Lite 720p (OpenRouter)",
     });
     expect(videoDefaults("openrouter", true, [], { openrouterAvailable: true, glmAvailable: true }).videoModel).toBe("GLM CogVideoX-Flash");
+  });
+});
+
+describe("first + last frame anchors", () => {
+  it("sends last_frame and seed only to models that support them", () => {
+    const veo = openrouterVideoBody({ model: "google/veo-3.1-lite", prompt: "p", imageUrl: "https://x/s.png", lastImageUrl: "https://x/e.png", seed: 7, aspectRatio: "9:16", durationSec: 4 });
+    expect(veo.frame_images).toEqual([
+      { type: "image_url", image_url: { url: "https://x/s.png" }, frame_type: "first_frame" },
+      { type: "image_url", image_url: { url: "https://x/e.png" }, frame_type: "last_frame" },
+    ]);
+    expect(veo.seed).toBe(7);
+    const kling = openrouterVideoBody({ model: "kwaivgi/kling-v3.0-std", prompt: "p", imageUrl: "https://x/s.png", lastImageUrl: "https://x/e.png", seed: 7, aspectRatio: "9:16", durationSec: 5 });
+    expect((kling.frame_images as unknown[]).length).toBe(2);
+    expect(kling).not.toHaveProperty("seed");
+    const wan3 = openrouterVideoBody({ model: "alibaba/wan-3.0", prompt: "p", imageUrl: "https://x/s.png", lastImageUrl: "https://x/e.png", aspectRatio: "9:16", durationSec: 5 });
+    expect((wan3.frame_images as unknown[]).length).toBe(1);
+    expect(supportsLastFrame("bytedance/seedance-2.0-fast")).toBe(true);
+    expect(supportsLastFrame("alibaba/wan-3.0")).toBe(false);
   });
 });

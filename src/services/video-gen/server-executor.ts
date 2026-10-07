@@ -18,7 +18,7 @@ import { jobDone, jobFailed, runDone, runFailed } from "./libtv-queue";
 import { assembleGlmMaster, type AssembleFrame } from "./glm-assemble";
 import type { ServerEngine } from "./libtv-pricing";
 import { cleanFramePrompt, hasPeople, motionSafePrompt } from "./prompt-safety";
-import { keyframeQcEnabled, reviewKeyframe, shouldReroll } from "./keyframe-qc";
+import { keyframeQcEnabled, MAX_KEYFRAME_REROLLS, reviewKeyframe, shouldReroll } from "./keyframe-qc";
 import { finishDirectedMotion, finishDirectedStill } from "./shot-director";
 
 export type TickResult = "idle" | "running" | "done" | "failed";
@@ -54,7 +54,8 @@ export interface EngineAdapter {
   generateImage(prompt: string, ctx: JobContext): Promise<{ url: string } | { taskId: string }>;
   pollImage?(taskId: string, ctx: JobContext): Promise<TaskResult>;
   /** Start a clip; returns the task id stored on the job (nodeId). */
-  submitVideo(input: { prompt: string; imageUrl?: string }, ctx: JobContext): Promise<string>;
+  /** imageUrl = the segment's start keyframe; lastImageUrl = its end keyframe (first + last frame anchoring). */
+  submitVideo(input: { prompt: string; imageUrl?: string; lastImageUrl?: string; seed?: number }, ctx: JobContext): Promise<string>;
   pollVideo(taskId: string, ctx: JobContext): Promise<TaskResult>;
 }
 
@@ -222,9 +223,14 @@ export async function tickRun(
           // AI keyframe QC: send a visibly broken keyframe back once before a clip is made from it.
           const s = (j.settings ?? {}) as { qcAttempts?: number; castSheet?: unknown };
           if (keyframeQcEnabled() && adapter.engine !== "animatic") {
-            const verdict = await reviewKeyframe(out.url, j.prompt);
+            // Keyframes edited from references are also checked for identity against them (strict: 2 re-rolls).
+            const editFrom = (j.settings as { editFrom?: string } | null)?.editFrom;
+            const refNames = editFrom ? ((j.leftRefs as string[] | null) ?? []) : [];
+            const label = (r: string) => (r === "CAST" ? "casting sheet" : /^K\d+$/.test(r) ? "start frame of this shot" : "official product photo");
+            const refImages = refNames.map((r) => ({ label: label(r), url: urlOf(r) })).filter((x): x is { label: string; url: string } => !!x.url);
+            const verdict = await reviewKeyframe(out.url, j.prompt, refImages.length ? { images: refImages } : undefined);
             const attempts = s.qcAttempts ?? 0;
-            if (shouldReroll(verdict, attempts)) {
+            if (shouldReroll(verdict, attempts, refImages.length ? Math.max(2, MAX_KEYFRAME_REROLLS) : MAX_KEYFRAME_REROLLS)) {
               await prisma.libtvJob.update({
                 where: { id: j.id },
                 data: { status: "queued", settings: { ...s, qcAttempts: attempts + 1, qcIssues: verdict!.issues.slice(0, 5), qcRejectedUrl: out.url } as never },
@@ -262,6 +268,11 @@ export async function tickRun(
     if (ref && !TERMINAL_JOB.has(ref.status)) continue; // keyframe not ready yet
     if (ref?.status === "failed") continue; // the run fails on the keyframe; don't add a second error
     const imageUrl = ref?.resultUrl ?? undefined;
+    // First + last frame anchoring: the clip also waits for its end keyframe (K<n>E).
+    const vs = (j.settings ?? {}) as { anchorEnd?: number; seed?: number };
+    const endRef = vs.anchorEnd ? byNameFresh.get(refName(((j.leftRefs as string[] | null) ?? [])[1] ?? "")) : undefined;
+    if (endRef && !TERMINAL_JOB.has(endRef.status)) continue;
+    const lastImageUrl = endRef?.status === "completed" ? (endRef.resultUrl ?? undefined) : undefined;
     if (!(await claimJob(j.id))) continue;
     // Free video models warp faces the moment people move: hold people shots on
     // their (sharp) keyframe with a slow zoom, and give AI motion to the rest.
@@ -279,7 +290,7 @@ export async function tickRun(
       // smooth motion", "cinematic film still, sharp focus") is what made clips static and plastic.
       const directed = !!(j.settings as { directed?: number } | null)?.directed;
       const clipPrompt = directed ? finishDirectedMotion(j.prompt) : motionSafePrompt(cleanFramePrompt(j.prompt));
-      const taskId = await adapter.submitVideo({ prompt: withNoText(clipPrompt, "video"), imageUrl }, ctxFor(j));
+      const taskId = await adapter.submitVideo({ prompt: withNoText(clipPrompt, "video"), imageUrl, lastImageUrl, seed: vs.seed }, ctxFor(j));
       await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: taskId } });
       inFlight++;
     } catch (err) {

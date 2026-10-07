@@ -108,12 +108,24 @@ export interface OpenRouterVideoInput {
   resolution?: string;
   /** Sent through the provider's own negative-prompt field (Kling, Veo). */
   negativePrompt?: string;
+  /** The segment's end keyframe — the clip's last frame, on models that support it. */
+  lastImageUrl?: string;
+  /** Reproducible takes on models with seed support. */
+  seed?: number;
 }
 
-/** Provider passthrough for the negative prompt (slugs and field names per the video models API). */
+/** Models that honour a last_frame anchor (OpenRouter catalog, 2026-10-06; Wan 3.0 rejects it). */
+export const LAST_FRAME_MODEL = /^(google\/veo-3\.1|kwaivgi\/kling-(v3|video-o1)|bytedance\/seedance|alibaba\/wan-2\.7|minimax\/hailuo-3|black-forest-labs\/flux-3-video)/;
+const SEED_MODEL = /^(google\/veo|bytedance\/seedance|alibaba\/wan|runway\/gen-4)/;
+export const supportsLastFrame = (model: string) => LAST_FRAME_MODEL.test(model);
+
+/**
+ * Provider passthrough for the negative prompt: `provider.options.<slug>.parameters.<key>` — unknown
+ * slugs or keys are silently dropped. Kling and Wan 2.6/2.7 are served by atlas-cloud.
+ */
 export function negativeOptions(model: string, negative?: string): Record<string, unknown> | null {
   if (!negative) return null;
-  if (/^kwaivgi\//.test(model)) return { options: { kling: { negative_prompt: negative } } };
+  if (/^kwaivgi\//.test(model) || /^alibaba\/wan-2\.[67]/.test(model)) return { options: { "atlas-cloud": { parameters: { negative_prompt: negative } } } };
   if (/^google\/veo/.test(model)) return { options: { "google-vertex": { parameters: { negativePrompt: negative } } } };
   return null;
 }
@@ -129,7 +141,15 @@ export function openrouterVideoBody(input: OpenRouterVideoInput, withAudioFlag =
     ...(input.resolution ? { resolution: input.resolution.toLowerCase() } : {}),
     // Our edit lays its own voiceover and music over the clips; silent clips are cheaper.
     ...(withAudioFlag ? { generate_audio: false } : {}),
-    ...(input.imageUrl ? { frame_images: [{ type: "image_url", image_url: { url: input.imageUrl }, frame_type: "first_frame" }] } : {}),
+    ...(input.seed !== undefined && SEED_MODEL.test(input.model) ? { seed: input.seed } : {}),
+    ...(input.imageUrl || input.lastImageUrl
+      ? {
+          frame_images: [
+            ...(input.imageUrl ? [{ type: "image_url", image_url: { url: input.imageUrl }, frame_type: "first_frame" }] : []),
+            ...(input.lastImageUrl && supportsLastFrame(input.model) ? [{ type: "image_url", image_url: { url: input.lastImageUrl }, frame_type: "last_frame" }] : []),
+          ],
+        }
+      : {}),
   };
 }
 
@@ -140,6 +160,9 @@ export async function submitOpenRouterVideo(input: OpenRouterVideoInput): Promis
     const msg = String(err instanceof Error ? err.message : err);
     // A model without an audio option rejects the flag; a refused passthrough option is dropped.
     if (/generate_audio|audio/i.test(msg)) return send(false);
+    // A model that refuses the end anchor still gets the start anchor (the clip is then trimmed in the edit).
+    if (input.lastImageUrl && /last_frame|frame_images/i.test(msg))
+      return call<{ id?: string }>("/videos", { body: openrouterVideoBody({ ...input, lastImageUrl: undefined }, true, true) });
     if (/provider|option|negative/i.test(msg)) return send(true, false);
     throw err;
   });

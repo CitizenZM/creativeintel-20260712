@@ -13,6 +13,10 @@
  *   refImageUrl    a per-shot product reference used instead of the kit packshot (e.g. a front render
  *            whose real bezel must show, or the TV with this shot's picture already on screen)
  *   castLock (first frame) the lead's description for the casting reference image
+ *   anchorEnd  first + last frame anchoring (default on where the model supports it): an end keyframe
+ *            K<n>E is edited from the approved start keyframe + cast + product refs, and the clip is
+ *            generated between the two, sized so the whole clip fills the frame and ends on the anchor
+ *   endState   what the end keyframe shows (default: the end of the motion prompt)
  * No director rewrite, no comparison LLM split, no cast-lock heuristics.
  */
 import type { CompiledJobDraft } from "./libtv-compile";
@@ -31,6 +35,8 @@ export interface LockedBlock {
   refImageUrl?: string;
   castLock?: string;
   fine?: string;
+  anchorEnd?: boolean;
+  endState?: string;
 }
 
 export interface LockedFrame {
@@ -47,6 +53,25 @@ export const LOCKED_STYLE = "locked-script";
 
 export function isLockedStoryboard(style: string | null | undefined): boolean {
   return style === LOCKED_STYLE;
+}
+
+/**
+ * Clip length that lets an end-anchored clip fill its frame: Kling takes 3–15 s, Veo 4/6/8 s. The clip
+ * then plays at `speed` = clip / frame. Skipped when that would speed people up by more than 1.7× the
+ * planned speed (unless forced) — plan anchored segments at 3–4 s with framings inside.
+ */
+export function anchorPlan(engine: LockedEngine, frameSec: number, plannedSpeed: number, force = false): { durationSec: number; speed: number; clipEndSec: number } | null {
+  const span = frameSec * plannedSpeed;
+  let d: number;
+  // Kling bills anything under 5 s as 5 s (measured), so its anchored clips are at least 5 s.
+  if (engine === "kling") d = Math.min(15, Math.max(5, Math.ceil(span - 1e-6)));
+  else if (engine === "veo" || engine === "veo1080") d = [4, 6, 8].find((x) => x >= span - 1e-6) ?? 8;
+  else return null;
+  const speed = d / frameSec;
+  if (!force && speed / plannedSpeed > 1.7) return null;
+  // Veo 3.1 Lite reaches its end anchor ~0.3 s early, then overshoots: cut there.
+  const clipEndSec = engine === "kling" ? d : d - 0.3;
+  return { durationSec: d, speed: Math.round((clipEndSec / frameSec) * 1000) / 1000, clipEndSec };
 }
 
 export interface LockedVideoChoice {
@@ -137,11 +162,31 @@ export function lockedDrafts(
       const v = opts.video(L.engine);
       const clipSec = Number(v.settings.duration) || 4;
       const speed = Math.max(1, L.speed ?? 1);
+      const anchor = L.anchorEnd === false ? null : anchorPlan(L.engine, len, speed, L.anchorEnd === true);
+      if (anchor) {
+        // End keyframe: image 1 = the approved start keyframe, then the cast sheet and the product ref.
+        const castRef = r.leftRefs.find((x) => x === "CAST");
+        const productRef = r.leftRefs.find((x) => x !== "CAST");
+        const endShot = L.endState?.trim()
+          ? `End state: ${L.endState.trim()}`
+          : `Start: ${(f.imagePrompt ?? "").slice(0, 500)} Action — show where it ends: ${(f.videoPrompt ?? "").slice(0, 500)}`;
+        drafts.push({
+          shotIndex: -1,
+          kind: "image",
+          nodeName: `K${n}E`,
+          leftRefs: [`K${n}`, ...(castRef ? [castRef] : []), ...(productRef ? [productRef] : [])],
+          prompt: endShot,
+          modelName: opts.imageModel,
+          settings: { ...opts.imgSettings, directed: 1, directedKeyframe: endShot, editFrom: "end", endCast: castRef ? 1 : 0, endProduct: productRef ? 1 : 0, endOf: n, frameNumber: null, coversFrames: [] },
+          sourceUrl: null,
+          creditsEstimated: opts.imageCredits,
+        });
+      }
       drafts.push({
         shotIndex: index,
         kind: "video",
         nodeName: `V${n}`,
-        leftRefs: [`K${n}`],
+        leftRefs: anchor ? [`K${n}`, `K${n}E`] : [`K${n}`],
         prompt: f.videoPrompt ?? "",
         modelName: v.modelName,
         settings: {
@@ -150,13 +195,14 @@ export function lockedDrafts(
           directed: 1,
           budgetMode: "full",
           frameSeconds: len,
-          frameOffsetsSec: [{ frameNumber: n, clipStartSec: 0, clipEndSec: Math.min(clipSec, len * speed) }],
-          speed,
+          frameOffsetsSec: [{ frameNumber: n, clipStartSec: 0, clipEndSec: anchor ? anchor.clipEndSec : Math.min(clipSec, len * speed) }],
+          speed: anchor ? anchor.speed : speed,
           zoomHit: L.zoomHit ?? null,
+          ...(anchor ? { anchorEnd: 1, duration: anchor.durationSec, seed: 1000 + n } : {}),
           ...(opts.holdVideos ? { hold: 1 } : {}),
         },
         sourceUrl: null,
-        creditsEstimated: v.credits,
+        creditsEstimated: anchor ? Math.round((v.credits * anchor.durationSec) / clipSec) : v.credits,
       });
     }
 

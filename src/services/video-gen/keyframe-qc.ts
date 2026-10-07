@@ -46,14 +46,34 @@ export async function smallImage(url: string, maxSide = 512): Promise<string> {
   }
 }
 
-export async function reviewKeyframe(imageUrl: string, shot: string): Promise<KeyframeVerdict | null> {
+/** Identity rules added when the keyframe was edited from references (cast sheet, product photo, start frame). */
+export const IDENTITY_QC = `
+IDENTITY (reference images follow the keyframe): reject when
+- a person who should be from the casting sheet has a different face, hair, skin tone, age or build
+- the product differs from the product reference in shape, bezel/frame thickness, ports, camera module, colour or logo placement
+- for an END frame (reference = the start frame): the room, lighting, framing distance or wardrobe changed.
+Name the mismatch in issues, e.g. "lead's face differs from casting sheet", "tablet bezel thicker than reference".`;
+
+export interface KeyframeRefs {
+  /** Labelled reference images, in the order the editor received them. */
+  images: { label: string; url: string }[];
+}
+
+export async function reviewKeyframe(imageUrl: string, shot: string, refs?: KeyframeRefs): Promise<KeyframeVerdict | null> {
   try {
     const { analyzeWithClaude } = await import("@/services/ai/claude-client");
+    const refParts = await Promise.all(
+      (refs?.images ?? []).slice(0, 3).map(async (r, i) => [
+        { type: "text" as const, text: `Reference ${i + 1} — ${r.label}:` },
+        { type: "image_url" as const, url: await smallImage(r.url, 384) },
+      ])
+    );
     return await analyzeWithClaude({
-      systemPrompt: KEYFRAME_QC_SYSTEM,
+      systemPrompt: refParts.length ? KEYFRAME_QC_SYSTEM + IDENTITY_QC : KEYFRAME_QC_SYSTEM,
       userPrompt: [
         { type: "text", text: `Intended shot: ${shot.replace(/\s+/g, " ").slice(0, 400)}\nReview this keyframe:` },
         { type: "image_url", url: await smallImage(imageUrl) },
+        ...refParts.flat(),
       ],
       responseSchema: verdictSchema,
       maxTokens: 300,

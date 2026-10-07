@@ -182,6 +182,24 @@ export async function editMatrixImage(
  */
 export type EditFrom = "cast" | "product" | "cast+product";
 
+/**
+ * End keyframe of an anchored segment. Image 1 is the approved start keyframe (composition, light, room,
+ * wardrobe); the next images are the cast sheet and/or the official product photo it must match exactly.
+ */
+export function endFramePrompt(shot: string, refs: { cast: boolean; product: boolean }): string {
+  const order = [refs.cast ? "the casting sheet (same faces, hair, skin tone, build, wardrobe)" : null, refs.product ? "the official product photo (same shape, bezel thickness, ports, camera module, logo placement)" : null].filter(Boolean);
+  const body = shot.replace(/\s+/g, " ").trim().slice(0, 900);
+  return [
+    "Edit image 1 to show the FINAL moment of this same shot — the end state of the action below — as one continuous photograph.",
+    `Shot and action: ${body}`,
+    "Keep everything else from image 1 identical: the room, props, lighting, lens, framing distance and colour grade. Change only what the action changes (poses, hands, the product's position).",
+    order.length ? `Correct identity against ${order.map((o, i) => `image ${i + 2} — ${o}`).join("; ")}.` : "",
+    "No collage, split screen or text on screens or signs.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function lockedEditPrompt(kind: EditFrom, shot: string, opts: { maxChars?: number } = {}): string {
   const keep =
     kind === "cast"

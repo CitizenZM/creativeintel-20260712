@@ -113,7 +113,8 @@ describe("realism", () => {
 
   it("sends 3–5 negatives per model family through the provider's own field", () => {
     expect(negativePromptFor("kwaivgi/kling-v3.0-std").split(",").length).toBeLessThanOrEqual(5);
-    expect(negativeOptions("kwaivgi/kling-v3.0-std", "waxy skin")).toEqual({ options: { kling: { negative_prompt: "waxy skin" } } });
+    // Kling is served by atlas-cloud on OpenRouter; options.kling was silently dropped.
+    expect(negativeOptions("kwaivgi/kling-v3.0-std", "waxy skin")).toEqual({ options: { "atlas-cloud": { parameters: { negative_prompt: "waxy skin" } } } });
     expect(negativeOptions("google/veo-3.1-lite", "over-smoothed")).toEqual({ options: { "google-vertex": { parameters: { negativePrompt: "over-smoothed" } } } });
     expect(negativeOptions("alibaba/wan-3.0", "x")).toBeNull();
     expect(openrouterVideoBody({ model: "kwaivgi/kling-v3.0-std", prompt: "p", aspectRatio: "9:16", durationSec: 3, negativePrompt: "waxy skin" })).toHaveProperty("provider");
