@@ -185,6 +185,10 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("spend-report"), projectId: z.string().min(1), since: z.string().min(4).optional() }),
   /** Client report (HTML + DOCX), uploaded; returns both URLs. narrative "template" skips the LLM summary. */
   z.object({ action: z.literal("campaign-report"), projectId: z.string().min(1), narrative: z.enum(["llm", "template"]).optional() }),
+  /** Static image ad set (templates × formats) from the brief + plan, rendered locally, uploaded, kept on Project.imageAdSets. */
+  z.object({ action: z.literal("image-ads"), projectId: z.string().min(1), templates: z.array(z.string()).max(12).optional(), formats: z.array(z.string()).max(12).optional(), promo: z.object({ pct: z.number().nullable().optional(), price: z.number().nullable().optional(), comparePrice: z.number().nullable().optional(), currency: z.string().nullable().optional(), code: z.string().nullable().optional(), deadline: z.string().nullable().optional(), label: z.string().max(40).nullable().optional() }).optional(), proof: z.object({ rating: z.number().min(0).max(5).nullable().optional(), reviewCount: z.number().int().nullable().optional(), quote: z.string().max(240).nullable().optional(), author: z.string().max(60).nullable().optional() }).optional(), copy: z.record(z.string(), z.string().max(160)).optional(), productUrl: z.string().url().optional(), beforeUrl: z.string().url().optional() }),
+  /** Pre-flight creative score of a run's master (thumb-stop predictor, no spend) → qcReport.preflight. */
+  z.object({ action: z.literal("preflight"), projectId: z.string().min(1), runId: z.string().min(1), platform: z.string().max(40).optional(), goal: z.string().max(40).optional() }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;

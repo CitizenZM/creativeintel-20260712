@@ -230,6 +230,7 @@ model Project {
   // running total of the SpendEntry ledger (open reservations at their estimate).
   budgetUsd         Float?
   spentUsd          Float?
+  imageAdSets       Json? // static image ad sets, latest first (services/image-ads/generate.ts): [{createdAt, items[{template, format, w, h, url}], skipped}]
 }
 
 model Brand {

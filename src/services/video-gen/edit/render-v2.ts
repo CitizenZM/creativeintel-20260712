@@ -517,6 +517,11 @@ export async function renderEditV2(input: {
     captionCoverage: spokenBeforeCta.length ? covered / Math.max(0.01, wordSpan) : input.frames.some((f) => f.voiceover?.trim()) ? 0 : null,
     ctaSec: plan.ctaSec,
   });
+  // Pre-flight creative score as an extra QC section (preflight/); never blocks the render.
+  const cov = qc.checks.find((c) => c.key === "caption_coverage")?.value;
+  qc.preflight = await import("../preflight")
+    .then((m) => m.preflightForEdit({ master, dir, aspectRatio: input.aspectRatio, canvas, plan, frames: input.frames, overlays, captions: windows.map((w) => ({ text: groups[w.group].map((x) => x.text).join(" "), startSec: w.startSec, endSec: w.endSec })), captionCoverage: typeof cov === "number" ? cov / 100 : null, known: measured }))
+    .catch((err) => (console.warn(`[edit-v2] preflight skipped for ${input.runId}:`, err instanceof Error ? err.message.slice(0, 160) : err), undefined));
 
   const previewFile = path.join(dir, "v2preview.mp4");
   await run(ff, ["-y", "-v", "error", "-i", master, "-vf", "scale=-2:1280", "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", previewFile], { timeout: 90_000 });

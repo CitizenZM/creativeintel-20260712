@@ -32,6 +32,8 @@ export interface QcReport {
   measuredAt: string;
   /** The master's hook style (q / c / p) — variants cover the other two. */
   hookStyle?: string;
+  /** Pre-flight creative score (thumb-stop predictor, preflight/): optional extra section. */
+  preflight?: import("../preflight/types").PreflightReport;
 }
 
 export interface QcInput {

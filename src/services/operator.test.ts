@@ -70,3 +70,12 @@ describe("operatorActionSchema — clone-ad / localize-run", () => {
     expect(operatorActionSchema.safeParse({ action: "localize-run", projectId: "p", runId: "r", locales: [] }).success).toBe(false);
   });
 });
+
+describe("image-ads / preflight actions", () => {
+  it("accept a static ad set request and a pre-flight score request", () => {
+    expect(operatorActionSchema.safeParse({ action: "image-ads", projectId: "p", templates: ["hero-product"], formats: ["1080x1080"], promo: { pct: 26, label: "Black Friday" }, proof: { rating: 4.6, reviewCount: 120 } }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "image-ads", projectId: "p", proof: { rating: 7 } }).success).toBe(false);
+    expect(operatorActionSchema.safeParse({ action: "preflight", projectId: "p", runId: "r", platform: "tiktok" }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "preflight", projectId: "p" }).success).toBe(false);
+  });
+});
