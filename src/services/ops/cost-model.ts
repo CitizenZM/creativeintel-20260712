@@ -89,6 +89,8 @@ const tok = (inPerM: number, outPerM: number, source: string, asOf = PRICES_AS_O
 export const DEFAULT_PRICES: PriceTable = {
   video: {
     "google/veo-3.1-lite": { perSec: 0.03, durations: [4, 6, 8], source: "libtv-pricing.ts Veo 3.1 Lite — measured: a 4 s 720p clip cost 11.9¢", asOf: "2026-10-04", verified: true },
+    // Native audio (talking-head clips, generate_audio): measured 2026-10-07 — a 6 s 720p clip with speech billed 29.7¢.
+    "google/veo-3.1-lite@audio": { perSec: 0.0495, durations: [4, 6, 8], source: "measured: 6 s 720p Veo 3.1 Lite with native audio billed 29.7¢ (run cmuya9gwk)", asOf: "2026-10-07", verified: true },
     "google/veo-3.1-lite@1080p": { perSec: 0.05, durations: [4, 6, 8], source: "libtv-pricing.ts Veo 3.1 Lite 1080P row (20¢ / 4 s)", asOf: PRICES_AS_OF },
     "alibaba/wan-3.0": { perSec: 0.1, source: "libtv-pricing.ts Wan 3.0 note (10¢/s, estimate)", asOf: PRICES_AS_OF },
     "kwaivgi/kling-v3.0-std": { perSec: 0.0832, minBillSec: 5, source: "libtv-pricing.ts Kling 3.0 — measured: a 3 s clip billed as 5 s (41.6¢)", asOf: PRICES_AS_OF, verified: true },
@@ -172,12 +174,12 @@ export interface PriceResult {
   source: string;
 }
 
-export function videoCostUsd(table: PriceTable, model: string, durationSec: number, resolution?: string | null): PriceResult & { billedSec: number } {
+export function videoCostUsd(table: PriceTable, model: string, durationSec: number, resolution?: string | null, audio = false): PriceResult & { billedSec: number } {
   const cat = catalogueId(model, "video");
   const id = cat.id ?? model;
   if (cat.free || FREE_MODEL.test(id)) return { usd: 0, free: true, billedSec: durationSec, source: "free engine" };
   const hi = /1080/i.test(resolution ?? "") || /1080/i.test(model);
-  const p = (hi && lookup(table.video, `${id}@1080p`)) || lookup(table.video, id);
+  const p = (audio && lookup(table.video, `${id}@audio`)) || (hi && lookup(table.video, `${id}@1080p`)) || lookup(table.video, id);
   if (!p) {
     return { usd: round(table.fallback.videoPerSec * durationSec), fallback: true, billedSec: durationSec, source: "fallback price (model not in the table)" };
   }
@@ -387,7 +389,7 @@ export function jobUnitUsd(table: PriceTable, job: CostJob, executor?: string | 
   if (!cents && FREE_ENGINES.has(executor ?? "")) return { usd: 0, free: true, source: "free engine" };
   const priced =
     job.kind === "video"
-      ? videoCostUsd(table, model, Number(s.duration) || Number(clipDurationSec) || 5, str(s.resolution))
+      ? videoCostUsd(table, model, Number(s.duration) || Number(clipDurationSec) || 5, str(s.resolution), !!s.nativeAudio)
       : imageCostUsd(table, model);
   // A model missing from the table but carrying a cents estimate (Matrix, paid Zhipu): trust the estimate.
   if (priced.fallback && cents && (job.creditsEstimated ?? 0) > 0) return { usd: (job.creditsEstimated ?? 0) / 100, source: "job credit estimate (US cents)" };
