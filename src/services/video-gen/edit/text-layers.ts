@@ -14,6 +14,11 @@
  */
 import { ensureFontconfig, pangoEscape } from "../glm-assemble";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
+import { joinTokens, sepBetween } from "../voiceover";
+
+/** Arabic / Hebrew text: a leading RLM makes the paragraph right-to-left even when it opens on a Latin brand name. */
+const RTL_TEXT = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+export const withBaseDirection = (markup: string) => (RTL_TEXT.test(markup) ? `\u200F${markup}` : markup);
 
 
 type Canvas = { w: number; h: number };
@@ -30,7 +35,7 @@ export async function renderMarkup(markup: string, opts: { family: string; fontF
   const sharp = await sharpLib();
   return sharp({
     text: {
-      text: markup,
+      text: withBaseDirection(markup),
       font: `${opts.family} ${opts.size}`,
       fontfile: opts.fontFile,
       width: opts.width,
@@ -67,10 +72,11 @@ export type Look = Pick<BrandStyle, "highlight" | "button" | "buttonText" | "off
 /** One state of a kinetic caption: the group's words, word `active` highlighted. */
 export function kineticCaptionPng(words: string[], active: number, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
   const size = Math.round(unit(canvas) * 0.074);
+  // CJK tokens join without spaces (joinTokens); everything else word by word.
   const markup = words
-    .map((w, i) => `<span foreground="${i === active ? look.highlight : "white"}">${pangoEscape(w.toUpperCase())}</span>`)
-    .join(" ");
-  const plain = `<span foreground="black">${pangoEscape(words.join(" ").toUpperCase())}</span>`;
+    .map((w, i) => `${i ? sepBetween(words[i - 1], w) : ""}<span foreground="${i === active ? look.highlight : "white"}">${pangoEscape(w.toUpperCase())}</span>`)
+    .join("");
+  const plain = `<span foreground="black">${pangoEscape(joinTokens(words).toUpperCase())}</span>`;
   return shadowed(markup, plain, { family: look.body.family, fontFile: look.body.file, size, width: Math.round(canvas.w * 0.86) });
 }
 
@@ -118,7 +124,8 @@ export function offerCardPng(text: string, canvas: Canvas, look: Look = DEFAULT_
 
 /** The CTA button that lands on a beat. */
 export function ctaButtonPng(text: string, canvas: Canvas, look: Look = DEFAULT_STYLE): Promise<Buffer> {
-  return pill(`${text.toUpperCase()}  ›`, canvas, { size: Math.round(unit(canvas) * 0.058), fg: look.buttonText, bg: look.button, family: look.body.family, fontFile: look.body.file, widthPct: 0.7 });
+  // Right-to-left buttons end on the left: the chevron points that way.
+  return pill(`${text.toUpperCase()}  ${RTL_TEXT.test(text) ? "‹" : "›"}`, canvas, { size: Math.round(unit(canvas) * 0.058), fg: look.buttonText, bg: look.button, family: look.body.family, fontFile: look.body.file, widthPct: 0.7 });
 }
 
 /** A comparison label: ours on the brand accent, the other side on a neutral dark pill. */

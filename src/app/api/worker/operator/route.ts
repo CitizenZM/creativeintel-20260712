@@ -23,6 +23,8 @@
  * POST { action: "export-pack", projectId, runId, platforms? } — videos, thumbnails, ad copy, bulk CSVs, README, manifest
  * POST { action: "perf-ask", projectId, question } — Performance Agent answer + the aggregated table it used
  * POST { action: "test-plan", projectId, totalBudget, days, goal?, platforms?, baseline?, targetCpa?, targetLift? } — testing plan → Project.testPlan
+ * POST { action: "clone-ad", projectId, teardownId | structureId, platform?, goal? } — Ad Cloner → Project.campaignPlan
+ * POST { action: "localize-run", projectId, runId, locales[], gender?, force? } — localized versions → qcReport.locales
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -410,6 +412,33 @@ export async function POST(request: Request) {
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
     }
+  }
+
+  if (input.action === "clone-ad") {
+    const { cloneAdIntoProject } = await import("@/services/creative/ad-cloner.store");
+    const { CampaignPlanError } = await import("@/services/creative/campaign-plan.store");
+    const { summarizePlan } = await import("@/services/creative/campaign-planner");
+    try {
+      const { plan, clone } = await cloneAdIntoProject(input.projectId, { teardownId: input.teardownId, structureId: input.structureId, platform: input.platform, goal: input.goal });
+      return NextResponse.json({ ok: true, label: clone.plan.label, hook: clone.hook, endCard: clone.endCard, summary: summarizePlan(plan) });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof CampaignPlanError ? err.status : 500 });
+    }
+  }
+
+  if (input.action === "localize-run") {
+    // Same clips, re-edited per locale (~2–3 min each) after the response; poll GET ?runId for qc.locales.
+    const run = await prisma.libtvRun.findFirst({ where: { id: input.runId, projectId: input.projectId }, select: { id: true, executor: true, status: true, qcReport: true } });
+    if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    if (!isServerEngine(run.executor) || run.status !== "completed") return NextResponse.json({ error: `Only completed server runs can be localized (status ${run.status})` }, { status: 409 });
+    const { missingLocales } = await import("@/services/video-gen/localize");
+    const queued = missingLocales((run.qcReport ?? {}) as never, input.locales, Date.now(), input.force);
+    if (queued.length) {
+      await loadAiSettings();
+      const { localizeRun } = await import("@/services/video-gen/localize-run");
+      after(() => localizeRun(run.id, queued, { gender: input.gender, force: input.force, budgetMs: 280_000 }).then((r) => console.log(`[localize] ${run.id}: done ${r.done.map((d) => d.locale).join(",") || "-"} failed ${r.failed.map((f) => `${f.locale} (${f.error.slice(0, 80)})`).join("; ") || "-"} left ${r.left.join(",") || "-"}`)));
+    }
+    return NextResponse.json({ ok: true, queued, skipped: input.locales.filter((l) => !queued.includes(l)), note: queued.length > 1 ? "Locales render one after another (~2–3 min each); any that don't fit this call's time budget stay missing — call again to continue." : undefined }, { status: 202 });
   }
 
   // approve-run: free server renders only.

@@ -1,0 +1,26 @@
+{
+  "id": "st_wait_01",
+  "sourceProjectId": "proj_other",
+  "name": "Glowly — curiosity gap · 5 beats",
+  "category": "tablet_laptop",
+  "goalType": "awareness",
+  "sourceTitle": "Glowly night reader — wait for it",
+  "sourceOwner": "Glowly",
+  "sourceUrl": "https://www.facebook.com/ads/library/?id=1234567890",
+  "sourceViews": 880000,
+  "hookType": "curiosity_gap",
+  "hookText": "Wait for it",
+  "durationSec": 20,
+  "beats": [
+    { "startSec": 0, "endSec": 2, "role": "hook", "visual": "Dark bedroom, something on the nightstand starts to glow", "onScreenText": "wait for it" },
+    { "startSec": 2, "endSec": 6, "role": "demo", "visual": "Hands-only demo: thumb taps the reader awake, page turns, warm light fades up", "onScreenText": "one tap" },
+    { "startSec": 6, "endSec": 11, "role": "proof", "visual": "Time-lapse of a whole night of reading, battery icon barely moves", "onScreenText": "weeks of battery" },
+    { "startSec": 11, "endSec": 16, "role": "brand", "visual": "Lifestyle: reading on the couch with a cat, cosy lamp light", "onScreenText": "made for nights in" },
+    { "startSec": 16, "endSec": 20, "role": "cta", "visual": "Logo lockup and a pill button", "onScreenText": "Shop now" }
+  ],
+  "proofDevices": [{ "type": "demo", "description": "time-lapse battery test", "timestamp": "8s" }],
+  "whyItWorks": "A suspense open holds the viewer, the one-tap demo pays it off immediately, a time-lapse proof makes battery life visible.",
+  "timesUsed": 3,
+  "sourceTeardownId": "td_other_9",
+  "createdAt": "2026-09-30T10:00:00.000Z"
+}

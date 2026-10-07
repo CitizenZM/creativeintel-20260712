@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { escapeXml, kineticGroups, placeLines, planVoiceover, respell, shownForm, spokenForm, subtitleCues, timedWords, toSrt } from "./voiceover";
+import { alignToSource, escapeXml, joinTokens, kineticGroups, placeLines, planVoiceover, respell, shownForm, spokenForm, subtitleCues, timedWords, toSrt } from "./voiceover";
 
 describe("planVoiceover", () => {
   it("speaks each beat once, spanning the frames that repeat its line", () => {
@@ -106,5 +106,34 @@ describe("caption spellings", () => {
 describe("escapeXml", () => {
   it("escapes what would break the TTS SSML", () => {
     expect(escapeXml("Bang & Olufsen <3")).toBe("Bang &amp; Olufsen &lt;3");
+  });
+});
+
+describe("unspaced scripts (ja / zh)", () => {
+  // Edge TTS word boundaries for 「NXTPAPER 14で、反射ゼロ。」 (punctuation dropped).
+  const line = "{NXTPAPER 14|ネクストペーパー フォーティーン}で、反射ゼロ。";
+  const tts = ["ネクスト", "ペーパー", "フォーティーン", "で", "反射", "ゼロ"].map((text, i) => ({ text, startSec: i * 0.3, durSec: 0.28 }));
+
+  it("aligns a line without spaces to the TTS words, keeping the source's punctuation", () => {
+    const out = alignToSource(tts.slice(3), "で、反射ゼロ。");
+    expect(out.map((w) => w.text)).toEqual(["で、", "反射", "ゼロ。"]);
+    expect(out[1].startSec).toBeCloseTo(1.2);
+  });
+
+  it("respells a spoken phrase the TTS split into several words, and joins CJK tokens without spaces", () => {
+    const timed = timedWords(tts, { startSec: 0, tempo: 1 }, line);
+    expect(timed.map((w) => w.text)).toEqual(["NXTPAPER", "14", "で、", "反射", "ゼロ。"]);
+    expect(joinTokens(timed.map((w) => w.text))).toBe("NXTPAPER 14で、反射ゼロ。");
+    expect(subtitleCues(tts, { startSec: 0, tempo: 1 }, 32, line).map((c) => c.text).join("")).toBe("NXTPAPER 14で、反射ゼロ。");
+  });
+
+  it("keeps a code the voice split (NXT + 20) as one token", () => {
+    const zh = ["使用", "优惠", "码", "NXT", "20", "立享"].map((text, i) => ({ text, startSec: i * 0.3, durSec: 0.28 }));
+    expect(alignToSource(zh, "使用优惠码NXT20，立享").map((w) => w.text)).toEqual(["使用", "优惠", "码", "NXT20，", "立享"]);
+  });
+
+  it("keeps spaces for spaced scripts", () => {
+    expect(joinTokens(["반사", "제로"])).toBe("반사 제로");
+    expect(joinTokens(["sin", "reflejos."])).toBe("sin reflejos.");
   });
 });

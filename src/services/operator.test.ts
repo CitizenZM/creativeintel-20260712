@@ -58,3 +58,15 @@ describe("operatorActionSchema — performance agent + test plan", () => {
     expect(operatorActionSchema.safeParse({ action: "test-plan", projectId: "p", totalBudget: -1, days: 14 }).success).toBe(false);
   });
 });
+
+describe("operatorActionSchema — clone-ad / localize-run", () => {
+  it("accepts a clone from a teardown or a structure", () => {
+    expect(operatorActionSchema.safeParse({ action: "clone-ad", projectId: "p", teardownId: "t" }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "clone-ad", projectId: "p", structureId: "s", platform: "tiktok" }).success).toBe(true);
+  });
+  it("accepts supported locales only", () => {
+    expect(operatorActionSchema.safeParse({ action: "localize-run", projectId: "p", runId: "r", locales: ["es-US", "ja-JP", "ar-SA"] }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "localize-run", projectId: "p", runId: "r", locales: ["en-GB"] }).success).toBe(false);
+    expect(operatorActionSchema.safeParse({ action: "localize-run", projectId: "p", runId: "r", locales: [] }).success).toBe(false);
+  });
+});

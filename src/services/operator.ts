@@ -7,6 +7,7 @@
  */
 import { z } from "zod";
 import { appendFrameHistory } from "@/services/creative-library";
+import { LOCALES } from "@/services/video-gen/localize";
 
 export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("approve-frames"), projectId: z.string().min(1), storyboardId: z.string().min(1) }),
@@ -145,6 +146,10 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("render-batch"), projectId: z.string().min(1), runId: z.string().min(1), batchId: z.string().min(1), limit: z.number().int().min(1).max(10).default(1) }),
   /** Export pack: videos + thumbnails, per-platform ad copy, Meta/TikTok bulk CSVs, README, manifest (+ zip). */
   z.object({ action: z.literal("export-pack"), projectId: z.string().min(1), runId: z.string().min(1), platforms: z.array(z.string()).max(12).optional() }),
+  /** Ad Cloner: a winning ad's structure (stored teardown or saved structure) for our product → Project.campaignPlan "Cloned from <ref>". */
+  z.object({ action: z.literal("clone-ad"), projectId: z.string().min(1), teardownId: z.string().min(1).optional(), structureId: z.string().min(1).optional(), platform: z.string().min(1).optional(), goal: z.string().max(80).optional() }),
+  /** Localized versions of a finished master (same clips; translated VO, captions, text, end card). Renders in the background. */
+  z.object({ action: z.literal("localize-run"), projectId: z.string().min(1), runId: z.string().min(1), locales: z.array(z.enum(LOCALES)).min(1).max(LOCALES.length), gender: z.enum(["male", "female"]).optional(), force: z.boolean().optional() }),
   z.object({
     action: z.literal("approve-run"),
     projectId: z.string().min(1),
