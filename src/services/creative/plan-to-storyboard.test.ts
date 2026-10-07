@@ -83,3 +83,16 @@ describe("directPlanStoryboard", () => {
     expect(out.frames).toHaveLength(6);
   });
 });
+
+describe("cleanVisual / refs for live plan visuals", async () => {
+  const { cleanVisual } = await import("./plan-to-storyboard");
+  it("strips edit-time layers from keyframe visuals", () => {
+    expect(cleanVisual(`End card E02: official NXTPAPER 14 packshot + "20% OFF" badge slam.`, "NXTPAPER 14")).not.toMatch(/badge|end card/i);
+    expect(cleanVisual(`Macro: slide between screens. Overlay: 'Same resolution, zero grain' — crisp text.`, "X")).not.toMatch(/Overlay|Same resolution/);
+    expect(cleanVisual("End card E02: badge slam.", "NXTPAPER 14")).toMatch(/Hero shot of the NXTPAPER 14/);
+  });
+  it("an offer beat that starts with 'End card' still carries the product ref", () => {
+    const p = { ...plan, scripts: [{ ...plan.scripts[0], beats: [{ t0: 0, t1: 2, purpose: "offer", visual: "End card E02: packshot + badge" }] }] } as unknown as PlatformPlan;
+    expect(scaffoldLockedFrames({ plan: p, productName: "NXTPAPER 14" })[0].locked.refs).toBe("product");
+  });
+});

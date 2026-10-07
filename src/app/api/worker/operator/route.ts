@@ -299,6 +299,7 @@ export async function POST(request: Request) {
       cast: input.cast,
       setting: input.setting,
       engine: input.engine,
+      ctaButton: input.ctaButton,
     });
     const sb = await prisma.storyboard.create({
       data: { projectId: input.projectId, title: out.title, frames: out.frames as unknown as object[], style: "locked-script", frameSeconds: 1 },
