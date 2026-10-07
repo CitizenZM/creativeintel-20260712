@@ -35,6 +35,7 @@
  * POST { action: "creative-agent", projectId, message, storyboardId? } / { action: "creative-agent-undo", projectId } — chat edits to the plan / storyboard
  * POST { action: "covers", projectId, runId, force? } — cover frames (9:16 / 1:1 / 4:5) for the master + variants / exports → qcReport.covers
  * POST { action: "auto-fix", projectId, runId, platform? } — re-edit once with pre-flight corrections (free) → qcReport.autofix
+ * POST { action: "ops-health" } / { action: "ops-recover", dryRun? (default true) } — health scan / safe auto-recovery
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -521,6 +522,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
     }
   }
+
+  if (input.action === "ops-health") return NextResponse.json(await (await import("@/services/ops/health")).scanHealth()); // report.ok = no critical / warning issues
+  if (input.action === "ops-recover") return NextResponse.json({ ok: true, ...(await (await import("@/services/ops/health")).autoRecover({ dryRun: input.dryRun })) });
 
   // approve-run: free server renders only.
   await loadAiSettings();

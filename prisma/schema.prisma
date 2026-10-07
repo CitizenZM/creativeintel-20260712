@@ -1248,3 +1248,27 @@ model AutopilotRun {
   @@index([status, updatedAt])
   @@index([projectId])
 }
+
+/// Ops health monitor (services/ops/health.ts): one row per auto-recovery action it took — re-drive a run,
+/// re-assemble a stale assembly, release an orphaned spend reservation, re-queue a failed provider task.
+model OpsEvent {
+  id         String   @id @default(cuid())
+  action     String // redrive-run | reassemble-run | release-reservation | requeue-job
+  issueCode  String? // the health issue that triggered it (run.approved-stale, …)
+  targetType String? // run | job | spend
+  targetId   String?
+  projectId  String?
+  ok         Boolean  @default(true)
+  detail     Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action, createdAt])
+}
+
+/// Last run of each Vercel cron (one row per cron, upserted on every run) — cron freshness on /status.
+model CronHeartbeat {
+  name      String   @id
+  lastRunAt DateTime @default(now())
+  runs      Int      @default(0)
+}
