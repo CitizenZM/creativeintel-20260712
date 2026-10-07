@@ -95,6 +95,7 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     cast: z.string().max(400).optional(),
     setting: z.string().max(300).optional(),
     engine: z.enum(["kling", "veo", "veo1080"]).optional(),
+    ctaButton: z.string().max(40).optional(),
   }),
   /** Pick 3 diverse opening hooks + an end card for category × platform × goal (category defaults to the stored brief). */
   z.object({

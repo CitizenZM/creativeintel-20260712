@@ -19,6 +19,8 @@ export interface PlanStoryboardInput {
   /** Shared set dressing so every shot reads as one location. */
   setting?: string;
   engine?: LockedEngine;
+  /** CTA button copy override (e.g. "Claim Coupon"); default the plan end card's button. */
+  ctaButton?: string;
 }
 
 export interface PlanStoryboardFrame extends LockedFrame {
@@ -28,7 +30,6 @@ export interface PlanStoryboardFrame extends LockedFrame {
 }
 
 const PEOPLE = /\b(hands?|person|people|man|woman|mother|mom|father|dad|kid|child|children|family|girl|boy|couple|friends?|she|he|creator|user|customer|student|artist)\b/i;
-const NO_PRODUCT = /^(logo|end card|button)\b/i;
 
 const SEGMENT: Record<PlanBeat["purpose"], string> = { hook: "HOOK", pitch: "HOOK", proof: "BODY", benefit: "BODY", objection: "BODY", offer: "BODY", cta: "CTA" };
 
@@ -41,11 +42,21 @@ export function pickScript(plan: PlatformPlan, hookId?: string): PlanScript {
   return { hookId: h?.hookId ?? "", title: h?.name ?? plan.label, beats: [...hook, ...plan.beats.filter((b) => b.purpose !== "hook")] };
 }
 
+/** Every ad frame shows the product (an unreferenced product shot is where the model invents one). */
 function refsFor(visual: string, purpose: PlanBeat["purpose"]): LockedRefs {
-  const people = PEOPLE.test(visual);
-  if (purpose === "cta") return "product";
-  if (NO_PRODUCT.test(visual.trim())) return people ? "cast" : "none";
-  return people ? "cast+product" : "product";
+  if (purpose === "cta" || purpose === "offer" || purpose === "pitch") return "product";
+  return PEOPLE.test(visual) ? "cast+product" : "product";
+}
+
+/** Plan visuals mention edit-time layers ("End card E02: …", "Overlay: '…'", "badge slam"); keyframes must not. */
+export function cleanVisual(visual: string, product: string): string {
+  const v = visual
+    .replace(/^\s*(end card|logo)[^:]*:\s*/i, "")
+    .replace(/\boverlay:?\s*(['"“]).*?\1/gi, "")
+    .replace(/[^.]*\b(badge|button|end card|logo|overlay|caption|text on screen)\b[^.]*\.?/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return v || `Hero shot of the ${product} from image 1, centered, softly lit`;
 }
 
 /** Deterministic frames; prompts are usable as-is when the model pass fails. */
@@ -59,7 +70,7 @@ export function scaffoldLockedFrames(input: PlanStoryboardInput): PlanStoryboard
     const refs = refsFor(b.visual, b.purpose);
     const people = refs === "cast" || refs === "cast+product";
     const productShot = refs === "product";
-    const visual = b.purpose === "cta" ? `Hero shot of the ${product} from image 1, centered, on a warm softly lit table` : b.visual;
+    const visual = b.purpose === "cta" ? `Hero shot of the ${product} from image 1, centered, on a warm softly lit table` : cleanVisual(b.visual, product);
     const locked: PlanStoryboardFrame["locked"] = { engine, refs, anchorEnd: true };
     if (people && !castGiven && input.cast) {
       locked.castLock = input.cast;
@@ -68,7 +79,7 @@ export function scaffoldLockedFrames(input: PlanStoryboardInput): PlanStoryboard
     if (productShot) locked.zoomHit = { x: 0.5, y: 0.5 };
     if (b.purpose === "cta") {
       const ec = input.plan.endCard;
-      locked.endCard = { id: ec.id, data: { ...(ec.data ?? {}), button: ec.button, ...(ec.headline ? { headline: ec.headline } : {}) } };
+      locked.endCard = { id: ec.id, data: { ...(ec.data ?? {}), button: input.ctaButton?.trim() || ec.button, ...(ec.headline ? { headline: ec.headline } : {}) } };
     }
     const subject = refs === "none" ? "" : ` The ${product} from image 1 matches the reference exactly.`;
     return {
@@ -93,6 +104,7 @@ export const directorCopySchema = z
   .catch({});
 
 const DIRECTOR_SYSTEM = `You are the director of a short vertical product video ad. For each numbered frame write:
+- NEVER add badges, stickers, labels, certification marks, logos, buttons, price tags, captions or any text to the product or the scene, and never leave "space for" them — every overlay, end card and button is added later in the edit and must not be mentioned. The product carries only what the reference shows.
 - imagePrompt: the first keyframe as one photorealistic still (subject, action, framing, lens, light, set). Refer to the product as "the <product> from image 1" and keep it exactly as the reference (shape, bezel, thickness, colour, logo). Never ask for readable text, UI or screen content you cannot control.
 - videoPrompt: the motion inside the frame duration with second marks (e.g. "0–1s: … 1–3s: …"), natural speed; zooms always end on the product.
 - endState: what the last frame of the clip shows (the clip is generated between the first and the last keyframe).
@@ -118,7 +130,7 @@ export async function directPlanStoryboard(
     "FRAMES:",
     ...frames.map((f, k) => {
       const b = script.beats[k];
-      return `${f.frameNumber}. ${f.startSec}–${f.endSec}s ${b.purpose.toUpperCase()} refs=${f.locked.refs} — ${b.visual}${b.onScreenText ? ` | overlay "${b.onScreenText}" (added in edit, not in the image)` : ""}`;
+      return `${f.frameNumber}. ${f.startSec}–${f.endSec}s ${b.purpose.toUpperCase()} refs=${f.locked.refs} — ${cleanVisual(b.visual, input.productName)}`;
     }),
   ]
     .filter(Boolean)
