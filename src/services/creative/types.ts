@@ -116,6 +116,8 @@ export interface CreativeInputs {
    * always required.
    */
   strictCompliance?: boolean;
+  /** Performance Agent score adjustments by hook id / end-card id (services/performance/bias.ts), bounded ±3. */
+  bias?: Partial<Record<string, number>>;
 }
 
 export interface CreativeChoice {

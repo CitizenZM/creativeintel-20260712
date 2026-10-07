@@ -261,3 +261,15 @@ describe("fitSpoken", () => {
     expect(fitSpoken("one two three four five six seven eight nine ten eleven", 5)).toBe("one two three four five.");
   });
 });
+
+describe("planCampaign performance bias", () => {
+  it("passes the bias through to creative selection and notes it", async () => {
+    const date = "2026-03-10T12:00:00Z";
+    const plain = await planCampaign({ brief, platforms: ["meta_feed"], goal: "cold", runDate: date, llm: async () => ({}) });
+    const target = plain.platforms[0].hookVariants[2].hookId;
+    const biased = await planCampaign({ brief, platforms: ["meta_feed"], goal: "cold", runDate: date, llm: async () => ({}), bias: { [target]: 3 } });
+    expect(biased.platforms[0].hookVariants[0].hookId).toBe(target);
+    expect(biased.notes.join(" ")).toMatch(new RegExp(`performance bias from real results: ${target} \\+3`));
+    expect(plain.notes.join(" ")).not.toMatch(/performance bias/);
+  });
+});

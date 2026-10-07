@@ -25,6 +25,8 @@ export interface PlanRequest {
   /** Studio overrides: { [platform]: { hookIds?, endCardId? } } (or { pinnedHooks, endCards }). */
   overrides?: unknown;
   llm?: LlmFn;
+  /** Performance Agent bias; default: loaded from this project's imported results (null = off). */
+  bias?: Partial<Record<string, number>> | null;
 }
 
 /** Strict legal gating is opt-in: per request, or globally with CREATIVE_STRICT_COMPLIANCE=true. */
@@ -58,6 +60,7 @@ export async function createCampaignPlan(projectId: string, req: PlanRequest = {
     strictCompliance: req.strictCompliance ?? strictByDefault(),
     overrides: normalizeOverrides(req.overrides),
     llm: req.llm,
+    bias: req.bias === undefined ? await import("@/services/performance/agent").then((m) => m.performanceBias(projectId)).catch(() => undefined) : (req.bias ?? undefined),
   });
   await prisma.project.update({ where: { id: projectId }, data: { campaignPlan: plan as object, campaignPlanAt: new Date() } });
   return plan;

@@ -20,6 +20,7 @@ export async function saveRows(projectId: string, rows: PerfRow[], source = "csv
       clicks: r.clicks,
       spend: r.spend,
       conversions: r.conversions,
+      perfRevenue: r.revenue ?? null,
     };
     const existing = await prisma.adPerformance.findFirst({ where: { projectId, platform: r.platform, adName: data.adName, dateFrom: r.dateFrom } });
     if (existing) await prisma.adPerformance.update({ where: { id: existing.id }, data });

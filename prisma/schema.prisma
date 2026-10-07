@@ -223,6 +223,9 @@ model Project {
   competitorRollups CompetitorRollup[]
   libtvRuns         LibtvRun[]
   adPerformance     AdPerformance[]
+  perfElementMaps   PerfElementMap[] // Performance Agent: ad name → creative elements
+  testPlan          Json? // test-plan strategist: structure, phases, kill/scale rules, round-1 variants (services/creative/test-plan.ts)
+  testPlanAt        DateTime?
 }
 
 model Brand {
@@ -1140,9 +1143,31 @@ model AdPerformance {
   conversions Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  perfRevenue Float? // purchase conversion value, for ROAS (Performance Agent)
 
   @@unique([projectId, platform, adName, dateFrom])
   @@index([projectId, hookStyle])
+}
+
+/// Performance Agent mapping table: which creative elements an ad name carries, for ads whose
+/// names don't encode them (services/performance/elements.ts). Name-parsed tokens win; this fills gaps.
+model PerfElementMap {
+  id             String   @id @default(cuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  adName         String
+  runId          String?
+  hookId         String? // H01–H35
+  endCardId      String? // E01–E12
+  voice          String?
+  aspect         String? // 9x16 | 4x5 | 1x1 | 16x9
+  durationSec    Int?
+  sellingPointId String?
+  platform       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([projectId, adName])
 }
 
 /// A proven ad structure saved from a teardown — hook, beat timeline, proof

@@ -35,6 +35,8 @@ export interface ScaffoldOptions {
   hookIds?: string[];
   /** User-chosen end card: replaces the auto pick, which moves into the alternates. */
   endCardId?: EndCardId;
+  /** Performance Agent score adjustments (hook / end-card id → points), see services/performance/bias.ts. */
+  bias?: CreativeInputs["bias"];
 }
 
 /* ───────────────────────── helpers ───────────────────────── */
@@ -296,7 +298,7 @@ export function scaffoldPlatformPlan(
   const D = Math.round(clamp(opts.durationSec ?? profile.durationSec.ideal, Math.max(5, profile.durationSec.range[0]), profile.durationSec.max));
   const strict = !!opts.strictCompliance;
   const category = TO_CREATIVE_CATEGORY[brief.category as SpCategory] ?? "gifts";
-  const auto = selectCreative({ category, platform, goal, promo, runDate, assets: opts.assets, ctv: opts.ctv, strictCompliance: strict });
+  const auto = selectCreative({ category, platform, goal, promo, runDate, assets: opts.assets, ctv: opts.ctv, strictCompliance: strict, bias: opts.bias });
   const choice = applyOverrides(auto, opts);
   const facts = offerFacts(promo, runDate);
   const product = squash(brief.product?.name) || squash(brief.product?.brand) || "the product";
@@ -628,6 +630,8 @@ export interface PlanCampaignInput {
   overrides?: PlanOverrides | Record<string, unknown>;
   llm?: LlmFn;
   now?: Date;
+  /** Performance Agent bias from real results (performanceBias(projectId)); optional. */
+  bias?: CreativeInputs["bias"];
 }
 
 export const DEFAULT_PLAN_PLATFORMS: PlatformId[] = ["tiktok", "instagram_reels", "meta_feed"];
@@ -642,12 +646,14 @@ export async function planCampaign(input: PlanCampaignInput): Promise<CampaignPl
   const platforms = await Promise.all(
     ids.map(async (platform) => {
       const o = overrides[platform];
-      const scaffold = scaffoldPlatformPlan(input.brief, platform, goal, input.promo, runDate, { durationSec: input.durationSec, strictCompliance: input.strictCompliance, assets: input.assets, hookIds: o?.hookIds, endCardId: o?.endCardId });
+      const scaffold = scaffoldPlatformPlan(input.brief, platform, goal, input.promo, runDate, { durationSec: input.durationSec, strictCompliance: input.strictCompliance, assets: input.assets, hookIds: o?.hookIds, endCardId: o?.endCardId, bias: input.bias });
       const res = await writeCampaignScripts(scaffold, input.brief, { goal, promo: input.promo, runDate, strictCompliance: input.strictCompliance, llm: input.llm });
       if (res.source === "fallback") notes.push(`${platform}: copy pass failed, scaffold copy used (${clip(res.error, 100)})`);
       return res.plan;
     })
   );
+  const biased = Object.entries(input.bias ?? {}).filter(([, v]) => v);
+  if (biased.length) notes.push(`performance bias from real results: ${biased.map(([k, v]) => `${k} ${v! > 0 ? "+" : ""}${v}`).join(", ")}`);
   const productTitle = [input.brief.product?.brand, input.brief.product?.name].map(squash).filter(Boolean).join(" ") || "Product";
   return {
     version: 1,

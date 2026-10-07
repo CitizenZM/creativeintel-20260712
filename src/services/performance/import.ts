@@ -18,6 +18,8 @@ export interface PerfRow {
   clicks: number;
   spend: number;
   conversions: number;
+  /** Purchase conversion value (ROAS); null when the export has no value column. */
+  revenue?: number | null;
 }
 
 /** RFC-4180-ish CSV (quoted fields, doubled quotes, CRLF), also tab-separated exports. */
@@ -70,6 +72,7 @@ const COLS: Record<keyof Omit<PerfRow, "platform" | "hookStyle" | "format">, Reg
   clicks: [/^link clicks$/i, /clicks \(all\)/i, /^clicks \(destination\)/i, /^clicks$/i],
   spend: [/amount spent/i, /^cost$/i, /^spend$/i, /total cost/i],
   conversions: [/^results$/i, /^conversions$/i, /^purchases$/i],
+  revenue: [/purchases? conversion value/i, /^conversion value/i, /total purchase value/i, /complete payment value/i, /^revenue$/i, /^purchase value/i],
 };
 
 /** Fields a Batch Mode name adds (creative/batch-matrix.ts batchAdName). */
@@ -146,8 +149,9 @@ export function rowsFromCsv(text: string): { rows: PerfRow[]; platform: PerfRow[
       clicks: Math.round(num(r[idx.clicks])),
       spend: num(r[idx.spend]),
       conversions: Math.round(num(r[idx.conversions])),
+      revenue: idx.revenue >= 0 ? num(r[idx.revenue]) : null,
     });
   }
-  const unmatchedHeaders = (Object.keys(COLS) as (keyof typeof COLS)[]).filter((k) => idx[k] < 0 && k !== "dateTo" && k !== "conversions");
+  const unmatchedHeaders = (Object.keys(COLS) as (keyof typeof COLS)[]).filter((k) => idx[k] < 0 && k !== "dateTo" && k !== "conversions" && k !== "revenue");
   return { rows, platform, unmatchedHeaders };
 }

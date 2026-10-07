@@ -50,3 +50,11 @@ describe("batch + export-pack actions", () => {
     expect(operatorActionSchema.safeParse({ action: "export-pack", projectId: "p", runId: "r" }).success).toBe(true);
   });
 });
+
+describe("operatorActionSchema — performance agent + test plan", () => {
+  it("accepts perf-ask and test-plan, rejects bad budgets", () => {
+    expect(operatorActionSchema.safeParse({ action: "perf-ask", projectId: "p", question: "Which hook wins?" }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "test-plan", projectId: "p", totalBudget: 5000, days: 14, baseline: { meta: { cpm: 11, ctr: 0.012 } } }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "test-plan", projectId: "p", totalBudget: -1, days: 14 }).success).toBe(false);
+  });
+});
