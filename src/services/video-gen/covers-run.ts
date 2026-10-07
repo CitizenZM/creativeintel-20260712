@@ -103,16 +103,14 @@ export async function coversForRun(projectId: string, runId: string, opts: { for
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 
-  // Record on the fresh report (other renders may have written meanwhile).
-  const fresh = await prisma.libtvRun.findUnique({ where: { id: run.id }, select: { qcReport: true } });
-  const qc = (fresh?.qcReport && typeof fresh.qcReport === "object" ? fresh.qcReport : {}) as QcCovers & Record<string, unknown>;
+  // Record on the fresh report, conditionally (other renders may write meanwhile — qc-report.patchQcReport).
   const by = new Map(done.map((d) => [d.key, d.covers]));
-  const next = {
+  const { patchQcReport } = await import("./qc-report");
+  await patchQcReport<QcCovers & Record<string, unknown>>(run.id, (qc) => ({
     ...qc,
     ...(by.has("master") ? { covers: by.get("master") } : {}),
     ...(qc.variants ? { variants: qc.variants.map((v) => (by.has(`variant:${v.hookStyle}`) ? { ...v, covers: by.get(`variant:${v.hookStyle}`) } : v)) } : {}),
     ...(qc.exports ? { exports: qc.exports.map((e) => (by.has(`export:${e.format}`) ? { ...e, covers: by.get(`export:${e.format}`) } : e)) } : {}),
-  };
-  await prisma.libtvRun.update({ where: { id: run.id }, data: { qcReport: next as never } });
+  }));
   return done;
 }

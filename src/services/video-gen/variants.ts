@@ -10,6 +10,7 @@ import { renderHookVariant } from "./glm-assemble";
 import { isServerEngine } from "./libtv-pricing";
 import { storyboardFrames } from "./server-executor";
 import { loadLearning } from "@/services/performance/store";
+import { patchQcReport } from "./qc-report";
 
 export type HookStyle = "q" | "c" | "p";
 export const AUTO_STYLES: HookStyle[] = ["c", "p"];
@@ -62,12 +63,12 @@ export function variantAdName(parts: { brand?: string | null; title?: string | n
 }
 
 async function setPending(runId: string, style: HookStyle, at: string | null) {
-  const run = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true } });
-  const qc = qcOf(run ?? { qcReport: null });
-  const pending = { ...(qc.variantsPending ?? {}) };
-  if (at) pending[style] = at;
-  else delete pending[style];
-  await prisma.libtvRun.update({ where: { id: runId }, data: { qcReport: { ...qc, variantsPending: pending } as never } });
+  await patchQcReport<Qc>(runId, (qc) => {
+    const pending = { ...(qc.variantsPending ?? {}) };
+    if (at) pending[style] = at;
+    else delete pending[style];
+    return { ...qc, variantsPending: pending };
+  });
 }
 
 /** Render one hook variant of a completed server run and keep it on the run. */
@@ -95,12 +96,11 @@ export async function renderVariantForRun(runId: string, style: HookStyle, hookT
       createdAt: new Date().toISOString(),
       ...(v.covers ? { covers: v.covers } : {}),
     };
-    const fresh = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true } });
-    const qc = qcOf(fresh ?? { qcReport: null });
-    const pending = { ...(qc.variantsPending ?? {}) };
-    delete pending[style];
-    const variants = [...(qc.variants ?? []).filter((x) => x.hookStyle !== style), entry];
-    await prisma.libtvRun.update({ where: { id: runId }, data: { qcReport: { ...qc, variants, variantsPending: pending } as never } });
+    await patchQcReport<Qc>(runId, (qc) => {
+      const pending = { ...(qc.variantsPending ?? {}) };
+      delete pending[style];
+      return { ...qc, variants: [...(qc.variants ?? []).filter((x) => x.hookStyle !== style), entry], variantsPending: pending };
+    });
     return entry;
   } catch (err) {
     await setPending(runId, style, null).catch(() => {});
@@ -127,8 +127,17 @@ export async function advanceAutoVariants(): Promise<{ runId: string; style: Hoo
     // The AI director signs off a new master first (fast — one vision call).
     if (!qc.director && process.env.AI_DIRECTOR !== "off") {
       const { reviewAndStore } = await import("./director");
-      await reviewAndStore(r.id);
-      return { runId: r.id, style: "director" };
+      try {
+        await reviewAndStore(r.id);
+        return { runId: r.id, style: "director" };
+      } catch (err) {
+        // A refused (over budget) or failed review must not wedge the cron on this run: record it as
+        // skipped (the run moves on to its variants next time) and go on to the next run.
+        const reason = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+        console.warn(`[hook-variants] director review of ${r.id} skipped: ${reason}`);
+        await patchQcReport(r.id, (cur) => (cur.director ? null : { ...cur, director: { skipped: true, reason, at: new Date().toISOString() } })).catch(() => undefined);
+        continue;
+      }
     }
     // Evidence first: the style real results favour is rendered before the others.
     const order = (await loadLearning(r.projectId))?.order ?? [];

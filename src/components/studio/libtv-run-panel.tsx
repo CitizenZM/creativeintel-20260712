@@ -934,7 +934,12 @@ function QcCard({
           ))}
         </tbody>
       </table>
-      {qc.director && (
+      {qc.director?.skipped && (
+        <p className="mt-2 text-muted-foreground" data-testid="director-skipped">
+          AI director review skipped: {qc.director.reason}
+        </p>
+      )}
+      {qc.director && !qc.director.skipped && (
         <div className="mt-2 rounded-md bg-muted/50 px-2 py-1.5" data-testid="director-review">
           <p>
             <span className="font-medium">AI director: {qc.director.score}/100</span>{" "}
@@ -954,7 +959,7 @@ function QcCard({
           {onFixShots && qc.director.shotIndexes.length > 0 && (
             <button
               type="button"
-              onClick={() => onFixShots(qc.director!.shotIndexes)}
+              onClick={() => onFixShots((qc.director as { shotIndexes: number[] }).shotIndexes)}
               className="mt-1 rounded-md border border-border px-2 py-1 font-medium hover:border-foreground/40"
               data-testid="director-fix"
             >

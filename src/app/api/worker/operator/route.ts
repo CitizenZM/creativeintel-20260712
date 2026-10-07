@@ -227,9 +227,14 @@ export async function POST(request: Request) {
       subtitlesUrl: master.subtitlesUrl,
       previewMp4Url: master.previewUrl ?? null,
       contactSheetUrl: master.contactSheetUrl ?? null,
-      qcReport: master.qcReport ? { ...master.qcReport, variants: ((run.qcReport as { variants?: unknown[] } | null)?.variants ?? []), batches: ((run.qcReport as { batches?: unknown[] } | null)?.batches ?? []) } : null,
       creditsSpent: run.creditsSpent,
     });
+    // The new cut's measurements replace the old ones; every other key (variants, batches, locales, exports,
+    // the export pack, auto-fix, the director review…) is kept — written conditionally, on the fresh report.
+    if (master.qcReport) {
+      const { mergeReassembledQc, patchQcReport } = await import("@/services/video-gen/qc-report");
+      await patchQcReport(run.id, (qc) => mergeReassembledQc(qc, master.qcReport as unknown as Record<string, unknown>));
+    }
     return NextResponse.json({ ok: true, run: summarize((await getRunWithJobs(run.id))!), qc: master.qcReport ?? null });
   }
 

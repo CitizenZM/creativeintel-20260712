@@ -12,13 +12,13 @@ import { storyboardFrames } from "./server-executor";
 import { variantAdName } from "./variants";
 import { captionFontFor, localeAdName, localeProfile, localizeFrames, missingLocales, type LlmFn, type LocaleEntry, type LocaleId, type VoiceGender } from "./localize";
 import type { BrandFont } from "./edit/brand-style";
+import { patchQcReport } from "./qc-report";
 
 type Qc = Record<string, unknown> & { locales?: LocaleEntry[]; localesPending?: Record<string, string> };
 
+/** Optimistic qcReport write (qc-report.patchQcReport): other writers' keys are never lost. */
 async function patchQc(runId: string, fn: (qc: Qc) => Qc) {
-  const run = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true } });
-  const qc = (run?.qcReport && typeof run.qcReport === "object" ? run.qcReport : {}) as Qc;
-  await prisma.libtvRun.update({ where: { id: runId }, data: { qcReport: fn(qc) as never } });
+  await patchQcReport<Qc>(runId, fn);
 }
 
 /** A face with the locale's glyphs: a local file when one exists, else the Noto family from Google Fonts. */

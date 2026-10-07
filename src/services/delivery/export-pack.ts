@@ -209,11 +209,7 @@ export async function buildExportPack(runId: string, opts: { platforms?: string[
   const mUp = await uploadBuffer({ buffer: Buffer.from(JSON.stringify(manifest, null, 2), "utf8"), filename: "manifest.json", contentType: "application/json", folder }).catch(() => null);
   const manifestUrl = mUp && mUp.provider !== "inline" ? mUp.url : null;
 
-  const fresh = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true } });
-  const freshQc = (fresh?.qcReport && typeof fresh.qcReport === "object" ? fresh.qcReport : {}) as Record<string, unknown>;
-  await prisma.libtvRun.update({
-    where: { id: runId },
-    data: { qcReport: { ...freshQc, exportPack: { manifestUrl, zipUrl: manifest.zipUrl, createdAt: manifest.createdAt, videos: videos.length, campaignName } } as never },
-  });
+  const { patchQcReport } = await import("@/services/video-gen/qc-report");
+  await patchQcReport(runId, (qc) => ({ ...qc, exportPack: { manifestUrl, zipUrl: manifest.zipUrl, createdAt: manifest.createdAt, videos: videos.length, campaignName } }));
   return { manifestUrl, zipUrl: manifest.zipUrl, manifest };
 }
