@@ -1,3 +1,4 @@
+import { CloneAdButton } from "./clone-ad-button";
 import { SaveStructureButton } from "./save-structure-button";
 import {
   ExternalLink, Zap, MousePointerClick, BadgeCheck, Tag,
@@ -134,7 +135,12 @@ export function AdTeardownCard({ asset, projectId }: { asset: TeardownAssetView;
               </span>
             )}
           </div>
-          {projectId && t && <SaveStructureButton projectId={projectId} teardownId={t.id} />}
+          {projectId && t && (
+            <div className="flex flex-wrap gap-1.5">
+              <SaveStructureButton projectId={projectId} teardownId={t.id} />
+              <CloneAdButton projectId={projectId} teardownId={t.id} />
+            </div>
+          )}
           <div className="flex flex-wrap gap-1">
             {asset.platform && (
               <span className="text-[10px] bg-muted border border-border px-1.5 py-0.5 rounded-full">{asset.platform}</span>

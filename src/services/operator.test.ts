@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approveAllFrames, freeRunRefusal, operatorActionSchema } from "./operator";
+import { approveAllFrames, freeRunRefusal, operatorActionSchema, parseOperatorAction } from "./operator";
 
 describe("approveAllFrames", () => {
   it("approves unapproved frames and records their prior state once each", () => {
@@ -77,5 +77,25 @@ describe("image-ads / preflight actions", () => {
     expect(operatorActionSchema.safeParse({ action: "image-ads", projectId: "p", proof: { rating: 7 } }).success).toBe(false);
     expect(operatorActionSchema.safeParse({ action: "preflight", projectId: "p", runId: "r", platform: "tiktok" }).success).toBe(true);
     expect(operatorActionSchema.safeParse({ action: "preflight", projectId: "p" }).success).toBe(false);
+  });
+});
+
+describe("parseOperatorAction (session routes)", () => {
+  it("validates with the operator schema of one action and narrows the type", () => {
+    const ok = parseOperatorAction("plan-batch", { projectId: "p", runId: "r", dims: { aspects: ["9:16", "1:1"] } });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.data).toMatchObject({ action: "plan-batch", design: "pairwise", maxVariants: 24, dims: { aspects: ["9:16", "1:1"] } });
+  });
+
+  it("the path's action wins over a body that names another one", () => {
+    const r = parseOperatorAction("set-budget", { action: "approve-run", projectId: "p", usd: 25 });
+    expect(r.ok && r.data.action).toBe("set-budget");
+  });
+
+  it("reports the first issue", () => {
+    const bad = parseOperatorAction("localize-run", { projectId: "p", runId: "r", locales: ["xx-XX"] });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toMatch(/^Invalid locales/);
+    expect(parseOperatorAction("set-budget", { projectId: "p", usd: 20_000 }).ok).toBe(false);
   });
 });

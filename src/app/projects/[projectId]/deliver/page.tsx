@@ -2,6 +2,11 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { StageGuide } from "@/components/layout/stage-guide";
 import { PerformancePanel } from "@/components/deliver/performance-panel";
+import { SpendPanel } from "@/components/workbench/spend-panel";
+import { RunWorkbench } from "@/components/workbench/run-workbench";
+import { ReportsCard } from "@/components/workbench/reports-card";
+import { ImageAdsGallery } from "@/components/workbench/image-ads-gallery";
+import { AskTheData, TestPlanPanel } from "@/components/workbench/performance-tools";
 import { isPlayable } from "@/components/studio/types";
 import { Download, ExternalLink, Film, FileText, Clapperboard } from "lucide-react";
 
@@ -44,6 +49,11 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
 
   const delivered = runs.filter((r) => r.masterMp4Url);
   const scriptById = new Map(scripts.map((s) => [s.id, s]));
+  const runLabel = (r: (typeof runs)[number]) =>
+    `${r.isFinal ? "FINAL · " : ""}${(r.scriptId ? scriptById.get(r.scriptId)?.title : null) ?? r.canvasName ?? r.id.slice(-8)} · ${r.createdAt.toISOString().slice(0, 10)}`;
+  const runLabels = Object.fromEntries(runs.map((r) => [r.id, runLabel(r)]));
+  const spendTargets = runs.slice(0, 30).map((r) => ({ key: `run:${r.id}`, label: `${runLabel(r)} (${r.status})`, runId: r.id }));
+  const workbenchRuns = delivered.map((r) => ({ id: r.id, label: runLabel(r) }));
 
   return (
     <div className="space-y-8">
@@ -65,7 +75,20 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
         </a>
       </div>
 
+      <ReportsCard projectId={projectId} />
+
       <PerformancePanel projectId={projectId} />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <AskTheData projectId={projectId} />
+        <TestPlanPanel projectId={projectId} />
+      </div>
+
+      <RunWorkbench projectId={projectId} runs={workbenchRuns} />
+
+      <ImageAdsGallery projectId={projectId} />
+
+      <SpendPanel projectId={projectId} targets={spendTargets} runLabels={runLabels} />
 
       <section>
         <h3 className="flex items-center gap-2 text-sm font-semibold mb-3">
