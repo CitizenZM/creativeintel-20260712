@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { CORRECTIONS_MARKER, applyCorrections } from "./corrections";
-import { bestCandidate, consistencyRecord, decideKeyframe, generateConsistentKeyframe } from "./gate";
+import { bestCandidate, consistencyRecord, consistencyRepairEnabled, decideKeyframe, generateConsistentKeyframe, repairReason } from "./gate";
 import { scoreFrame, type ConsistencyScore } from "./score";
 import { deviceBox, deviceImage, type DeviceOpts } from "./test-images";
 import { visionReportSchema, type VisionScorer } from "./vision";
@@ -86,5 +86,73 @@ describe("generateConsistentKeyframe — re-roll loop", () => {
     // The 6 % bezel is closest to the reference: it is kept.
     expect(out.url).toBe(urls[1]);
     expect(out.decision.chosen.score).toBe(Math.max(...out.decision.candidates.map((c) => c.score)));
+  });
+});
+
+describe("packshot repair of a defective best attempt", () => {
+  const box = [0.2, 0.5, 0.55, 0.8] as [number, number, number, number];
+  /** A failing score whose vision report named `major` and boxed the product. */
+  const majorScore = (score: number, major: string[]): ConsistencyScore => ({
+    ...fakeScore(score, false, major),
+    majorDefects: major.length,
+    majorIssues: major,
+    product: { expected: true, present: true, bbox: box, view: "front", visionScore: 0.3, pixel: null, score: 0.3 },
+  });
+
+  it("names the major product defect; people, scene and passing frames are not repaired", () => {
+    const c = { url: "u", score: 0.3, pass: false, defects: [], bbox: box };
+    expect(repairReason({ ...c, major: ["colour wrong: white body instead of dark"] })).toBe("colour wrong: white body instead of dark");
+    expect(repairReason({ ...c, major: ["body too thin (stick-like): proportions 6:1", "bezel thicker: 9%"] })).toMatch(/stick-like.*; bezel thicker/);
+    expect(repairReason({ ...c, major: ["face differs: jaw", "hair colour differs"] })).toBeNull();
+    expect(repairReason({ ...c, major: ["collage: two panels"] })).toBeNull();
+    expect(repairReason({ ...c, major: ["colour wrong"], pass: true })).toBeNull();
+    expect(repairReason({ ...c, major: ["colour wrong"], bbox: null })).toBeNull();
+    expect(repairReason({ ...c, major: [] })).toBeNull();
+  });
+
+  it("a failing attempt carries its product box and major defects for the repair", () => {
+    const d = decideKeyframe("u0", majorScore(0.3, ["colour wrong: white body"]), { attempts: 2 }, { maxRerolls: 2 });
+    expect(d).toMatchObject({ action: "accept", chosen: { bbox: box, major: ["colour wrong: white body"] } });
+  });
+
+  it("repairs the kept best attempt once, records it, and respects CONSISTENCY_REPAIR=off", async () => {
+    const repair = vi.fn(async () => ({ url: "repaired.jpg", result: { ...fakeScore(0.7, true), reviewed: true } }));
+    const run = () =>
+      generateConsistentKeyframe({
+        generate: async (_c, attempt) => `u${attempt}`,
+        score: async (url) => majorScore(url === "u1" ? 0.33 : 0.3, ["colour wrong: white body instead of dark"]),
+        maxRerolls: 2,
+        repair,
+      });
+    const out = await run();
+    expect(repair).toHaveBeenCalledTimes(1);
+    expect(repair).toHaveBeenCalledWith(expect.objectContaining({ url: "u1", bbox: box }), "colour wrong: white body instead of dark");
+    expect(out.url).toBe("repaired.jpg");
+    expect(out.repair).toMatchObject({ reason: "colour wrong: white body instead of dark", url: "repaired.jpg" });
+    const rec = consistencyRecord(out.result, out.decision, out.attempts, { method: "packshot-composite", reason: out.repair!.reason, score: 0.7, pass: true, url: "repaired.jpg" });
+    expect(rec).toMatchObject({ chosenUrl: "u1", bestOf: true, repair: { method: "packshot-composite", url: "repaired.jpg" } });
+
+    process.env.CONSISTENCY_REPAIR = "off";
+    try {
+      expect(consistencyRepairEnabled()).toBe(false);
+      const off = await run();
+      expect(off.url).toBe("u1");
+      expect(off.repair).toBeUndefined();
+      expect(repair).toHaveBeenCalledTimes(1);
+    } finally {
+      delete process.env.CONSISTENCY_REPAIR;
+    }
+    expect(consistencyRepairEnabled()).toBe(true);
+  });
+
+  it("ships the best attempt when the repair is not possible", async () => {
+    const out = await generateConsistentKeyframe({
+      generate: async (_c, attempt) => `u${attempt}`,
+      score: async () => majorScore(0.3, ["bezel thicker: 9% vs 4%"]),
+      maxRerolls: 1,
+      repair: async () => null,
+    });
+    expect(out.url).toBe("u1");
+    expect(out.repair).toBeUndefined();
   });
 });

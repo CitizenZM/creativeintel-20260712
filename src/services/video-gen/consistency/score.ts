@@ -76,6 +76,8 @@ export interface ConsistencyScore {
   reasons: string[];
   majorDefects: number;
   sceneConsistent: boolean | null;
+  /** The major defects by name (repair decides on product ones). */
+  majorIssues?: string[];
 }
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -234,5 +236,6 @@ export async function scoreFrame(frame: ImageSource, refs: ConsistencyRefs, opts
     reasons,
     majorDefects: major,
     sceneConsistent: report?.sceneConsistent ?? null,
+    majorIssues: [...new Set(defects.filter((d) => d.major).map((d) => d.issue))].slice(0, 6),
   };
 }

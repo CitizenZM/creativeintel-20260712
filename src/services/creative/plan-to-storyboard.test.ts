@@ -178,3 +178,118 @@ describe("AI presenter (talking-head frames)", () => {
     expect(out.presenter).toBeTruthy();
   });
 });
+
+describe("comparison visuals → two generated shots (locked.compare)", async () => {
+  const { detectComparison, productShortName } = await import("./plan-to-storyboard");
+  const P = "NXTPAPER 14";
+  const NOT_OURS = /split|side[- ]by[- ]side|\bvs\b|versus|collage|panel|before|ipad|apple|glossy|second tablet/i;
+
+  it("split-screen 'X vs Y': ours is the product alone, the other side debranded", () => {
+    const c = detectComparison("Split-screen under the same desk lamp: a glossy iPad with harsh glare vs the NXTPAPER 14 matte screen, no glare", P)!;
+    expect(c).not.toBeNull();
+    expect(c.labelOurs).toBe("NXTPAPER 14");
+    expect(c.labelOther).toBe("Glossy tablet");
+    expect(c.other).toMatch(/glossy tablet/i);
+    expect(c.other.replace(/no split screen/i, "")).not.toMatch(/ipad|apple|NXTPAPER|split|no glare/i);
+    expect(c.other).toMatch(/desk lamp/);
+    expect(c.ours).toMatch(/NXTPAPER 14 from image 1/);
+    expect(c.ours).toMatch(/matte screen/);
+    expect(c.ours).toMatch(/single .*full frame|full frame.*single/i);
+    expect(c.ours.replace(/no split screen, no second device, no panels/i, "")).not.toMatch(NOT_OURS);
+  });
+
+  it("'slide between a glossy iPad and the NXTPAPER' (the live K5 plan)", () => {
+    const c = detectComparison("Hands slide between a glossy iPad and the NXTPAPER 14 on a sunlit desk", P)!;
+    expect(c.labelOther).toBe("Glossy tablet");
+    expect(c.ours).toMatch(/^Hands hold the NXTPAPER 14 from image 1/);
+    expect(c.ours).toMatch(/sunlit desk/);
+    expect(c.other).toMatch(/^Hands hold a glossy tablet/);
+    expect(c.ours.replace(/no split screen, no second device, no panels/i, "")).not.toMatch(NOT_OURS);
+  });
+
+  it("flicker split-screen without 'vs' (the live K3 plan), side by side, before/after", () => {
+    const k3 = detectComparison("Flicker test split-screen: a phone camera on a glossy tablet shows rolling bands; on the NXTPAPER 14 the camera shows none", P)!;
+    expect(k3.labelOther).toBe("Glossy tablet");
+    expect(k3.ours).toMatch(/NXTPAPER 14 from image 1/);
+    expect(k3.ours).toMatch(/shows none/);
+    expect(k3.ours.replace(/no split screen, no second device, no panels/i, "")).not.toMatch(/glossy|rolling bands|split/i);
+    expect(k3.other).toMatch(/rolling bands/);
+
+    const sbs = detectComparison("The NXTPAPER 14 side by side with a regular LCD tablet in noon sun", P)!;
+    expect(sbs.labelOther).toBe("Regular LCD tablet");
+    expect(sbs.ours).toMatch(/noon sun/);
+
+    const ba = detectComparison("Before/after: tired eyes reading a backlit tablet at night, then relaxed reading on the NXTPAPER 14", P)!;
+    expect(ba).not.toBeNull();
+    expect(ba.other).not.toMatch(/NXTPAPER/);
+    expect(ba.ours).toMatch(/relaxed reading/);
+  });
+
+  it("nothing detected for ordinary shots", () => {
+    for (const v of [
+      "Close-up of the matte screen in bright sunlight, no glare",
+      "Macro: slide between screens",
+      "A mother sketches on the tablet with the stylus at the kitchen table",
+      "The tablet next to a coffee cup on an oak desk",
+      "Hands tear red gift wrap to reveal the tablet",
+    ])
+      expect(detectComparison(v, P)).toBeNull();
+  });
+
+  it("short product names for the label", () => {
+    expect(productShortName("NXTPAPER 14")).toBe("NXTPAPER 14");
+    expect(productShortName("TCL NXTPAPER 14 tablet")).toBe("NXTPAPER 14");
+    expect(productShortName("TCL QM8L 85-inch QD-Mini LED TV")).toBe("QM8L 85-inch");
+  });
+
+  const cmpPlan = {
+    ...plan,
+    scripts: [
+      {
+        ...plan.scripts[0],
+        beats: [
+          plan.scripts[0].beats[0],
+          { t0: 2, t1: 5, purpose: "proof", visual: "Hands slide between a glossy iPad and the NXTPAPER 14 under a desk lamp", vo: "No glare." },
+          plan.scripts[0].beats[2],
+        ],
+      },
+    ],
+  } as unknown as PlatformPlan;
+
+  it("the scaffold maps a comparison beat to locked.compare with a single-subject keyframe", () => {
+    const f = scaffoldLockedFrames({ plan: cmpPlan, productName: P });
+    expect(f[1].locked.compare).toMatchObject({ labelOurs: "NXTPAPER 14", labelOther: "Glossy tablet", other: expect.stringMatching(/glossy tablet/i) });
+    expect(f[1].imagePrompt).toMatch(/NXTPAPER 14 from image 1/);
+    expect(f[1].imagePrompt!.replace(/no split screen, no second device, no panels/i, "")).not.toMatch(NOT_OURS);
+    expect(f[0].locked.compare).toBeUndefined();
+    expect(f[2].locked.compare).toBeUndefined();
+  });
+
+  it("the director is told never to ask for split screens, and a model prompt that does is replaced", async () => {
+    let system = "";
+    let user = "";
+    const out = await directPlanStoryboard(
+      { plan: cmpPlan, productName: P },
+      {
+        llm: async (a) => {
+          system = a.system;
+          user = a.user;
+          return {
+            frames: [
+              { i: 1, imagePrompt: "Split screen collage of two gifts", videoPrompt: "Unwrap." },
+              { i: 2, imagePrompt: "Hands slide from a glossy iPad to the NXTPAPER 14 from image 1", videoPrompt: "0–2s: the hand slides between the two tablets", endState: "Both tablets side by side" },
+              { i: 3, imagePrompt: "Macro of the matte NXTPAPER 14 from image 1 in noon sun" },
+            ],
+          };
+        },
+      }
+    );
+    expect(system).toMatch(/never ask .*split[- ]screens?.*collages?.*two-panel/i);
+    expect(user).toMatch(/COMPARE/);
+    expect(out.frames[0].imagePrompt).not.toMatch(/split screen|collage/i);
+    expect(out.frames[1].imagePrompt).not.toMatch(/ipad|glossy/i);
+    expect(out.frames[1].videoPrompt).not.toMatch(/two tablets|between/i);
+    expect(out.frames[1].locked.endState).toBeUndefined();
+    expect(out.frames[2].imagePrompt).toBe("Macro of the matte NXTPAPER 14 from image 1 in noon sun");
+  });
+});

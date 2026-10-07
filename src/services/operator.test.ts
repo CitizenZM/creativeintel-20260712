@@ -34,6 +34,12 @@ describe("freeRunRefusal", () => {
 });
 
 describe("operatorActionSchema", () => {
+  it("repair-keyframe: a keyframe node, an optional 0–1 box", () => {
+    expect(operatorActionSchema.safeParse({ action: "repair-keyframe", projectId: "p", runId: "r", node: "K4", bbox: [0.19, 0.51, 0.54, 0.8], apply: true }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "repair-keyframe", projectId: "p", runId: "r", node: "K4E" }).success).toBe(true);
+    expect(operatorActionSchema.safeParse({ action: "repair-keyframe", projectId: "p", runId: "r", node: "V4" }).success).toBe(false);
+    expect(operatorActionSchema.safeParse({ action: "repair-keyframe", projectId: "p", runId: "r", node: "K4", bbox: [0, 0, 2, 1] }).success).toBe(false);
+  });
   it("rejects unknown actions and bad input", () => {
     expect(operatorActionSchema.safeParse({ action: "delete-project", projectId: "p" }).success).toBe(false);
     expect(operatorActionSchema.safeParse({ action: "approve-run", projectId: "p" }).success).toBe(false);

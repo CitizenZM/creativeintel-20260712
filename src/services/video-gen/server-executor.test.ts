@@ -108,6 +108,11 @@ vi.mock("./glm-assemble", () => ({ assembleGlmMaster: assemble }));
 const consistency = vi.hoisted(() => ({ scoreFrame: vi.fn() }));
 vi.mock("./consistency/score", async (orig) => ({ ...(await orig<typeof import("./consistency/score")>()), scoreFrame: consistency.scoreFrame }));
 // The yes/no reviewer never reaches a model in tests.
+const repairMod = vi.hoisted(() => ({ repairKeyframe: vi.fn() }));
+vi.mock("./consistency/repair", () => repairMod);
+const storage = vi.hoisted(() => ({ uploadBuffer: vi.fn(async (i: { filename: string }) => ({ url: `https://cdn/repairs/${i.filename}` })) }));
+vi.mock("@/services/storage", () => storage);
+
 const review = vi.hoisted(() => ({ reviewKeyframe: vi.fn(async () => null) }));
 vi.mock("./keyframe-qc", async (orig) => ({ ...(await orig<typeof import("./keyframe-qc")>()), reviewKeyframe: review.reviewKeyframe }));
 
@@ -462,6 +467,36 @@ describe("consistency gate (keyframes edited from references)", () => {
     expect(statusOf("k1")).toBe("completed");
     expect(store.jobs.find((j) => j.id === "k1")!.resultUrl).toBe("https://cdn/K1-1.png");
     expect(settingsOf("k1").consistency).toMatchObject({ score: 0.62, pass: false, bestOf: true, attempts: 3, tries: [{ score: 0.4 }, { score: 0.62 }, { score: 0.5 }] });
+  });
+
+  it("repairs a best attempt that still has a major product defect from the packshot", async () => {
+    seedGated();
+    const box = [0.2, 0.5, 0.55, 0.8];
+    const wrong = (score: number) => ({
+      ...verdict(score, false, ["colour wrong: white body instead of dark"]),
+      majorIssues: ["colour wrong: white body instead of dark"],
+      product: { expected: true, present: true, bbox: box, view: "front", visionScore: 0.3, pixel: null, score },
+    });
+    consistency.scoreFrame.mockResolvedValueOnce(wrong(0.3)).mockResolvedValueOnce(wrong(0.34)).mockResolvedValueOnce(wrong(0.31));
+    repairMod.repairKeyframe.mockReset().mockResolvedValueOnce({
+      image: Buffer.from("jpg"),
+      result: verdict(0.7, true),
+      record: { method: "packshot-composite", reason: "colour wrong: white body instead of dark", score: 0.7, before: 0.52, accepted: true, pass: true, pixel: 0.7 },
+    });
+    const adapter = countingAdapter();
+    for (let i = 0; i < 3; i++) await tickRun(adapter, "run1");
+    expect(repairMod.repairKeyframe).toHaveBeenCalledWith(
+      expect.objectContaining({ frame: "https://cdn/K1-1.png", packshots: ["https://cdn/packshot.png"], bbox: box, reason: "colour wrong: white body instead of dark", shot: "Close-up of the tablet on a walnut desk" })
+    );
+    expect(storage.uploadBuffer).toHaveBeenCalledWith(expect.objectContaining({ filename: "K1-repaired.jpg", contentType: "image/jpeg" }));
+    expect(statusOf("k1")).toBe("completed");
+    expect(store.jobs.find((j) => j.id === "k1")!.resultUrl).toBe("https://cdn/repairs/K1-repaired.jpg");
+    expect(settingsOf("k1")).toMatchObject({
+      qcOk: true,
+      repair: { method: "packshot-composite", reason: "colour wrong: white body instead of dark", fromUrl: "https://cdn/K1-1.png", url: "https://cdn/repairs/K1-repaired.jpg" },
+      consistency: { bestOf: true, chosenUrl: "https://cdn/K1-1.png", repair: { method: "packshot-composite", pass: true } },
+    });
+    expect(adapter.submitVideo).toHaveBeenCalledWith(expect.objectContaining({ imageUrl: "https://cdn/repairs/K1-repaired.jpg" }), expect.anything());
   });
 
   it("leaves keyframes without references on the yes/no review", async () => {

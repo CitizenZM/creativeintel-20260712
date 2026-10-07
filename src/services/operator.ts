@@ -215,6 +215,8 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("ops-health") }),
   /** Safe auto-recovery (re-drive, re-assemble, release orphaned reservations, re-queue provider-failed tasks); dry run by default. */
   z.object({ action: z.literal("ops-recover"), dryRun: z.boolean().default(true) }),
+  /** Packshot repair of a server run's keyframe (local composite, no spend): returns the repaired image; apply swaps it in as the job's result. */
+  z.object({ action: z.literal("repair-keyframe"), projectId: z.string().min(1), runId: z.string().min(1), node: z.string().regex(/^K\d+E?$/), bbox: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]).optional(), packshotUrl: z.string().url().optional(), reason: z.string().max(200).optional(), apply: z.boolean().optional() }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;
