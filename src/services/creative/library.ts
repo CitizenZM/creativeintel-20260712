@@ -134,6 +134,7 @@ function hookAllowed(h: HookDef, i: CreativeInputs, s: ReturnType<typeof promoSt
   if (h.id === "H22" && !i.assets?.realTestFootage) return "torture-test claims need real footage";
   if (["H10", "H22", "H15"].includes(h.id) && i.category === "health") return "result claims restricted for health";
   if (h.id === "H16" && !s.pct) return "deal slam needs a verified live discount";
+  if (h.id === "H16" && (i.goal === "awareness" || i.goal === "lead")) return "a price slam doesn't fit an awareness/lead goal";
   return null;
 }
 
