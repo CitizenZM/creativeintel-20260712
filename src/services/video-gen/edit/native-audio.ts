@@ -83,10 +83,21 @@ export function talkCaptionWords(
  * The final mix's audio graph. Voice bus = TTS voiceover + the talk clips' native audio; the music bed
  * is sidechain-ducked under the whole bus, then voice + ducked music + SFX are loudness-normalised.
  */
-export function audioMixGraph(i: { ttsIdx: number; nativeIdx: number; musicIdx: number; sfxIdx: number; totalSec: number; lufs?: number }): string[] {
+export function audioMixGraph(i: {
+  ttsIdx: number;
+  nativeIdx: number;
+  musicIdx: number;
+  sfxIdx: number;
+  totalSec: number;
+  lufs?: number;
+  /** Music bed level under the voice (before the duck); default 0.26. */
+  musicGain?: number;
+  /** Music bed level with no voice at all; default 0.6. */
+  musicSoloGain?: number;
+}): string[] {
   const end = `loudnorm=I=${(i.lufs ?? -14).toFixed(1)}:TP=-1.5:LRA=7,alimiter=limit=0.79:attack=2:release=40:level=disabled,atrim=0:${i.totalSec.toFixed(3)}[a]`;
   const voices = [i.ttsIdx, i.nativeIdx].filter((x) => x >= 0);
-  if (!voices.length) return [`[${i.musicIdx}:a]volume=0.6[mus]`, `[mus][${i.sfxIdx}:a]amix=inputs=2:normalize=0,${end}`];
+  if (!voices.length) return [`[${i.musicIdx}:a]volume=${+(i.musicSoloGain ?? 0.6).toFixed(3)}[mus]`, `[mus][${i.sfxIdx}:a]amix=inputs=2:normalize=0,${end}`];
   const bus =
     voices.length === 2
       ? [
@@ -97,7 +108,7 @@ export function audioMixGraph(i: { ttsIdx: number; nativeIdx: number; musicIdx: 
       : [`[${voices[0]}:a]aresample=44100,asplit=2[vo][vosc]`];
   return [
     ...bus,
-    `[${i.musicIdx}:a]volume=0.26[mus]`,
+    `[${i.musicIdx}:a]volume=${+(i.musicGain ?? 0.26).toFixed(3)}[mus]`,
     `[mus][vosc]sidechaincompress=threshold=0.02:ratio=6:attack=15:release=350[duck]`,
     `[duck][vo][${i.sfxIdx}:a]amix=inputs=3:normalize=0,${end}`,
   ];

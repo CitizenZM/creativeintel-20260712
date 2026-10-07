@@ -62,6 +62,8 @@ export interface QcInput {
   beats: number[];
   /** From the edit plan (what the viewer gets regardless of detection). */
   plannedCuts: number[];
+  /** Planned cuts left off the beat on purpose (edit-plan offBeatCuts): not judged against the beat grid. */
+  offBeatCuts?: number[];
   hookHeadline: boolean;
   captionCoverage: number | null;
   ctaSec: number | null;
@@ -127,7 +129,8 @@ export function scoreQc(q: QcInput): QcReport {
   const per15 = (cuts.length / d) * 15;
   const staticSec = q.freezes.reduce((n, f) => n + f.duration, 0);
   const longest = q.freezes.reduce((n, f) => Math.max(n, f.duration), 0);
-  const offsets = q.cutsSec.map((t) => (t - nearest(q.beats, t)) * 1000);
+  const onPurpose = (t: number) => (q.offBeatCuts ?? []).some((c) => Math.abs(c - t) < 0.04);
+  const offsets = q.cutsSec.filter((t) => !onPurpose(t)).map((t) => (t - nearest(q.beats, t)) * 1000);
   const bias = offsets.length ? offsets.reduce((a, b) => a + b, 0) / offsets.length : null;
   const worst = offsets.length ? Math.max(...offsets.map(Math.abs)) : null;
   const firstCut = q.plannedCuts.length ? Math.min(...q.plannedCuts) : null;

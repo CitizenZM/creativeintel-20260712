@@ -316,7 +316,7 @@ export async function POST(request: Request) {
 
   if (input.action === "plan-to-storyboard") {
     const { directPlanStoryboard } = await import("@/services/creative/plan-to-storyboard");
-    const project = await prisma.project.findUnique({ where: { id: input.projectId }, select: { campaignPlan: true, productName: true, name: true, ...(input.presenter ? { brandName: true, productBrief: true } : {}) } });
+    const project = await prisma.project.findUnique({ where: { id: input.projectId }, select: { campaignPlan: true, productName: true, name: true, productBrief: true, ...(input.presenter ? { brandName: true } : {}) } });
     const plan = project?.campaignPlan as { platforms?: import("@/services/creative/campaign-plan.types").PlatformPlan[]; cast?: string; setting?: string } | null;
     const platformPlan = plan?.platforms?.find((p) => !input.platform || p.platform === input.platform);
     if (!platformPlan) return NextResponse.json({ error: "No campaign plan for that platform — run plan-campaign first" }, { status: 409 });
@@ -329,13 +329,14 @@ export async function POST(request: Request) {
       engine: input.engine,
       ctaButton: input.ctaButton,
       ...(await presenterOptions(input, project as { brandName?: string | null; productBrief?: unknown } | null)),
+      category: (project?.productBrief as { category?: string } | null)?.category,
     });
     const sb = await prisma.storyboard.create({
       data: { projectId: input.projectId, title: out.title, frames: out.frames as unknown as object[], style: "locked-script", frameSeconds: 1 },
       select: { id: true },
     });
     const talkFrames = out.frames.filter((f) => f.locked.talk).map((f) => f.frameNumber);
-    return NextResponse.json({ ok: true, storyboardId: sb.id, frames: out.frames.length, promptSource: out.source, error: out.error, ...(out.presenter ? { presenter: out.presenter, talkFrames } : {}) }, { status: 201 });
+    return NextResponse.json({ ok: true, storyboardId: sb.id, frames: out.frames.length, promptSource: out.source, error: out.error, coverage: out.coverage, musicMood: out.frames[0]?.locked.musicMood ?? null, ...(out.presenter ? { presenter: out.presenter, talkFrames } : {}) }, { status: 201 });
   }
 
   if (input.action === "select-creative") {

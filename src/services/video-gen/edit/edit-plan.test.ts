@@ -128,12 +128,49 @@ describe("hook variants", () => {
 });
 
 describe("planEdit on a real track's beats", () => {
-  it("starts at 0 even when the first detected beat is a frame later, and keeps every cut on a beat", () => {
+  it("starts at 0 even when the first detected beat is a frame later; a cut goes on a beat within ±120 ms, else stays on its frame", () => {
     const beats = Array.from({ length: 40 }, (_, i) => Math.round((1 / 30 + i * 0.6) * 1000) / 1000); // 100 BPM, offset one frame
     const p = planEdit(ad, { beats });
     expect(p.shots[0].startSec).toBe(0);
     expect(p.shots.reduce((n, s) => n + s.frames, 0)).toBe(Math.round(p.durationSec * 30));
-    for (const b of p.boundaries) expect(p.grid.beats.some((x) => Math.abs(x - b.atSec) < 0.017)).toBe(true);
+    for (const b of p.boundaries) {
+      const onGrid = p.grid.beats.some((x) => Math.abs(x - b.atSec) < 0.017);
+      expect(onGrid || p.offBeatCuts.includes(b.atSec)).toBe(true);
+    }
+    // Every frame boundary is within 120 ms of where the storyboard put it.
+    for (let t = 2; t < 20; t += 2) expect(p.boundaries.some((b) => Math.abs(b.atSec - t) <= 0.12 + 1e-6)).toBe(true);
+    expect(p.offBeatCuts.length).toBeGreaterThan(0);
+    expect(p.offBeatCuts.length).toBeLessThan(p.boundaries.length);
+  });
+});
+
+describe("planEdit beat-synced cuts on a mood's tempo", () => {
+  const seg = (n: number, url: string, segment: string, length: number): PlanInputSegment => ({ kind: "clip", url, from: 0, length, frameNumber: n, segment });
+  // 1.9 s frames at 120 BPM: each boundary is 100 ms off a beat in alternating directions.
+  const frames = [seg(1, "a", "HOOK", 1.9), seg(2, "b", "BODY", 2), seg(3, "c", "BODY", 2), seg(4, "d", "CTA", 2)];
+
+  it("snaps a frame boundary to a beat within ±120 ms", () => {
+    const p = planEdit(frames, { bpm: 120 });
+    expect(p.boundaries.map((b) => b.atSec)).toContain(2);
+    expect(p.dropSec).toBe(2);
+  });
+
+  it("never moves a cut later than the voiceover line that starts there", () => {
+    const vo = new Map<number, string | null>([[1, "Want a gift?"], [2, "Meet the tablet."], [3, "Meet the tablet."], [4, "Shop now."]]);
+    const p = planEdit(frames, { bpm: 120, voiceovers: vo });
+    // frame 2 starts at 1.9 s with a new line: the beat at 2.0 is later → the cut stays at 1.9 s.
+    expect(p.dropSec).toBeCloseTo(1.9, 3);
+    expect(p.offBeatCuts).toContain(p.dropSec);
+    // frame 3 repeats frame 2's line: its boundary (3.9 s) may move to the 4.0 s beat.
+    expect(p.boundaries.map((b) => b.atSec)).toContain(4);
+  });
+
+  it("carries the product box and the frame's source window to the shots", () => {
+    const box = { start: [0.55, 0.5, 0.85, 0.85] as [number, number, number, number], end: null, present: true };
+    const p = planEdit([{ ...seg(1, "a", "BODY", 2), productBox: box, speed: 2 }, seg(2, "b", "CTA", 2)]);
+    const s = p.shots.find((x) => x.url === "a")!;
+    expect(s.productBox).toEqual(box);
+    expect(s.frameSrc).toEqual({ from: 0, span: 4 });
   });
 });
 

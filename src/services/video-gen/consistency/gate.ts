@@ -20,8 +20,13 @@ export interface KeyframeCandidate {
   score: number;
   pass: boolean;
   defects: string[];
-  /** For the repair: the product's box in this frame, its major defects, the best-matching product photo. */
+  /**
+   * The product's box in this frame (always recorded: the edit reframes on it and judges the CTA hero by
+   * it; the repair uses it on failing frames), its major defects and the best-matching product photo.
+   */
   bbox?: BBox | null;
+  /** Whether the vision check found the product at all (null = no product check). */
+  present?: boolean | null;
   major?: string[];
   refIndex?: number;
 }
@@ -62,9 +67,15 @@ export function decideKeyframe(
   opts: { maxRerolls?: number; productSpec?: string } = {}
 ): GateDecision {
   const max = opts.maxRerolls ?? MAX_CONSISTENCY_REROLLS;
-  const current: KeyframeCandidate = { url, score: result.score, pass: result.pass, defects: result.defects.slice(0, 6) };
+  const current: KeyframeCandidate = {
+    url,
+    score: result.score,
+    pass: result.pass,
+    defects: result.defects.slice(0, 6),
+    bbox: result.product?.bbox ?? null,
+    present: result.product ? result.product.present : null,
+  };
   if (!result.pass && result.product?.bbox) {
-    current.bbox = result.product.bbox;
     current.major = (result.majorIssues ?? []).slice(0, 4);
     if (result.product.pixel) current.refIndex = result.product.pixel.refIndex;
   }
@@ -96,6 +107,9 @@ export function consistencyRecord(
     chosenUrl: decision.url,
     tries: decision.candidates.map((c) => ({ score: c.score, pass: c.pass })),
     ...(repair ? { repair } : {}),
+    // Where the product sits in the kept keyframe: the edit reframes on it and judges the CTA hero by it.
+    productBox: decision.chosen.bbox ?? null,
+    productPresent: decision.chosen.present ?? null,
   };
 }
 

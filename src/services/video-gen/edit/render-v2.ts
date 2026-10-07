@@ -20,12 +20,14 @@ import path from "node:path";
 import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
 import { pMap } from "@/lib/parallel";
-import { FPS } from "./beat-grid";
+import { FPS, fitTempo, round3 } from "./beat-grid";
 import { CTA_BUTTON_SEC, planEdit, type EditPlan, type HookStyle, type PlanInputSegment, type Shot } from "./edit-plan";
 import { fitLayerPng, layoutBox, separateCaptions, textCanvas } from "./safe-layout";
 import type { PlatformId } from "@/services/creative/types";
 import { synthesizeMusic, toWav } from "./music-synth";
-import { bestWindow, motionScores } from "./motion";
+import { isMoodId, MOOD_ENERGY, MOOD_MIX_DB, MOOD_TEMPO, SEASONAL_COPY, type MoodId } from "./music-moods";
+import { bestWindow, motionScores, reframeTrack } from "./motion";
+import { composeCtaHero, ctaHeroDecision } from "./cta-hero";
 import { detectBeats, trackWindowStart } from "./beat-detect";
 import { measureCuts, measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
@@ -94,24 +96,36 @@ export const ZOOM_HIT = { start: 0.15, ramp: 0.35, hold: 0.3, peak: 0.6 };
 export function zoomHitFilter(input: string, target: { x: number; y: number }, canvas: Canvas): string {
   const { w, h } = canvas;
   const { start: a, ramp: r, hold: hd, peak } = ZOOM_HIT;
-  const p1 = `clip((t-${f3(a)})/${f3(r)},0,1)`;
-  const p2 = `clip((t-${f3(a + r + hd)})/${f3(r)},0,1)`;
+  // zoompan, not scale(eval=frame)+crop: crop evaluates iw/ih once at configure time, so the old
+  // graph cropped at x=y=0 on every frame and each zoom hit pushed into the top-left corner,
+  // whatever the target (first live run: the product slid out of frame at 12.5 s).
+  const t = `(on/${FPS})`;
+  const p1 = `clip((${t}-${f3(a)})/${f3(r)},0,1)`;
+  const p2 = `clip((${t}-${f3(a + r + hd)})/${f3(r)},0,1)`;
   const env = `(${p1}*${p1}*(3-2*${p1})-${p2}*${p2}*(3-2*${p2}))`;
   const z = `(1+${peak}*${env})`;
   const x = Math.min(1, Math.max(0, target.x));
   const y = Math.min(1, Math.max(0, target.y));
   const moving = `between(t,${f3(a)},${f3(a + r)})+between(t,${f3(a + r + hd)},${f3(a + 2 * r + hd)})`;
   return [
-    `${input}scale=w='2*trunc(${w}*${z}/2)':h='2*trunc(${h}*${z}/2)':eval=frame`,
-    `crop=${w}:${h}:x='min(max(${x}*iw-${w}/2,0),iw-${w})':y='min(max(${y}*ih-${h}/2,0),ih-${h})'`,
+    `${input}zoompan=z='${z}':x='min(max(${x}*iw-iw/zoom/2,0),iw-iw/zoom)':y='min(max(${y}*ih-ih/zoom/2,0),ih-ih/zoom)':d=1:s=${w}x${h}:fps=${FPS}`,
     `gblur=sigma=2.2:enable='${moving}'`,
     `setsar=1,format=yuv420p[v]`,
   ].join(",");
 }
 
+/** The product reframe of a clip shot (motion.ts reframeTrack), when its keyframes carry a product box. */
+export function shotReframe(shot: Shot, canvas: Canvas): ReturnType<typeof reframeTrack> {
+  if (shot.kind !== "clip" || canvas.w > canvas.h || !shot.productBox) return null;
+  return reframeTrack(shot.productBox, { canvasAspect: canvas.w / canvas.h, baseZoom: shot.zoom });
+}
+
 export function shotFilter(shot: Shot, canvas: Canvas, beatSec = 0.5): string {
   const raw = shotBaseFilter(shot, canvas);
-  const base = shot.zoomHit ? `${raw.replace(/\[v\]$/, "[zh]")};${zoomHitFilter("[zh]", shot.zoomHit, canvas)}` : raw;
+  // A zoom hit on a reframed shot lands on the product where the reframe put it.
+  const track = shot.zoomHit ? shotReframe(shot, canvas) : null;
+  const target = track ? track.from.out : shot.zoomHit;
+  const base = target ? `${raw.replace(/\[v\]$/, "[zh]")};${zoomHitFilter("[zh]", target, canvas)}` : raw;
   if (!shot.contrast) return base;
   // Contrast hook: the picture sits small in a dimmed, blurred frame for the
   // first beat, then fills the screen — the size jump is the claim.
@@ -171,13 +185,23 @@ function shotBaseFilter(shot: Shot, canvas: Canvas): string {
     ].join(";");
   }
   if (shot.kind === "clip") {
-    const z = shot.zoom;
+    // Product reframe: zoom so the product is centred and ≥ 35 % of the frame height, the crop
+    // following it from the start keyframe's box to the end keyframe's across the frame's source window.
+    const track = shotReframe(shot, canvas);
+    const z = track ? track.zoom : shot.zoom;
+    let crop = `crop=${w}:${h}:(iw-${w})/2:(ih-${h})*${shot.anchorY}`;
+    if (track) {
+      const fs = shot.frameSrc;
+      const p = fs ? `clip((${f3(shot.srcFrom - fs.from)}+t*${f3(shot.speed ?? 1)})/${f3(fs.span)},0,1)` : "0";
+      const c = (a: number, b: number) => (Math.abs(b - a) < 1e-3 ? f3(a) : `(${f3(a)}+${f3(b - a)}*${p})`);
+      crop = `crop=${w}:${h}:x='min(max(${c(track.from.cx, track.to.cx)}*iw-${w}/2,0),iw-${w})':y='min(max(${c(track.from.cy, track.to.cy)}*ih-${h}/2,0),ih-${h})'`;
+    }
     // Time-remap (the 1-second install): speed the source up and blend frames into motion blur.
     // Frame blending only for real speed ramps (≥ 2×); a gentle fit (an end-anchored clip at 1.3×) stays crisp.
     const remap = (shot.speed ?? 1) > 1 ? `setpts=(PTS-STARTPTS)/${f3(shot.speed!)},${shot.speed! >= 2 ? `tmix=frames=${Math.min(5, Math.ceil(shot.speed!))},` : ""}` : "";
     return [
       `[0:v]${remap}scale=${Math.round((w * z) / 2) * 2}:${Math.round((h * z) / 2) * 2}:force_original_aspect_ratio=increase`,
-      `crop=${w}:${h}:(iw-${w})/2:(ih-${h})*${shot.anchorY}`,
+      crop,
       // Film finish for generated footage (the "clean plastic render" look is crushed blacks, clipped
       // highlights, over-saturation and razor edges): soften the digital crunch, lift blacks and roll
       // highlights off, pull saturation ~12 %, warm the shadows, then luma-only temporal grain that is
@@ -294,7 +318,7 @@ interface Overlay {
 /** Holiday / gift copy picks the seasonal music bed. */
 export function musicMood(frames: { voiceover?: string | null; text?: string | null }[]): "pop" | "holiday" {
   const text = frames.map((f) => `${f.voiceover ?? ""} ${f.text ?? ""}`).join(" ");
-  return /christmas|holiday|new year|black friday|cyber monday|gift|santa|xmas|winter/i.test(text) ? "holiday" : "pop";
+  return SEASONAL_COPY.test(text) ? "holiday" : "pop";
 }
 
 /** Caption windows: each word state is shown until the next word starts (short gaps are held). */
@@ -387,8 +411,8 @@ export async function renderEditV2(input: {
   hookText?: string | null;
   /** Brand Kit packaging (colours, fonts, logo, CTA, domain). */
   brand?: BrandStyle;
-  /** Music bed override (Batch Mode); default: picked from the copy. */
-  musicMood?: "pop" | "holiday";
+  /** Music bed override (Batch Mode); default: the storyboard's mood (frames[].musicMood), else picked from the copy. */
+  musicMood?: MoodId;
   /**
    * Target platform: every readable layer fits its safe zone (TikTok's right rail, Reels' bottom UI).
    * Default (none): today's frame-centred layout.
@@ -429,7 +453,11 @@ export async function renderEditV2(input: {
     zoomHit: s.zoomHit ?? null,
     fine: bySeg.get(s.frameNumber)?.fine ?? null,
     nativeAudio: s.kind === "clip" && !!s.nativeAudio,
+    productBox: s.productBox ?? null,
   }));
+  // CTA hero: a CTA clip whose keyframe shows the product off-centre, small or not at all becomes the
+  // official packshot over the blurred last shot (a still: it gets the slow push-in).
+  await applyCtaHero({ dir, canvas, frames, planInput, sources: input.sources, runId: input.runId });
   // Comparison frames: fetch the other side's image (stacked against ours in the shot).
   for (const s of segments) {
     const u = s.compare?.otherUrl;
@@ -460,7 +488,15 @@ export async function renderEditV2(input: {
       track = null;
     }
   }
+  // The bed: Batch override, else the storyboard's mood, else from the copy. Its tempo is fitted inside
+  // the mood's range so the most frame boundaries fall within ±120 ms of a beat.
+  const storyMood = frames.map((f) => f.musicMood).find((m) => isMoodId(m));
+  const mood: MoodId = input.musicMood ?? (isMoodId(storyMood) ? storyMood : musicMood(frames));
+  let at = 0;
+  const frameCuts = planInput.slice(0, -1).map((s) => round3((at += s.length)));
+  const bpm = fitTempo(frameCuts, MOOD_TEMPO[mood]);
   const plan = planEdit(planInput, {
+    bpm,
     voiceovers: new Map(frames.map((f) => [f.frameNumber, f.voiceover ? shownForm(f.voiceover) : null])),
     hookStyle: input.hookStyle,
     hookText: input.hookText,
@@ -577,7 +613,11 @@ export async function renderEditV2(input: {
     console.warn(`[edit-v2] voiceover failed for ${input.runId}:`, err instanceof Error ? err.message.slice(0, 200) : err);
     return null;
   });
-  const words: TimedWord[] = [...(vo ? vo.words.flatMap((w, i) => timedWords(w, vo.placements[i], vo.lines[i].text)) : []), ...talkWordsByFrame.flat()].sort((a, b) => a.startSec - b.startSec);
+  // Caption words carry their line (TTS line index; talk lines 1000+frame) so fragments never merge across lines.
+  const words: TimedWord[] = [
+    ...(vo ? vo.words.flatMap((w, i) => timedWords(w, vo.placements[i], vo.lines[i].text).map((x) => ({ ...x, line: i }))) : []),
+    ...talkWordsByFrame.flatMap((ws, k) => ws.map((x) => ({ ...x, line: 1000 + k }))),
+  ].sort((a, b) => a.startSec - b.startSec);
   // On the end card the offer and the button carry the message; captions stop there.
   const captionEnd = plan.ctaSec ?? total;
   // Native captions show a longer phrase (≤ 2 lines); kinetic ones 2–3 words.
@@ -696,10 +736,11 @@ export async function renderEditV2(input: {
   if (track) {
     await run(ff, ["-y", "-v", "error", "-ss", f3(track.startSec), "-t", f3(total), "-i", track.file, "-af", `afade=t=out:st=${f3(Math.max(0, total - 0.4))}:d=0.4,aresample=44100`, "-ac", "2", musicFile], { timeout: 60_000 });
   } else {
-    const mood = input.musicMood ?? musicMood(frames);
-    const music = synthesizeMusic({ durationSec: total, bpm: plan.grid.bpm, dropSec: plan.dropSec, breakdownSec: plan.breakdownSec, ctaSec: plan.ctaSec, energy: mood === "holiday" ? 0.55 : 0.8, seed: input.runId.length, mood });
+    const music = synthesizeMusic({ durationSec: total, bpm: plan.grid.bpm, dropSec: plan.dropSec, breakdownSec: plan.breakdownSec, ctaSec: plan.ctaSec, energy: MOOD_ENERGY[mood], seed: input.runId.length, mood });
     await writeFile(musicFile, toWav(music.left, music.right));
   }
+  // Every bed is −14 LUFS before ducking; the mood's mix offset sets how far under the voice it sits.
+  const bedGain = (track ? 1 : Math.pow(10, MOOD_MIX_DB[mood] / 20)) * MUSIC_BED_GAIN;
   const sfx = renderSfxBed(plan.sfx, total);
   const sfxFile = path.join(dir, "v2sfx.wav");
   await writeFile(sfxFile, toWav(sfx.left, sfx.right));
@@ -728,7 +769,7 @@ export async function renderEditV2(input: {
   // The loudness target (auto-fix nudges it when the measured mix landed off −14 LUFS).
   const lufs = Math.min(-9, Math.max(-20, fixes.loudnessTarget ?? -14));
   // Voice bus (TTS + the talk clips' own audio) → the music ducks under all of it (edit/native-audio.ts).
-  const audio = audioMixGraph({ ttsIdx: voIdx, nativeIdx, musicIdx, sfxIdx, totalSec: total, lufs });
+  const audio = audioMixGraph({ ttsIdx: voIdx, nativeIdx, musicIdx, sfxIdx, totalSec: total, lufs, musicGain: bedGain, musicSoloGain: (bedGain / MUSIC_BED_GAIN) * 0.6 });
   const master = path.join(dir, "v2master.mp4");
   await run(
     ff,
@@ -754,6 +795,7 @@ export async function renderEditV2(input: {
     ...measured,
     beats: plan.grid.beats,
     plannedCuts: plan.boundaries.map((b) => b.atSec),
+    offBeatCuts: plan.offBeatCuts,
     hookHeadline: plan.cards.some((c) => c.role === "hook" && c.startSec < 2),
     // A script with a voiceover but no spoken words means the voice failed: fail the check, never ship it silent.
     captionCoverage: spokenBeforeCta.length ? covered / Math.max(0.01, wordSpan) : frames.some((f) => f.voiceover?.trim()) ? 0 : null,
@@ -784,4 +826,51 @@ export async function renderEditV2(input: {
     .then(async (m) => ({ ...(await m.makeCovers({ file: body, dir, headline, plan: { durationSec: total, ctaSec: plan.ctaSec, cutsSec: plan.boundaries.map((b) => b.atSec), shots: m.coverShots(plan, input.frames) }, look })), headline }))
     .catch((err) => (console.warn(`[edit-v2] covers skipped for ${input.runId}:`, err instanceof Error ? err.message.slice(0, 160) : err), null));
   return { masterFile: master, previewFile, contactSheetFile, voiceoverFile: vo?.voiceoverFile ?? null, srt, qc, plan, covers };
+}
+
+/**
+ * Music bed level under the voice (before the side-chain duck). The beds are normalised to −14 LUFS;
+ * 0.28 keeps the original pop bed (−13.3 LUFS at 0.26) where it sat in the mix.
+ */
+export const MUSIC_BED_GAIN = 0.28;
+
+export const CTA_HERO_URL = "local://cta-hero";
+
+/** Swap the CTA clip for the packshot hero still when its keyframe check says the product is not a hero. */
+async function applyCtaHero(input: { dir: string; canvas: Canvas; frames: AssembleFrame[]; planInput: PlanInputSegment[]; sources: Map<string, string>; runId: string }): Promise<void> {
+  const seg = input.planInput.find((s) => (s.segment ?? "").toUpperCase() === "CTA");
+  const frame = seg ? input.frames.find((f) => f.frameNumber === seg.frameNumber) : undefined;
+  // A talking-head CTA keeps its clip (its audio is the presenter's line).
+  if (!seg || !frame?.packshotUrl || seg.nativeAudio) return;
+  const decision = ctaHeroDecision(frame.productBox);
+  if (!decision.use) return;
+  try {
+    let packFile = input.sources.get(frame.packshotUrl);
+    if (!packFile) {
+      const res = await fetch(frame.packshotUrl, { signal: AbortSignal.timeout(60_000) });
+      if (!res.ok) throw new Error(`packshot download ${res.status}`);
+      packFile = path.join(input.dir, "ctapack.img");
+      await writeFile(packFile, Buffer.from(await res.arrayBuffer()));
+      input.sources.set(frame.packshotUrl, packFile);
+    }
+    const src = input.sources.get(seg.url);
+    if (!src) throw new Error("CTA source missing");
+    let bgFile = src;
+    if (seg.kind === "clip") {
+      bgFile = path.join(input.dir, "ctabg.jpg");
+      await run(ffmpegPath!, ["-y", "-v", "error", "-ss", f3(seg.from), "-i", src, "-frames:v", "1", "-q:v", "3", bgFile], { timeout: 60_000 });
+    }
+    const hero = await composeCtaHero({ packshot: await readFile(packFile), background: await readFile(bgFile), canvas: input.canvas });
+    const heroFile = path.join(input.dir, "ctahero.jpg");
+    await writeFile(heroFile, hero);
+    input.sources.set(CTA_HERO_URL, heroFile);
+    // Every CTA frame on that source becomes the hero still.
+    for (const s of input.planInput) {
+      if ((s.segment ?? "").toUpperCase() !== "CTA" || s.url !== seg.url) continue;
+      Object.assign(s, { kind: "still", url: CTA_HERO_URL, from: 0, speed: 1, zoomHit: null, productBox: null });
+    }
+    console.info(`[edit-v2] CTA hero from the packshot for ${input.runId} (${decision.reason})`);
+  } catch (err) {
+    console.warn(`[edit-v2] CTA hero skipped for ${input.runId}:`, err instanceof Error ? err.message.slice(0, 160) : err);
+  }
 }

@@ -21,6 +21,7 @@
  *            default: inferred from the prompt)
  *   productSpec facts the product must show, fed into the QC rubric and re-roll corrections
  *            (e.g. "6.6 mm thick side profile, hair-thin bezel")
+ *   musicMood (first frame) the music bed the edit synthesises (edit/music-moods.ts), chosen from the plan
  *   screenPlate  real screen content composited by the edit onto the TV/tablet screen of this clip
  *            (contents + switch times, and the screen corners: track | firstLast | detect) — see
  *            edit/screen-plate.ts; the video prompt keeps the screen flat green (#00FF00) or black
@@ -65,6 +66,8 @@ export interface LockedBlock {
   talk?: TalkBlock;
   /** Caption look for the whole edit (first frame that sets it). */
   captionStyle?: "native" | "kinetic";
+  /** Storyboard-level music bed (edit/music-moods.ts MoodId), carried on the first frame. */
+  musicMood?: string;
 }
 
 export interface TalkBlock {

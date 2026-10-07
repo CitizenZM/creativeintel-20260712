@@ -20,6 +20,8 @@ import { personaById, personaCast, pickPersona, type CastingPrefs, type Persona 
 import { speechSec, talkKeyframePrompt, talkVideoPrompt } from "@/services/video-gen/talk-frame";
 import { captionStyleFor } from "@/services/video-gen/edit/caption-style";
 import { platformEnergy, styleForBeat, type VoiceEnergy, type VoiceStyle } from "@/services/video-gen/voice-styles";
+import { productFramingClause, validateProductCoverage, type CoverageIssue } from "./product-coverage";
+import { pickMusicMood, type MoodId } from "@/services/video-gen/edit/music-moods";
 
 export interface PlanStoryboardInput {
   plan: PlatformPlan;
@@ -35,7 +37,10 @@ export interface PlanStoryboardInput {
   ctaButton?: string;
   /** AI presenter: true = pick a persona for platform × category × audience, or a persona id. */
   presenter?: boolean | string;
-  /** Product category (creative library id) for the persona pick. */
+  /**
+   * Product category: the persona pick (creative-library id) and the music bed with the plan's
+   * musicMood (sp-1 or creative-library id).
+   */
   category?: string;
   /** Who the presenter may be (personas.ts resolveCasting); default white / Latino. */
   casting?: CastingPrefs;
@@ -317,6 +322,8 @@ export function scaffoldLockedFrames(input: PlanStoryboardInput): PlanStoryboard
     const people = refs === "cast" || refs === "cast+product";
     const productShot = refs === "product";
     const visual = b.purpose === "cta" ? `Hero shot of the ${product} from image 1, centered, on a warm softly lit table` : cleanVisual(b.visual, product);
+    // Product shots name the product as the centred main subject at ≥ 40 % of the frame (product-coverage.ts).
+    const framing = productShot ? ` ${productFramingClause(product)}` : "";
     const locked: PlanStoryboardFrame["locked"] = { engine, refs, anchorEnd: true };
     if (people && !castGiven && castText) {
       locked.castLock = castText;
@@ -338,8 +345,10 @@ export function scaffoldLockedFrames(input: PlanStoryboardInput): PlanStoryboard
       startSec: b.t0 + shift,
       endSec: b.t1 + shift,
       segment: SEGMENT[b.purpose] ?? "BODY",
-      imagePrompt: `${shot}.${subject}${setting} Photorealistic, 35mm, natural light, no on-screen text.`.replace(/\.\./g, "."),
-      videoPrompt: productShot ? "Slow push-in toward the product, then hold. Natural speed." : "Natural, unhurried movement; gentle handheld drift. Natural speed.",
+      imagePrompt: `${shot}.${subject}${framing}${setting} Photorealistic, 35mm, natural light, no on-screen text.`.replace(/\.\./g, "."),
+      videoPrompt: productShot
+        ? `Slow push-in toward the product, then hold. The camera keeps the ${product} centered and fully in frame; it never pans or drifts away from it. Natural speed.`
+        : "Natural, unhurried movement; gentle handheld drift. Natural speed.",
       locked,
       ...(b.onScreenText ? { textOverlay: b.onScreenText } : {}),
       ...(b.vo ? { voiceover: b.vo, voiceStyle: styleForBeat(b.purpose, input.plan.platform), ...(platformEnergy(input.plan.platform) ? { voiceEnergy: platformEnergy(input.plan.platform) } : {}) } : {}),
@@ -358,7 +367,9 @@ const DIRECTOR_SYSTEM = `You are the director of a short vertical product video 
 - NEVER add badges, stickers, labels, certification marks, logos, buttons, price tags, captions or any text to the product or the scene, and never leave "space for" them — every overlay, end card and button is added later in the edit and must not be mentioned. The product carries only what the reference shows.
 - NEVER ask the image model for split-screens, collages, side-by-side or two-panel layouts, grids, or a second competing device: every keyframe is ONE continuous photograph of a single scene. A frame marked COMPARE shows ONLY our product, single subject, full frame — the other side is generated separately and stacked in the edit; never mention the other device in its imagePrompt, videoPrompt or endState.
 - imagePrompt: the first keyframe as one photorealistic still (subject, action, framing, lens, light, set). Refer to the product as "the <product> from image 1" and keep it exactly as the reference (shape, bezel, thickness, colour, logo). Never ask for readable text, UI or screen content you cannot control.
-- videoPrompt: the motion inside the frame duration with second marks (e.g. "0–1s: … 1–3s: …"), natural speed; zooms always end on the product.
+- videoPrompt: the motion inside the frame duration with second marks (e.g. "0–1s: … 1–3s: …"), natural speed; zooms always end on the product, and the camera never pans or drifts off it.
+- Product shots (refs=product) and the CTA: the product is the main subject, centered, filling at least 40% of the frame height, fully in frame — never small, in a corner or half out of frame. The CTA is a front-view product hero.
+- The product is visible in frame 1 and in most frames.
 - endState: what the last frame of the clip shows (the clip is generated between the first and the last keyframe).
 Keep the same people, wardrobe, location and light across frames. Return JSON {"frames":[{"i":1,"imagePrompt":"…","videoPrompt":"…","endState":"…"}]}.`;
 
@@ -367,10 +378,25 @@ const defaultLlm: LlmFn = async ({ system, user }) => {
   return analyzeWithClaude({ systemPrompt: system, userPrompt: user, responseSchema: directorCopySchema, maxTokens: 3500 });
 };
 
+/** The music bed for a plan: its musicMood (platform musicStyle by default), the category, the platform, seasonal copy. */
+export function planMusicMood(input: PlanStoryboardInput): MoodId {
+  const script = pickScript(input.plan, input.hookId);
+  const copy = script.beats.map((b) => `${b.onScreenText ?? ""} ${b.vo ?? ""}`).join(" ") + ` ${input.plan.endCard?.headline ?? ""}`;
+  return pickMusicMood({ planMood: input.plan.musicMood, category: input.category, platform: input.plan.platform, copy });
+}
+
+/** Product coverage check + auto-fix (product-coverage.ts) and the music bed on frame 1. */
+function finishFrames(frames: PlanStoryboardFrame[], input: PlanStoryboardInput): { frames: PlanStoryboardFrame[]; coverage: CoverageIssue[] } {
+  const checked = validateProductCoverage(frames, { productName: input.productName || "product" });
+  const out = checked.frames;
+  if (out[0]) out[0].locked.musicMood = planMusicMood(input);
+  return { frames: out, coverage: checked.issues };
+}
+
 export async function directPlanStoryboard(
   input: PlanStoryboardInput,
   deps: { llm?: LlmFn } = {}
-): Promise<{ frames: PlanStoryboardFrame[]; title: string; source: "llm" | "fallback"; error?: string; presenter?: string }> {
+): Promise<{ frames: PlanStoryboardFrame[]; title: string; source: "llm" | "fallback"; error?: string; presenter?: string; coverage: CoverageIssue[] }> {
   const frames = scaffoldLockedFrames(input);
   const script = pickScript(input.plan, input.hookId);
   const title = `${input.plan.label} · ${script.title}`;
@@ -409,9 +435,9 @@ export async function directPlanStoryboard(
     }
     const presenter = frames.find((f) => f.locked.talk)?.locked.talk?.persona;
     if (!applied && frames.some((f) => !f.locked.talk)) throw new Error("model returned no prompts");
-    return { frames, title, source: "llm", ...(presenter ? { presenter } : {}) };
+    return { ...finishFrames(frames, input), title, source: "llm", ...(presenter ? { presenter } : {}) };
   } catch (err) {
     const presenter = frames.find((f) => f.locked.talk)?.locked.talk?.persona;
-    return { frames, title, source: "fallback", error: err instanceof Error ? err.message : String(err), ...(presenter ? { presenter } : {}) };
+    return { ...finishFrames(frames, input), title, source: "fallback", error: err instanceof Error ? err.message : String(err), ...(presenter ? { presenter } : {}) };
   }
 }

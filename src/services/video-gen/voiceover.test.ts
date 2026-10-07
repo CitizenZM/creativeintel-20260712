@@ -76,7 +76,38 @@ describe("kineticGroups", () => {
   const w = (texts: string[]) => texts.map((text, i) => ({ text, startSec: i * 0.3, endSec: i * 0.3 + 0.25 }));
   it("shows up to three short words at a time and breaks after punctuation, even inside quotes", () => {
     const g = kineticGroups(w(["Is", "this", "too", "bright", "for", "my", "room?'", "That's", "a", "common", "concern."]));
-    expect(g.map((x) => x.map((y) => y.text).join(" "))).toEqual(["Is this too", "bright for my", "room?'", "That's a common", "concern."]);
+    expect(g.map((x) => x.map((y) => y.text).join(" "))).toEqual(["Is this too", "bright for my", "room?'", "That's a common concern."]);
+  });
+
+  const text = (g: { text: string }[][]) => g.map((x) => x.map((y) => y.text).join(" "));
+
+  it("never leaves a one-word fragment ending in a comma or period alone — it joins the chunk before it (first live run: 'SUN.', 'COMPLETELY,')", () => {
+    expect(text(kineticGroups(w(["It", "reads", "like", "paper", "under", "harsh", "sun."])))).toEqual(["It reads like", "paper under harsh sun."]);
+    expect(text(kineticGroups(w(["Same", "resolution,", "zero", "grain,", "completely,", "no", "blur."])))).not.toContain("completely,");
+    for (const g of kineticGroups(w(["Same", "resolution,", "zero", "grain,", "completely,", "no", "blur."]))) {
+      expect(g.length === 1 && /[.,]$/.test(g[0].text)).toBe(false);
+    }
+  });
+
+  it("keeps a one-word line on its own, and a question or exclamation as a deliberate punch", () => {
+    const lines = [
+      { text: "Glare?", startSec: 0, endSec: 0.3, line: 0 },
+      { text: "Deleted.", startSec: 0.4, endSec: 0.8, line: 1 },
+      { text: "Read", startSec: 2, endSec: 2.2, line: 2 },
+      { text: "anywhere.", startSec: 2.3, endSec: 2.7, line: 2 },
+    ];
+    expect(text(kineticGroups(lines))).toEqual(["Glare?", "Deleted.", "Read anywhere."]);
+  });
+
+  it("a fragment that opens its line joins the next chunk of the same line, never the previous line", () => {
+    const words = [
+      { text: "Meet", startSec: 0, endSec: 0.2, line: 0 },
+      { text: "NXTPAPER.", startSec: 0.25, endSec: 0.6, line: 0 },
+      { text: "Completely,", startSec: 2, endSec: 2.4, line: 1 },
+      { text: "paper-like", startSec: 2.5, endSec: 2.9, line: 1 },
+      { text: "reading.", startSec: 3, endSec: 3.3, line: 1 },
+    ];
+    expect(text(kineticGroups(words))).toEqual(["Meet NXTPAPER.", "Completely, paper-like reading."]);
   });
 });
 

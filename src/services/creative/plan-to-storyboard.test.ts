@@ -80,7 +80,8 @@ describe("directPlanStoryboard", () => {
       { llm: async () => ({ frames: [{ i: 3, imagePrompt: "Macro of the matte tablet in noon sun", videoPrompt: "Slow push-in toward the screen.", endState: "Screen fills the frame" }] }) }
     );
     expect(out.source).toBe("llm");
-    expect(out.frames[2].imagePrompt).toBe("Macro of the matte tablet in noon sun");
+    // the model's prompt is kept; the coverage check appends the product framing it was missing
+    expect(out.frames[2].imagePrompt).toMatch(/^Macro of the matte tablet in noon sun\. The NXTPAPER 14 from image 1 is the main subject, centered/);
     expect(out.frames[2].locked.endState).toBe("Screen fills the frame");
     expect(out.frames[2].startSec).toBe(3);
   });
@@ -182,7 +183,8 @@ describe("AI presenter (talking-head frames)", () => {
     );
     expect(out.frames[0].imagePrompt).not.toBe("LLM 1");
     expect(out.frames[0].videoPrompt).toContain('"Okay, I did not expect this."');
-    expect(out.frames[1].imagePrompt).toBe("LLM 2");
+    // the model's prompt is applied; the coverage check appends the product framing it lacked
+    expect(out.frames[1].imagePrompt).toMatch(/^LLM 2\. The NXTPAPER 14 from image 1 is the main subject, centered/);
     expect(out.presenter).toBeTruthy();
   });
 });
@@ -298,6 +300,39 @@ describe("comparison visuals → two generated shots (locked.compare)", async ()
     expect(out.frames[1].imagePrompt).not.toMatch(/ipad|glossy/i);
     expect(out.frames[1].videoPrompt).not.toMatch(/two tablets|between/i);
     expect(out.frames[1].locked.endState).toBeUndefined();
-    expect(out.frames[2].imagePrompt).toBe("Macro of the matte NXTPAPER 14 from image 1 in noon sun");
+    expect(out.frames[2].imagePrompt).toMatch(/^Macro of the matte NXTPAPER 14 from image 1 in noon sun\. The NXTPAPER 14 from image 1 is the main subject, centered/);
+  });
+});
+
+describe("product coverage + music bed on the storyboard", async () => {
+  const { hasProductFraming } = await import("./product-coverage");
+
+  it("the scaffold already meets the coverage rules (no issues) and names the bed on frame 1", async () => {
+    const out = await directPlanStoryboard({ plan, productName: "NXTPAPER 14" }, { llm: async () => { throw new Error("down"); } });
+    expect(out.coverage).toEqual([]);
+    expect(out.frames[0].locked.musicMood).toBe("holiday");
+    for (const f of out.frames.filter((x) => x.locked.refs === "product")) expect(hasProductFraming(f.imagePrompt ?? "")).toBe(true);
+  });
+
+  it("fixes a model prompt that loses the product: corner framing and a CTA that is not a hero", async () => {
+    const out = await directPlanStoryboard(
+      { plan, productName: "NXTPAPER 14" },
+      { llm: async () => ({ frames: [
+        { i: 3, imagePrompt: "The NXTPAPER 14 from image 1 rests in the lower corner of a sunny room" },
+        { i: 6, imagePrompt: "A family waves goodbye at the door" },
+      ] }) }
+    );
+    expect(out.source).toBe("llm");
+    expect(out.coverage.map((i) => [i.code, i.frameNumber, i.fixed])).toEqual(expect.arrayContaining([["cta_not_hero", 6, true], ["weak_product_framing", 3, true]]));
+    expect(hasProductFraming(out.frames[2].imagePrompt ?? "")).toBe(true);
+    expect(out.frames[5].imagePrompt).toMatch(/^Hero shot of the NXTPAPER 14 from image 1/);
+  });
+
+  it("picks the bed from the plan's musicMood, the category and the platform", async () => {
+    const { planMusicMood } = await import("./plan-to-storyboard");
+    const calm = { ...plan, musicMood: "on-trend aesthetic pop/lo-fi/house", scripts: [{ ...plan.scripts[0], beats: plan.scripts[0].beats.map((b) => ({ ...b, onScreenText: "Read anywhere", vo: "Read anywhere." })) }], endCard: { ...plan.endCard, headline: "" } } as unknown as PlatformPlan;
+    expect(planMusicMood({ plan: calm, productName: "X", category: "home_air_cleaning" })).toBe("chill-lofi");
+    expect(planMusicMood({ plan: calm, productName: "X", category: "tablet_laptop" })).toBe("upbeat-pop");
+    expect(planMusicMood({ plan, productName: "X" })).toBe("holiday");
   });
 });

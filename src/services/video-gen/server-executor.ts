@@ -616,7 +616,7 @@ export async function storyboardFrames(storyboardId: string | null, directorPlan
   const sb = await prisma.storyboard.findUnique({ where: { id: storyboardId }, select: { frames: true, frameSeconds: true } });
   const frameSeconds = sb?.frameSeconds || 2;
   const frames = Array.isArray(sb?.frames)
-    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null; segment?: string | null; imagePrompt?: string | null; scene?: string | null; locked?: { speed?: number; zoomHit?: { x: number; y: number }; fine?: string; endCard?: { id: string; data?: Record<string, unknown> }; screenPlate?: import("./edit/screen-plate").ScreenPlate; talk?: { line?: string; persona?: string }; captionStyle?: "native" | "kinetic"; engine?: string }; voiceStyle?: import("./voice-styles").VoiceStyle | null; voiceEnergy?: import("./voice-styles").VoiceEnergy | null }[])
+    ? (sb!.frames as { frameNumber?: number; startSec?: number; endSec?: number; textOverlay?: string | null; voiceover?: string | null; segment?: string | null; imagePrompt?: string | null; scene?: string | null; locked?: { speed?: number; zoomHit?: { x: number; y: number }; fine?: string; endCard?: { id: string; data?: Record<string, unknown> }; screenPlate?: import("./edit/screen-plate").ScreenPlate; talk?: { line?: string; persona?: string }; captionStyle?: "native" | "kinetic"; engine?: string; musicMood?: string }; voiceStyle?: import("./voice-styles").VoiceStyle | null; voiceEnergy?: import("./voice-styles").VoiceEnergy | null }[])
     : [];
   const plan = (directorPlan as { frames?: Record<string, { vo?: string | null; txt?: string | null }> } | null)?.frames ?? {};
   return frames.map((f, i) => {
@@ -633,6 +633,7 @@ export async function storyboardFrames(storyboardId: string | null, directorPlan
       zoomHit: f.locked?.zoomHit ?? null,
       fine: f.locked?.fine ?? null,
       screenPlate: f.locked?.screenPlate ?? null,
+      musicMood: f.locked?.musicMood ?? null,
       endCard: f.locked?.endCard?.id ? { id: f.locked.endCard.id, data: (f.locked.endCard.data ?? {}) as never } : null,
       captionStyle: f.locked?.captionStyle ?? null,
       // Talking head: the clip's own voice says the line (no TTS there); captions come from the line.

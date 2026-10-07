@@ -17,7 +17,7 @@
  *   into the CTA  whip + whoosh, and the CTA button lands with a click
  * Transitions add light, blur or scale only — the content switch is the cut.
  */
-import { beatGrid, beatGridFromTimes, FPS, snapToFrame, round3, type BeatGrid } from "./beat-grid";
+import { beatGrid, beatGridFromTimes, FPS, snapCut, snapToFrame, round3, type BeatGrid } from "./beat-grid";
 import type { SfxEvent } from "./sfx";
 
 export type Transition = "cut" | "flash" | "whip" | "zoom";
@@ -42,6 +42,19 @@ export interface PlanInputSegment {
   fine?: string | null;
   /** Talking-head clip: its own (lip-synced) audio plays for this frame (edit/native-audio.ts). */
   nativeAudio?: boolean;
+  /** Product box from the keyframe consistency check (start / end keyframe of this frame's clip). */
+  productBox?: ProductBox | null;
+}
+
+/** [x0, y0, x1, y1] as 0–1 fractions of the source frame. */
+export type BBox = [number, number, number, number];
+
+/** Where the product sits in a frame's source: at the start keyframe and (anchored clips) the end keyframe. */
+export interface ProductBox {
+  start: BBox | null;
+  end?: BBox | null;
+  /** The vision check's verdict that the product is in the keyframe at all (null = not reviewed). */
+  present?: boolean | null;
 }
 
 export interface Shot {
@@ -72,6 +85,10 @@ export interface Shot {
   zoomHit?: { x: number; y: number } | null;
   /** The clip's native audio plays under this shot (talking head). */
   nativeAudio?: boolean;
+  /** Product box of the frame's source: the reframe keeps the product centred and big (motion.ts productReframe). */
+  productBox?: ProductBox | null;
+  /** The frame's source window (clips): where the shot sits inside it, to move the reframe from the start box to the end box. */
+  frameSrc?: { from: number; span: number } | null;
 }
 
 /**
@@ -105,6 +122,11 @@ export interface EditPlan {
   sfx: SfxEvent[];
   cards: TextCard[];
   ctaButton: { text: string; startSec: number } | null;
+  /**
+   * Cuts left off the beat on purpose: no beat within ±CUT_SNAP_SEC, or the snap would have started a
+   * voiceover line before its picture. QC judges beat timing on the other cuts.
+   */
+  offBeatCuts: number[];
 }
 
 const BODY_ROTATION: Transition[] = ["whip", "zoom", "whip", "flash"];
@@ -181,7 +203,24 @@ export function planEdit(
   });
   const durationSec = laid[laid.length - 1].endSec;
   const grid = opts.beats?.length ? beatGridFromTimes(opts.beats, durationSec) : beatGrid(durationSec, opts.bpm ?? 120);
-  const onBeat = (x: number) => snapToFrame(grid.beats.reduce((b, c) => (Math.abs(c - x) < Math.abs(b - x) ? c : b), grid.beats[0]));
+  /** Nearest beat, unconditionally — for split points inside a frame, which nothing else is timed to. */
+  const nearestOnBeat = (x: number) => snapToFrame(grid.beats.reduce((b, c) => (Math.abs(c - x) < Math.abs(b - x) ? c : b), grid.beats[0]));
+  // Voiceover lines start where a frame's line differs from the previous frame's (voiceover.ts planVoiceover).
+  const voStarts = new Set<number>();
+  laid.forEach((s, i) => {
+    const line = (opts.voiceovers?.get(s.frameNumber) ?? "").trim();
+    const prev = i ? (opts.voiceovers?.get(laid[i - 1].frameNumber) ?? "").trim() : "";
+    if (line && line !== prev) voStarts.add(round3(s.startSec));
+  });
+  /**
+   * A cut on the beat grid when a beat is within ±120 ms and moving there doesn't start a voiceover
+   * line before its picture (beat-grid snapCut); otherwise on the cut's own frame.
+   */
+  const onBeat = (x: number) => {
+    const near = nearestOnBeat(x);
+    if (Math.abs(near - x) < 1e-3) return near;
+    return snapCut(grid, x, { voStart: voStarts.has(round3(x)) }).atSec;
+  };
 
   const firstBody = laid.find((s) => s.segment !== "HOOK");
   const dropSec = firstBody ? onBeat(firstBody.startSec) : onBeat(Math.min(2, durationSec / 4));
@@ -214,6 +253,8 @@ export function planEdit(
       speed: s.speed ?? 1,
       zoomHit: s.zoomHit ?? null,
       ...(s.kind === "clip" && s.nativeAudio ? { nativeAudio: true } : {}),
+      productBox: s.productBox ?? null,
+      frameSrc: s.kind === "clip" ? { from: s.from, span: Math.max(0.05, (s.endSec - s.startSec) * (s.speed ?? 1)) } : null,
       ...extra,
     });
   };
@@ -266,7 +307,7 @@ export function planEdit(
     const cuts: number[] = [];
     for (let k = 1; k < parts; k++) {
       const ideal = s.startSec + (k * len) / parts;
-      const beat = onBeat(ideal);
+      const beat = nearestOnBeat(ideal);
       const at = beat - s.startSec > 0.4 && s.endSec - beat > 0.4 && Math.abs(beat - ideal) < 0.5 ? beat : snapToFrame(ideal);
       if (at > (cuts[cuts.length - 1] ?? s.startSec) + 0.3) cuts.push(at);
     }
@@ -358,5 +399,6 @@ export function planEdit(
   const ctaButton = ctaSec !== null ? { text: "Shop now", startSec: round3(Math.max(ctaSec, durationSec - CTA_BUTTON_SEC)) } : null;
   if (ctaButton) sfx.push({ kind: "click", atSec: ctaButton.startSec });
 
-  return { durationSec, grid, dropSec, ctaSec, breakdownSec, shots, boundaries, sfx, cards, ctaButton };
+  const offBeatCuts = boundaries.map((b) => b.atSec).filter((t) => !grid.beats.some((x) => Math.abs(x - t) < 0.02));
+  return { durationSec, grid, dropSec, ctaSec, breakdownSec, shots, boundaries, sfx, cards, ctaButton, offBeatCuts };
 }
