@@ -74,12 +74,21 @@ export const prismaHealthSource: HealthSource = {
     const runIds = activeRuns.map((r) => r.id);
     const lastJob = runIds.length ? await prisma.libtvJob.groupBy({ by: ["runId"], where: { runId: { in: runIds } }, _max: { updatedAt: true } }) : [];
     const lastByRun = new Map(lastJob.map((g) => [g.runId, g._max.updatedAt]));
+    const unfinished = runIds.length
+      ? await prisma.libtvJob.findMany({ where: { runId: { in: runIds }, status: { in: ["queued", "submitted", "running", "pending"] } }, select: { runId: true, settings: true } })
+      : [];
+    const held = new Map<string, number>();
+    const pending = new Map<string, number>();
+    for (const j of unfinished) {
+      const m = (j.settings as { hold?: unknown } | null)?.hold ? held : pending;
+      m.set(j.runId, (m.get(j.runId) ?? 0) + 1);
+    }
     const jobIds = [...new Set(openReservations.map((e) => e.jobId).filter((x): x is string => !!x))];
     const jobs = jobIds.length ? await prisma.libtvJob.findMany({ where: { id: { in: jobIds } }, select: { id: true, status: true, error: true } }) : [];
     const jobById = new Map(jobs.map((j) => [j.id, j]));
     return {
       now,
-      activeRuns: activeRuns.map((r) => ({ ...r, lastJobUpdateAt: lastByRun.get(r.id) ?? null })),
+      activeRuns: activeRuns.map((r) => ({ ...r, lastJobUpdateAt: lastByRun.get(r.id) ?? null, heldJobs: held.get(r.id) ?? 0, pendingJobs: pending.get(r.id) ?? 0 })),
       runningJobs: (runningJobs as JobRow[]).map(toJob),
       recentJobs: (recentJobs as JobRow[]).map(toJob),
       renders,

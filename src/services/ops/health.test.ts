@@ -161,7 +161,7 @@ describe("detectSpendAnomalies", () => {
   it("flags projects over budget", () => {
     const issues = detectSpendAnomalies(snap({ budgetProjects: [{ id: "p1", name: "TCL", budgetUsd: 2, spentUsd: 2.03 }, { id: "p2", name: "OK", budgetUsd: 2, spentUsd: 1.5 }] }));
     expect(issues).toHaveLength(1);
-    expect(issues[0]).toMatchObject({ code: "spend.project-over-budget", severity: "critical", projectId: "p1" });
+    expect(issues[0]).toMatchObject({ code: "spend.project-over-budget", severity: "warning", projectId: "p1" });
   });
 
   it("flags open reservations older than 2 h and plans a release only when the job has finished", () => {
@@ -338,5 +338,23 @@ describe("autoRecover", () => {
     const out = await autoRecover({ deps, source: { snapshot: async () => snap({ budgetProjects: [{ id: "p1", name: "x", budgetUsd: 1, spentUsd: 5 }], activeRuns: [run({ lastJobUpdateAt: ago(300) })] }) } });
     expect(out.actions).toEqual([]);
     expect(out.issues.length).toBeGreaterThan(0);
+  });
+});
+
+describe("health false positives seen on the first production scan (2026-10-07)", () => {
+  it("a run whose only unfinished jobs are held for keyframe review is awaiting release, not stuck", () => {
+    const issues = detectStuckRuns(snap({ activeRuns: [run({ status: "running", lastJobUpdateAt: ago(68 * 60), heldJobs: 9, pendingJobs: 0 })] }));
+    expect(issues.map((i) => [i.code, i.severity])).toEqual([["run.awaiting-release", "info"]]);
+    const stuck = detectStuckRuns(snap({ activeRuns: [run({ status: "running", lastJobUpdateAt: ago(68 * 60), heldJobs: 9, pendingJobs: 1 })] }));
+    expect(stuck[0].code).toBe("run.no-progress");
+  });
+
+  it("a few cents past the cap is a warning; ledger rows from before a recalibration are ignored for drift", () => {
+    const over = detectSpendAnomalies(snap({ budgetProjects: [{ id: "p", name: "P", budgetUsd: 2, spentUsd: 2.03 }] }));
+    expect(over[0]).toMatchObject({ code: "spend.project-over-budget", severity: "warning" });
+    const big = detectSpendAnomalies(snap({ budgetProjects: [{ id: "p", name: "P", budgetUsd: 2, spentUsd: 3 }] }));
+    expect(big[0].severity).toBe("critical");
+    const old = Array.from({ length: 48 }, (_, i) => ({ id: `e${i}`, projectId: "p", runId: null, jobId: null, kind: "vision_qc", model: "g", estUsd: 0.0028, actualUsd: 0.0092, createdAt: new Date("2026-10-07T08:00:00Z") }));
+    expect(detectSpendAnomalies(snap({ settledSpend: old })).filter((i) => i.code === "spend.ratio-drift")).toEqual([]);
   });
 });

@@ -36,6 +36,9 @@ export interface HealthRun {
   updatedAt: Date;
   /** Newest updatedAt of the run's jobs (null = no jobs). */
   lastJobUpdateAt: Date | null;
+  /** Unfinished jobs held for keyframe review (settings.hold) and unfinished jobs not held. */
+  heldJobs?: number;
+  pendingJobs?: number;
 }
 
 export interface HealthJob {
@@ -212,6 +215,18 @@ export function detectStuckRuns(s: HealthSnapshot, t = HEALTH_THRESHOLDS): Healt
       }
     } else if (r.status === "running" || r.status === "claimed") {
       const age = minutes(s.now, r.lastJobUpdateAt ?? r.startedAt ?? r.updatedAt);
+      // Everything left is held for keyframe review: waiting on the owner (release-videos), not stuck.
+      if ((r.heldJobs ?? 0) > 0 && (r.pendingJobs ?? 0) === 0) {
+        if (age >= t.noProgressMin) {
+          out.push({
+            ...base,
+            code: "run.awaiting-release",
+            severity: "info",
+            message: `${r.heldJobs} clip(s) held for keyframe review for ${fmtMin(age)} — release them (release-videos) or cancel the run.`,
+          });
+        }
+        continue;
+      }
       if (age >= t.noProgressMin) {
         out.push({
           ...base,
@@ -336,13 +351,17 @@ export function releaseAmount(e: HealthSpendEntry): number | null {
   return null; // still queued / running
 }
 
+/** When the price table was last recalibrated per spend kind (ops/cost-model.ts) — older ledger rows are skipped for drift. */
+export const PRICE_CALIBRATED_AT: Record<string, string> = { vision_qc: "2026-10-07T09:30:00Z" };
+
 export function detectSpendAnomalies(s: HealthSnapshot, t = HEALTH_THRESHOLDS): HealthIssue[] {
   const out: HealthIssue[] = [];
   for (const p of s.budgetProjects) {
     if (p.budgetUsd == null || p.spentUsd == null || p.spentUsd <= p.budgetUsd + 1e-6) continue;
     out.push({
       code: "spend.project-over-budget",
-      severity: "critical",
+      // A settle a few cents past the cap (provider bill above the reservation) is a warning; a real overrun is critical.
+      severity: p.spentUsd - p.budgetUsd <= Math.max(0.05, p.budgetUsd * 0.05) ? "warning" : "critical",
       category: "spend",
       projectId: p.id,
       target: { type: "project", id: p.id },
@@ -370,6 +389,9 @@ export function detectSpendAnomalies(s: HealthSnapshot, t = HEALTH_THRESHOLDS): 
   const byKind = new Map<string, { n: number; est: number; actual: number }>();
   for (const e of s.settledSpend) {
     if (e.actualUsd === null || !(e.actualUsd > 0) || !(e.estUsd > 0)) continue; // unbilled rows say nothing about price drift
+    // Rows estimated before the price table was recalibrated for this kind say nothing about today's table.
+    const cal = PRICE_CALIBRATED_AT[e.kind];
+    if (cal && new Date(e.createdAt).getTime() < Date.parse(cal)) continue;
     const g = byKind.get(e.kind) ?? { n: 0, est: 0, actual: 0 };
     g.n++;
     g.est += e.estUsd;
