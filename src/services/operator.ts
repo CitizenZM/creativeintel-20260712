@@ -156,6 +156,22 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
     allowPaid: z.boolean().optional(),
     creditCap: z.number().int().positive().optional(),
   }),
+  /** Performance Agent: answer a question from the aggregated results table (one text-model call). */
+  z.object({ action: z.literal("perf-ask"), projectId: z.string().min(1), question: z.string().min(3).max(500) }),
+  /** Test-plan strategist: structure, phases, power-sized round 1, kill/scale rules → Project.testPlan. Needs plan-campaign first. */
+  z.object({
+    action: z.literal("test-plan"),
+    projectId: z.string().min(1),
+    totalBudget: z.number().positive(),
+    days: z.number().int().min(1).max(120),
+    goal: z.string().max(40).optional(),
+    platforms: z.array(z.string().min(1)).max(12).optional(),
+    baseline: z.record(z.string(), z.object({ cpm: z.number().positive(), ctr: z.number().gt(0).lt(1), cvr: z.number().gt(0).lt(1), hookRate: z.number().gt(0).lt(1) }).partial()).optional(),
+    targetCpa: z.number().positive().optional(),
+    targetLift: z.number().gt(0).max(5).optional(),
+    maxVariants: z.number().int().min(2).max(20).optional(),
+    narrative: z.boolean().optional(),
+  }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;

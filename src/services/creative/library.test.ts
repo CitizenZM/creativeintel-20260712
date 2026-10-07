@@ -103,4 +103,19 @@ describe("goal fit", () => {
     const c = selectCreative({ category: "electronics", platform: "youtube_instream_skippable", goal: "awareness", runDate: "2026-11-27T12:00:00Z", promo: { pct: 25 } });
     expect(c.hooks.map((h) => h.hook.id)).not.toContain("H16");
   });
+
+  it("performance bias: adds to hook scores and reorders end cards; empty bias changes nothing", () => {
+    const base = { category: "electronics" as const, platform: "meta_feed" as const, goal: "cold" as const, runDate: "2026-03-10T12:00:00Z", promo: { pct: 20, price: 80, comparePrice: 100 }, assets: { rating: { value: 4.6, count: 1200 } } };
+    const plain = selectCreative(base);
+    expect(selectCreative({ ...base, bias: {} })).toEqual(plain);
+    expect(plain.endCard.id).toBe("E04");
+    expect(plain.hooks.map((h) => `${h.hook.id}:${h.score}`)).toEqual(["H01:8", "H16:8", "H20:7"]);
+    const up = selectCreative({ ...base, bias: { H20: 3, E06: 3 } });
+    expect(up.hooks[0]).toMatchObject({ hook: { id: "H20" }, score: 10 });
+    expect(up.hooks[0].why).toContain("performance +3");
+    expect(up.endCard.id).toBe("E06");
+    const down = selectCreative({ ...base, bias: { H01: -3 } });
+    expect(down.hooks[0].hook.id).not.toBe("H01");
+    expect(down.hooks.find((h) => h.hook.id === "H01")?.score ?? 5).toBe(5);
+  });
 });

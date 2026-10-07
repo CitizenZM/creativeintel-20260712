@@ -188,6 +188,8 @@ export function selectCreative(i: CreativeInputs): CreativeChoice {
     if (i.goal === "awareness" && SURPRISE.has(id)) (score += 1), why.push("surprise opener");
     if (i.platform === "tiktok" && hook.family === "native") (score += 1), why.push("native on TikTok");
     if (FACE_HEAVY.has(id)) (score -= 2), why.push("generated faces on screen");
+    const pb = i.bias?.[id];
+    if (pb) (score += pb), why.push(`performance ${pb > 0 ? "+" : ""}${pb}`);
     scored.push({ hook, score, why });
   }
   scored.sort((a, b) => b.score - a.score || a.hook.id.localeCompare(b.hook.id));
@@ -214,6 +216,8 @@ export function selectCreative(i: CreativeInputs): CreativeChoice {
   if (i.assets?.multiSku) push("E07");
   push(...cell.ends, ...bias.ends, "E01");
   const allowed = order.map(endCardById).filter((e) => endCardAllowed(e, i, s));
+  // Performance bias: rank = −position + bias (stable; no bias keeps the rule order).
+  if (i.bias) allowed.sort((a, b) => order.indexOf(a.id) - (i.bias?.[a.id] ?? 0) - (order.indexOf(b.id) - (i.bias?.[b.id] ?? 0)));
   for (const id of order) if (!allowed.find((e) => e.id === id)) notes.push(`${id} ${endCardById(id).name} skipped: missing ${endCardById(id).requires.join("/")}`);
 
   const labels: string[] = [];

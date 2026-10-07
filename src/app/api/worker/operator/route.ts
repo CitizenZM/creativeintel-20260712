@@ -21,6 +21,8 @@
  * POST { action: "plan-batch", projectId, runId, dims?, maxVariants?, design?: pairwise|full } — Batch Mode matrix + cost → qc.batches
  * POST { action: "render-batch", projectId, runId, batchId, limit? } — render free re-edit variants of a batch
  * POST { action: "export-pack", projectId, runId, platforms? } — videos, thumbnails, ad copy, bulk CSVs, README, manifest
+ * POST { action: "perf-ask", projectId, question } — Performance Agent answer + the aggregated table it used
+ * POST { action: "test-plan", projectId, totalBudget, days, goal?, platforms?, baseline?, targetCpa?, targetLift? } — testing plan → Project.testPlan
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -357,6 +359,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, export: await renderExportForRun(run.id, input.format) });
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+    }
+  }
+
+  if (input.action === "perf-ask") {
+    const { askPerformance } = await import("@/services/performance/agent");
+    return NextResponse.json({ ok: true, ...(await askPerformance(input.projectId, input.question)) });
+  }
+
+  if (input.action === "test-plan") {
+    const { createTestPlan, TestPlanError } = await import("@/services/creative/test-plan.store");
+    try {
+      const { action: _a, projectId, ...req } = input;
+      return NextResponse.json({ ok: true, testPlan: await createTestPlan(projectId, req) });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof TestPlanError ? err.status : 500 });
     }
   }
 
