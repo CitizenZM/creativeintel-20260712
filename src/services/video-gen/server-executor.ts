@@ -22,7 +22,7 @@ import type { ServerEngine } from "./libtv-pricing";
 import { cleanFramePrompt, hasPeople, motionSafePrompt } from "./prompt-safety";
 import { consistencyGateEnabled, keyframeQcEnabled, MAX_KEYFRAME_REROLLS, reviewKeyframe, shouldReroll } from "./keyframe-qc";
 import { applyCorrections, correctionsFor } from "./consistency/corrections";
-import { consistencyRecord, decideKeyframe, type KeyframeCandidate } from "./consistency/gate";
+import { consistencyRecord, consistencyRepairEnabled, decideKeyframe, repairReason, type KeyframeCandidate } from "./consistency/gate";
 import { isShotType } from "./consistency/thresholds";
 import { finishDirectedMotion, finishDirectedStill } from "./shot-director";
 import { guardJobCall, guardQc, settleClipOnPoll } from "@/services/ops/spend";
@@ -246,6 +246,7 @@ export async function tickRun(
       productSpec?: string;
     };
     const urls = (names: string[]) => names.map((r) => urlOf(r)).filter((u): u is string => !!u);
+    const productUrls = urls(refNames.filter((r) => r !== "CAST" && !/^K\d+/.test(r)));
     // Loaded on demand: the scorer pulls in sharp and the vision client.
     const { scoreFrame } = await import("./consistency/score");
     const refCount = refNames.length;
@@ -254,7 +255,7 @@ export async function tickRun(
       url,
       {
         cast: urls(refNames.filter((r) => r === "CAST")).map((image) => ({ image })),
-        product: urls(refNames.filter((r) => r !== "CAST" && !/^K\d+/.test(r))).map((image) => ({ image })),
+        product: productUrls.map((image) => ({ image })),
         start: urls(refNames.filter((r) => /^K\d+$/.test(r)))[0],
       },
       {
@@ -279,11 +280,46 @@ export async function tickRun(
     }
     const { qcCorrections: _drop, ...rest } = s;
     void _drop;
+    // Best attempt still shows a major product defect: put the official packshot in its place (local, free).
+    const reason = consistencyRepairEnabled() && productUrls.length ? repairReason(d.chosen) : null;
+    const repair = reason ? await repairKept(j, d.chosen, reason, productUrls, s) : null;
+    const repaired = !!repair?.accepted && !!repair.url;
     await prisma.libtvJob.update({
       where: { id: j.id },
-      data: { settings: { ...rest, qcOk: d.chosen.pass, qcIssues: d.chosen.defects.slice(0, 5), consistency: consistencyRecord(result, d, attempts) } as never },
+      data: {
+        settings: {
+          ...rest,
+          qcOk: d.chosen.pass || (repaired && repair!.pass),
+          qcIssues: d.chosen.defects.slice(0, 5),
+          consistency: consistencyRecord(result, d, attempts, repair ? { method: repair.method, reason: repair.reason, score: repair.score, pass: repair.pass, url: repair.url } : null),
+          ...(repair ? { repair } : {}),
+        } as never,
+      },
     });
-    return d.url;
+    return repaired ? repair!.url! : d.url;
+  };
+  /** Composite the packshot into the kept frame, upload it, and return the record (null when it could not be done). */
+  const repairKept = async (j: LibtvJob, chosen: KeyframeCandidate, reason: string, packshots: string[], s: { directedKeyframe?: string; qcShotType?: string }) => {
+    try {
+      const { repairKeyframe } = await import("./consistency/repair");
+      const out = await repairKeyframe({
+        frame: chosen.url,
+        packshots,
+        refIndex: chosen.refIndex,
+        bbox: chosen.bbox!,
+        reason,
+        shot: s.directedKeyframe ?? j.prompt,
+        shotType: isShotType(s.qcShotType) ? s.qcShotType : undefined,
+      });
+      if (!out) return null;
+      const url = out.record.accepted
+        ? (await (await import("@/services/storage")).uploadBuffer({ buffer: out.image, filename: `${j.nodeName}-repaired.jpg`, contentType: "image/jpeg", folder: `keyframe-repairs/${runId}` })).url
+        : undefined;
+      return { ...out.record, fromUrl: chosen.url, url };
+    } catch (err) {
+      console.warn(`[${adapter.engine}] ${j.nodeName} packshot repair failed:`, errorText(err));
+      return null;
+    }
   };
   const byName = new Map(run.jobs.map((j) => [j.nodeName, j]));
   const urlOf = (ref: string) => byName.get(refName(ref))?.resultUrl ?? byName.get(refName(ref))?.sourceUrl ?? null;

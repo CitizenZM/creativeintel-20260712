@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { brightnessAt, fxFilter, musicMood, openerTrim, overlayX } from "./render-v2";
+import sharp from "sharp";
+import { SAFE_BOX } from "@/services/creative/library";
+import { brightnessAt, compareFilter, compareLabelSlots, fxFilter, musicMood, openerTrim, overlayX } from "./render-v2";
 import { planEdit, type PlanInputSegment } from "./edit-plan";
 import { layerFilter } from "./endcard-render";
+import { comparisonLabelPng } from "./text-layers";
 
 describe("musicMood", () => {
   it("picks the seasonal bed for holiday / gift copy", () => {
@@ -46,4 +49,22 @@ describe("overlay x in the safe box", () => {
     expect(f).toContain("overlay=x=502-w/2");
     expect(layerFilter(7, "none", 0.4, 12, 15, "[a]", "[b]").join(";")).toContain("overlay=x=(W-w)/2");
   });
+});
+
+describe("comparison labels sit inside the safe box", () => {
+  it("each label inside its half and inside y 288–1220 / x 240–840 on 9:16", async () => {
+    const canvas = { w: 1080, h: 1920 };
+    const slot = compareLabelSlots(canvas);
+    for (const [text, ours] of [["NXTPAPER 14", true], ["GLOSSY TABLET", false], ["A VERY LONG COMPETITOR LABEL HERE", false]] as const) {
+      const { width = 0, height = 0 } = await sharp(await comparisonLabelPng(text, canvas, undefined, ours)).metadata();
+      const top = (ours ? slot.oursTop : slot.otherTop) * canvas.h;
+      expect(top).toBeGreaterThanOrEqual(SAFE_BOX.top);
+      expect(top + height).toBeLessThanOrEqual(ours ? SAFE_BOX.bottom : canvas.h / 2);
+      if (ours) expect(top).toBeGreaterThanOrEqual(canvas.h / 2);
+      expect((canvas.w - width) / 2).toBeGreaterThanOrEqual(SAFE_BOX.bodyBand.x0);
+    }
+    const f = compareFilter("[0:v]null[v]", canvas);
+    expect(f).toContain(`y=H*${slot.otherTop}[l1]`);
+    expect(f).toContain(`y=H*${slot.oursTop},format=yuv420p[v]`);
+  }, 60_000);
 });

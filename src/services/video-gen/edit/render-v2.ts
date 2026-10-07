@@ -125,6 +125,15 @@ export function shotFilter(shot: Shot, canvas: Canvas, beatSec = 0.5): string {
  * canvases, side by side on landscape — split by a white rule, each labelled
  * (inputs 2 = ours, 3 = other). Ours is always the second half the eye lands on.
  */
+/**
+ * Label tops (fractions of the canvas height) on a vertical canvas: each label inside its own half and inside
+ * the strict 9:16 safe box (y 288–1220 of 1920 = 0.15–0.635 — the old centred 0.16 put the top label's pill
+ * above 0.15). Landscape: both labels at the top of their halves.
+ */
+export function compareLabelSlots(canvas: Canvas): { otherTop: number; oursTop: number } {
+  return canvas.h >= canvas.w ? { otherTop: 0.165, oursTop: 0.52 } : { otherTop: 0.08, oursTop: 0.08 };
+}
+
 export function compareFilter(shotGraph: string, canvas: Canvas): string {
   const { w, h } = canvas;
   const vertical = h >= w;
@@ -132,6 +141,7 @@ export function compareFilter(shotGraph: string, canvas: Canvas): string {
   const hh = vertical ? Math.round(h / 4) * 2 : h;
   const pre = shotGraph.replace(/\[v\]$/, "[ours0]");
   const stack = vertical ? "vstack" : "hstack";
+  const slot = compareLabelSlots(canvas);
   return [
     pre,
     `[ours0]scale=${hw}:${hh}:force_original_aspect_ratio=increase,crop=${hw}:${hh},setsar=1[ours]`,
@@ -141,8 +151,8 @@ export function compareFilter(shotGraph: string, canvas: Canvas): string {
       ? `[st]drawbox=x=0:y=${hh - 3}:w=${w}:h=6:color=white@0.95:t=fill[ruled]`
       : `[st]drawbox=x=${hw - 3}:y=0:w=6:h=${h}:color=white@0.95:t=fill[ruled]`,
     vertical
-      ? `[ruled][3:v]overlay=x=(W-w)/2:y=H*0.16-h/2[l1];[l1][2:v]overlay=x=(W-w)/2:y=H*0.56-h/2,format=yuv420p[v]`
-      : `[ruled][3:v]overlay=x=W*0.25-w/2:y=H*0.12-h/2[l1];[l1][2:v]overlay=x=W*0.75-w/2:y=H*0.12-h/2,format=yuv420p[v]`,
+      ? `[ruled][3:v]overlay=x=(W-w)/2:y=H*${slot.otherTop}[l1];[l1][2:v]overlay=x=(W-w)/2:y=H*${slot.oursTop},format=yuv420p[v]`
+      : `[ruled][3:v]overlay=x=W*0.25-w/2:y=H*${slot.otherTop}[l1];[l1][2:v]overlay=x=W*0.75-w/2:y=H*${slot.oursTop},format=yuv420p[v]`,
   ].join(";");
 }
 

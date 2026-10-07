@@ -212,7 +212,8 @@ export function comparisonLabelPng(text: string, canvas: Canvas, look: Look = DE
     bg: ours ? look.button : "rgba(40,40,40,0.85)",
     family: look.body.family,
     fontFile: look.body.file,
-    widthPct: 0.6,
+    // Inside the safe body band (x 240–840 of 1080).
+    widthPct: 0.48,
   });
 }
 

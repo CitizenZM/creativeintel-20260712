@@ -36,6 +36,7 @@
  * POST { action: "covers", projectId, runId, force? } — cover frames (9:16 / 1:1 / 4:5) for the master + variants / exports → qcReport.covers
  * POST { action: "auto-fix", projectId, runId, platform? } — re-edit once with pre-flight corrections (free) → qcReport.autofix
  * POST { action: "ops-health" } / { action: "ops-recover", dryRun? (default true) } — health scan / safe auto-recovery
+ * POST { action: "repair-keyframe", projectId, runId, node, bbox?, packshotUrl?, reason?, apply? } — official-packshot repair of a keyframe (local, free)
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -525,6 +526,30 @@ export async function POST(request: Request) {
 
   if (input.action === "ops-health") return NextResponse.json(await (await import("@/services/ops/health")).scanHealth()); // report.ok = no critical / warning issues
   if (input.action === "ops-recover") return NextResponse.json({ ok: true, ...(await (await import("@/services/ops/health")).autoRecover({ dryRun: input.dryRun })) });
+
+  if (input.action === "repair-keyframe") {
+    // Local packshot composite (no model call); `apply` makes it the job's result for re-rendered clips.
+    const jobs = await prisma.libtvJob.findMany({ where: { runId: input.runId, run: { projectId: input.projectId } } });
+    const job = jobs.find((j) => j.nodeName === input.node);
+    if (!job?.resultUrl) return NextResponse.json({ error: `Keyframe ${input.node} not found or not rendered` }, { status: 404 });
+    const s = (job.settings ?? {}) as { qcCandidates?: { url: string; bbox?: [number, number, number, number] | null }[]; repair?: { fromUrl?: string }; directedKeyframe?: string; consistency?: { defects?: string[] } };
+    const frameUrl = s.repair?.fromUrl ?? job.resultUrl;
+    const bbox = input.bbox ?? s.qcCandidates?.find((c) => c.url === frameUrl && c.bbox)?.bbox ?? null;
+    const byName = new Map(jobs.map((j) => [j.nodeName, j]));
+    const packshots = input.packshotUrl
+      ? [input.packshotUrl]
+      : ((job.leftRefs as string[] | null) ?? []).filter((r) => r !== "CAST" && !/^K\d+/.test(r)).map((r) => byName.get(r)?.resultUrl ?? byName.get(r)?.sourceUrl).filter((u): u is string => !!u);
+    if (!bbox || !packshots.length) return NextResponse.json({ error: !bbox ? "No product box recorded — pass bbox [x0,y0,x1,y1] (0–1)" : "No product photo — pass packshotUrl" }, { status: 400 });
+    const { repairKeyframe } = await import("@/services/video-gen/consistency/repair");
+    const reason = input.reason ?? s.consistency?.defects?.[0] ?? "operator repair";
+    const out = await repairKeyframe({ frame: frameUrl, packshots, bbox, reason, shot: s.directedKeyframe ?? job.prompt });
+    if (!out) return NextResponse.json({ error: "Repair failed (no clean packshot cutout)" }, { status: 422 });
+    const { uploadBuffer } = await import("@/services/storage");
+    const up = await uploadBuffer({ buffer: out.image, filename: `${job.nodeName}-repaired.jpg`, contentType: "image/jpeg", folder: `keyframe-repairs/${input.runId}` });
+    const repair = { ...out.record, fromUrl: frameUrl, url: up.url };
+    if (input.apply) await prisma.libtvJob.update({ where: { id: job.id }, data: { resultUrl: up.url, settings: { ...(job.settings as Record<string, unknown>), repair } as never } });
+    return NextResponse.json({ ok: true, applied: !!input.apply, repair });
+  }
 
   // approve-run: free server renders only.
   await loadAiSettings();
