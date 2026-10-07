@@ -251,3 +251,13 @@ describe("plan → script writer", () => {
     expect(text.length).toBeLessThan(9000);
   });
 });
+
+describe("fitSpoken", () => {
+  it("never cuts a voiceover line mid-sentence or with an ellipsis", async () => {
+    const { fitSpoken } = await import("./campaign-planner");
+    expect(fitSpoken("Zero flicker. TÜV certified for low blue light. Your eyes won't fry after hours.", 9)).toBe("Zero flicker. TÜV certified for low blue light.");
+    expect(fitSpoken("NXTPAPER 3.0 kills glare, so you can read in full sun like actual paper", 9)).toBe("NXTPAPER 3.0 kills glare.");
+    expect(fitSpoken("Short line.", 9)).toBe("Short line.");
+    expect(fitSpoken("one two three four five six seven eight nine ten eleven", 5)).toBe("one two three four five.");
+  });
+});
