@@ -385,7 +385,7 @@ export async function assembleGlmMaster(input: {
     });
     if (uploaded.provider === "inline") throw new Error("No asset storage configured for the master video");
     // A v1 fallback must be visible on the run, never pass as an edit-v2 master.
-    return { masterUrl: uploaded.url, voiceoverUrl, subtitlesUrl, ...(v2Error ? { qcReport: { engine: "v1-fallback", v2Error, passed: 0, total: 1, checks: [] } } : {}) };
+    return { masterUrl: uploaded.url, voiceoverUrl, subtitlesUrl, ...(v2Error ? { qcReport: { engine: "v1-fallback" as const, v2Error, durationSec: totalSec, passed: 0, total: 1, checks: [], cutsSec: [], measuredAt: new Date().toISOString() } } : {}) };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
