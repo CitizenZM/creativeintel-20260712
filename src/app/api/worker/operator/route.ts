@@ -26,6 +26,8 @@
  * POST { action: "clone-ad", projectId, teardownId | structureId, platform?, goal? } — Ad Cloner → Project.campaignPlan
  * POST { action: "localize-run", projectId, runId, locales[], gender?, force? } — localized versions → qcReport.locales
  * POST { action: "estimate-run" | "set-budget" | "spend-report" | "campaign-report", projectId, … } — cost forecast, budget, ledger, client report
+ * POST { action: "image-ads", projectId, templates?, formats?, promo?, proof?, copy?, productUrl?, beforeUrl? } — static ad set → Project.imageAdSets
+ * POST { action: "preflight", projectId, runId, platform?, goal? } — pre-flight creative score → qcReport.preflight
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
 import { NextResponse, after } from "next/server";
@@ -446,6 +448,26 @@ export async function POST(request: Request) {
       after(() => localizeRun(run.id, queued, { gender: input.gender, force: input.force, budgetMs: 280_000 }).then((r) => console.log(`[localize] ${run.id}: done ${r.done.map((d) => d.locale).join(",") || "-"} failed ${r.failed.map((f) => `${f.locale} (${f.error.slice(0, 80)})`).join("; ") || "-"} left ${r.left.join(",") || "-"}`)));
     }
     return NextResponse.json({ ok: true, queued, skipped: input.locales.filter((l) => !queued.includes(l)), note: queued.length > 1 ? "Locales render one after another (~2–3 min each); any that don't fit this call's time budget stay missing — call again to continue." : undefined }, { status: 202 });
+  }
+
+  if (input.action === "image-ads") {
+    const { generateImageAdSet } = await import("@/services/image-ads/generate");
+    try {
+      const set = await generateImageAdSet(input.projectId, { ...input, templates: input.templates as never, formats: input.formats as never, copy: input.copy as never });
+      return NextResponse.json({ ok: true, set }, { status: 201 });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: msg }, { status: /not found/i.test(msg) ? 404 : /Unknown image ad|No product image/.test(msg) ? 400 : 500 });
+    }
+  }
+
+  if (input.action === "preflight") {
+    const { preflightRun, PreflightError } = await import("@/services/video-gen/preflight/run");
+    try {
+      return NextResponse.json({ ok: true, preflight: await preflightRun(input.projectId, input.runId, input) });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof PreflightError ? err.status : 500 });
+    }
   }
 
   // approve-run: free server renders only.
