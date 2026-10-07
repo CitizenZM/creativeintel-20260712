@@ -21,6 +21,11 @@ describe("OpenRouter video body", () => {
     expect(body).not.toHaveProperty("generate_audio");
     expect(body).not.toHaveProperty("frame_images");
   });
+
+  it("asks for native audio on talking-head clips (Veo speaks the quoted line, lip-synced)", () => {
+    const body = openrouterVideoBody({ model: "google/veo-3.1-lite", prompt: 'She says: "Hi."', imageUrl: "https://x/k.png", aspectRatio: "9:16", durationSec: 4, nativeAudio: true });
+    expect(body).toMatchObject({ generate_audio: true });
+  });
 });
 
 describe("OpenRouter job status", () => {

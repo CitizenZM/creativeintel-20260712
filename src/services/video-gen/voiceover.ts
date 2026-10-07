@@ -119,14 +119,16 @@ export function planVoiceover(frames: VoFrame[]): VoLine[] {
 /**
  * Where each line starts and how much it is sped up. A line starts on its beat
  * (or just after the previous line ends) and must finish before the next line's
- * beat or the video's end; past MAX_TEMPO it is allowed to run over.
+ * beat or the video's end; past MAX_TEMPO it is allowed to run over. `stops` are further hard
+ * limits (a talking-head frame's own voice starts there — edit/native-audio.ts).
  */
-export function placeLines(lines: VoLine[], durations: number[], totalSec: number): Placement[] {
+export function placeLines(lines: VoLine[], durations: number[], totalSec: number, stops: number[] = []): Placement[] {
   const out: Placement[] = [];
   let prevEnd = 0;
   lines.forEach((line, i) => {
     const start = Math.max(line.startSec, i ? prevEnd + GAP_SEC : line.startSec);
-    const limit = (i + 1 < lines.length ? lines[i + 1].startSec : totalSec) - start;
+    const stop = stops.find((x) => x > start + 1e-6) ?? Infinity;
+    const limit = Math.min(i + 1 < lines.length ? lines[i + 1].startSec : totalSec, stop) - start;
     const tempo = limit > 0 ? Math.min(MAX_TEMPO, Math.max(1, durations[i] / limit)) : MAX_TEMPO;
     out.push({ startSec: start, tempo });
     prevEnd = start + durations[i] / tempo;

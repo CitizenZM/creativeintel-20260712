@@ -100,6 +100,8 @@ export const openrouterAdapter: EngineAdapter = {
       imageUrl: input.imageUrl,
       lastImageUrl: input.lastImageUrl,
       seed: input.seed,
+      // Talking-head frames (locked talk): the clip's native, lip-synced dialogue is kept by the edit.
+      nativeAudio: !!ctx.settings?.nativeAudio,
       aspectRatio: ctx.aspectRatio,
       durationSec: ctx.durationSec,
       resolution,

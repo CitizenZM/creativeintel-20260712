@@ -30,10 +30,13 @@ import { detectBeats, trackWindowStart } from "./beat-detect";
 import { measureCuts, measureMaster, scoreQc, type QcReport } from "./qc";
 import { renderSfxBed } from "./sfx";
 import { applyScreenPlates } from "./screen-plate";
-import { claimChipPng, comparisonLabelPng, ctaButtonPng, domainPng, finePrintPng, hookHeadlinePng, kineticCaptionPng, logoPng, offerCardPng } from "./text-layers";
+import { claimChipPng, comparisonLabelPng, ctaButtonPng, domainPng, finePrintPng, hookHeadlinePng, kineticCaptionPng, logoPng, nativeCaptionPng, offerCardPng } from "./text-layers";
+import { audioMixGraph, nativeAudioWindows, talkCaptionWords, ttsFrames, type NativeWindow } from "./native-audio";
+import { nativeCaptionBox, type CaptionStyle } from "./caption-style";
+import { parseSilences, speechSpan } from "../talk-frame";
 import { endCardLayers, endCardSlots, layerFilter, layerInputArgs, RENDERABLE_END_CARDS, type EndCardTemplate, type LayerAnim } from "./endcard-render";
 import { DEFAULT_STYLE, type BrandStyle } from "./brand-style";
-import { kineticGroups, shownForm, timedWords, toSrt, subtitleCues, type TimedWord } from "../voiceover";
+import { kineticGroups, shownForm, timedWords, toSrt, subtitleCues, type SubtitleCue, type TimedWord } from "../voiceover";
 import { speakVoiceover, type AssembleFrame, type Segment } from "../glm-assemble";
 
 const run = promisify(execFile);
@@ -274,6 +277,8 @@ interface Overlay {
   cx?: number;
   /** Layer role for the safe-zone fit and the pre-flight layer list ("backdrop" / "decor" are not text). */
   role?: string;
+  /** Absolute top-left in pixels (native captions sit in the safe box, not on the centre line). */
+  at?: { x: number; y: number };
 }
 
 /** Holiday / gift copy picks the seasonal music bed. */
@@ -297,6 +302,62 @@ export function captionWindows(groups: TimedWord[][], totalSec: number): { group
     });
   });
   return out;
+}
+
+/** The file has an audio stream (a talk clip the model rendered silent has none). */
+async function hasAudioStream(file: string): Promise<boolean> {
+  const { stderr } = await run(ffmpegPath!, ["-hide_banner", "-i", file]).catch((e) => e as { stderr: string });
+  return /Stream #\S+.*Audio:/.test(String(stderr));
+}
+
+/**
+ * Talking-head frames keep their clip's own audio — when it has any. A talk clip that came back without an
+ * audio track (another engine, a refused audio flag) falls back to the TTS voice speaking its line.
+ */
+export async function routeNativeAudio(frames: AssembleFrame[], segments: Segment[], sources: Map<string, string>): Promise<{ frames: AssembleFrame[]; segments: Segment[] }> {
+  const silent = new Set<number>();
+  for (const s of segments) {
+    if (s.kind !== "clip" || !s.nativeAudio) continue;
+    const file = sources.get(s.url);
+    if (!file || !(await hasAudioStream(file).catch(() => false))) silent.add(s.frameNumber);
+  }
+  const talkSeg = new Set(segments.filter((s) => s.kind === "clip" && s.nativeAudio && !silent.has(s.frameNumber)).map((s) => s.frameNumber));
+  if (silent.size) console.warn(`[edit-v2] talk clip(s) without audio for frame(s) ${[...silent].join(", ")} — the TTS voice speaks their lines`);
+  return {
+    frames: frames.map((f) => (f.nativeAudio && !talkSeg.has(f.frameNumber) ? { ...f, nativeAudio: false } : f)),
+    segments: segments.map((s) => (s.kind === "clip" && s.nativeAudio && !talkSeg.has(s.frameNumber) ? { ...s, nativeAudio: false } : s)),
+  };
+}
+
+/** Each talk frame's speech span (relative to its first window), measured with silencedetect; null = estimate. */
+async function measureSpeechSpans(windows: NativeWindow[], sources: Map<string, string>): Promise<Map<number, { startSec: number; endSec: number } | null>> {
+  const out = new Map<number, { startSec: number; endSec: number } | null>();
+  for (const n of new Set(windows.map((w) => w.frameNumber))) {
+    const w = windows.filter((x) => x.frameNumber === n);
+    const file = sources.get(w[0].url);
+    const visible = w[w.length - 1].endSec - w[0].startSec;
+    if (!file) continue;
+    const { stderr } = await run(ffmpegPath!, ["-hide_banner", "-ss", f3(w[0].srcFrom), "-t", f3(visible), "-i", file, "-vn", "-af", "silencedetect=noise=-32dB:d=0.25", "-f", "null", "-"], { timeout: 30_000 }).catch((e) => e as { stderr: string });
+    out.set(n, speechSpan(parseSilences(String(stderr ?? "")), visible));
+  }
+  return out;
+}
+
+/** The talk clips' own audio, cut at exactly the source time each shot shows, on the edit's timeline. */
+async function renderNativeTrack(dir: string, windows: NativeWindow[], sources: Map<string, string>, totalSec: number): Promise<string | null> {
+  const usable = windows.filter((w) => sources.get(w.url) && w.endSec - w.startSec > 0.05);
+  if (!usable.length) return null;
+  const inputs = usable.flatMap((w) => ["-ss", f3(w.srcFrom), "-t", f3(w.endSec - w.startSec), "-i", sources.get(w.url)!]);
+  const chains = usable.map((w, k) => {
+    const d = w.endSec - w.startSec;
+    const ms = Math.round(w.startSec * 1000);
+    // 12 ms fades: a window edge never clicks.
+    return `[${k}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:${f3(d)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.012,afade=t=out:st=${f3(Math.max(0, d - 0.012))}:d=0.012,adelay=${ms}|${ms}[n${k}]`;
+  });
+  const mix = `${chains.join(";")};${usable.map((_, k) => `[n${k}]`).join("")}amix=inputs=${usable.length}:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,apad,atrim=0:${f3(totalSec)}[nat]`;
+  const file = path.join(dir, "v2native.wav");
+  await run(ffmpegPath!, ["-y", "-v", "error", ...inputs, "-filter_complex", mix, "-map", "[nat]", "-ac", "2", "-ar", "44100", file], { timeout: 90_000 });
+  return file;
 }
 
 export async function renderEditV2(input: {
@@ -325,6 +386,8 @@ export async function renderEditV2(input: {
   fixes?: EditFixes;
   /** Voiceover override (tests / offline validation); default: Edge TTS via speakVoiceover. */
   speak?: typeof speakVoiceover;
+  /** Caption look; default: the frames' (locked captionStyle), else kinetic. */
+  captionStyle?: CaptionStyle;
 }): Promise<EditV2Result> {
   const look = input.brand ?? DEFAULT_STYLE;
   const fixes = input.fixes ?? {};
@@ -335,8 +398,13 @@ export async function renderEditV2(input: {
   if (!ffmpegPath) throw new Error("ffmpeg is not available on this server");
   const ff = ffmpegPath;
   const { dir, canvas } = input;
-  const bySeg = new Map(input.frames.map((f) => [f.frameNumber, f]));
-  const planInput: PlanInputSegment[] = input.segments.map((s) => ({
+  // 0. Talking heads: keep the original clip files for their audio (screen plates re-encode video only),
+  // and drop native audio from any talk clip that came back silent (TTS speaks it instead).
+  const audioSources = new Map(input.sources);
+  const { frames, segments } = await routeNativeAudio(input.frames, input.segments, audioSources);
+  const captionStyle: CaptionStyle = input.captionStyle ?? frames.find((f) => f.captionStyle)?.captionStyle ?? "kinetic";
+  const bySeg = new Map(frames.map((f) => [f.frameNumber, f]));
+  const planInput: PlanInputSegment[] = segments.map((s) => ({
     kind: s.kind,
     url: s.url,
     from: s.kind === "clip" ? s.from : 0,
@@ -348,9 +416,10 @@ export async function renderEditV2(input: {
     speed: s.kind === "clip" ? (s.speed ?? 1) : 1,
     zoomHit: s.zoomHit ?? null,
     fine: bySeg.get(s.frameNumber)?.fine ?? null,
+    nativeAudio: s.kind === "clip" && !!s.nativeAudio,
   }));
   // Comparison frames: fetch the other side's image (stacked against ours in the shot).
-  for (const s of input.segments) {
+  for (const s of segments) {
     const u = s.compare?.otherUrl;
     if (!u || input.sources.has(u)) continue;
     const file = path.join(dir, `cmp${input.sources.size}.img`);
@@ -380,7 +449,7 @@ export async function renderEditV2(input: {
     }
   }
   const plan = planEdit(planInput, {
-    voiceovers: new Map(input.frames.map((f) => [f.frameNumber, f.voiceover ? shownForm(f.voiceover) : null])),
+    voiceovers: new Map(frames.map((f) => [f.frameNumber, f.voiceover ? shownForm(f.voiceover) : null])),
     hookStyle: input.hookStyle,
     hookText: input.hookText,
     beats: track?.beats,
@@ -389,13 +458,14 @@ export async function renderEditV2(input: {
 
   // 1a. Screen plates: real screen content composited onto the device screen of the source clips
   // first, so reframing, speed ramps, text and the end card all sit on top of it.
-  if (input.frames.some((f) => f.screenPlate)) await applyScreenPlates({ dir, frames: input.frames, segments: input.segments, sources: input.sources });
+  if (frames.some((f) => f.screenPlate)) await applyScreenPlates({ dir, frames: frames, segments: segments, sources: input.sources });
 
   // 1b. Smart segments: each hook shot from a clip takes that clip's most dynamic window.
   const motionCache = new Map<string, Awaited<ReturnType<typeof motionScores>>>();
   let prevHook: { url: string; from: number; to: number } | null = null;
   for (const shot of plan.shots) {
-    if (shot.segment !== "HOOK" || shot.kind !== "clip" || (shot.speed ?? 1) > 1) {
+    // A talking head keeps its own timing: re-picking its window would cut the line mid-word.
+    if (shot.segment !== "HOOK" || shot.kind !== "clip" || (shot.speed ?? 1) > 1 || shot.nativeAudio) {
       prevHook = null;
       continue;
     }
@@ -467,15 +537,35 @@ export async function renderEditV2(input: {
   const body = path.join(dir, "v2body.mp4");
   await run(ff, ["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", body], { timeout: 90_000 });
 
-  // 4a. Voice, captions, music, SFX.
-  const vo = await (input.speak ?? speakVoiceover)({ dir, frames: input.frames, totalSec: total, voice: input.voice }).catch((err) => {
+  // 4a. Voice, captions, music, SFX. Talking heads: the clip's own voice plays its window, the TTS voice
+  // skips those lines and finishes before each talk frame starts, captions come from the known line.
+  const nativeWindows = nativeAudioWindows(plan.shots);
+  const talkFrames = frames.filter((f) => f.nativeAudio && nativeWindows.some((w) => w.frameNumber === f.frameNumber));
+  const nativeFile = nativeWindows.length
+    ? await renderNativeTrack(dir, nativeWindows, audioSources, total).catch((err) => {
+        console.warn(`[edit-v2] native talk audio failed for ${input.runId}:`, err instanceof Error ? err.message.slice(0, 200) : err);
+        return null;
+      })
+    : null;
+  const talkSpans = nativeFile ? await measureSpeechSpans(nativeWindows, audioSources).catch(() => new Map()) : new Map();
+  const talkWordsByFrame = nativeFile ? talkFrames.map((f) => talkCaptionWords([{ frameNumber: f.frameNumber, talkLine: f.talkLine ?? f.voiceover }], nativeWindows, talkSpans)) : [];
+  const vo = await (input.speak ?? speakVoiceover)({
+    dir,
+    // Without the native track (render failure) the TTS voice speaks every line, talk lines included.
+    // A talk frame whose shots were all swapped out (hook variant "p") has no window: TTS speaks it too.
+    frames: nativeFile ? ttsFrames(frames.map((f) => (f.nativeAudio && !talkFrames.includes(f) ? { ...f, nativeAudio: false } : f))) : frames,
+    totalSec: total,
+    voice: input.voice,
+    stops: nativeFile ? [...new Set(nativeWindows.map((w) => w.startSec))] : [],
+  }).catch((err) => {
     console.warn(`[edit-v2] voiceover failed for ${input.runId}:`, err instanceof Error ? err.message.slice(0, 200) : err);
     return null;
   });
-  const words: TimedWord[] = vo ? vo.words.flatMap((w, i) => timedWords(w, vo.placements[i], vo.lines[i].text)) : [];
+  const words: TimedWord[] = [...(vo ? vo.words.flatMap((w, i) => timedWords(w, vo.placements[i], vo.lines[i].text)) : []), ...talkWordsByFrame.flat()].sort((a, b) => a.startSec - b.startSec);
   // On the end card the offer and the button carry the message; captions stop there.
   const captionEnd = plan.ctaSec ?? total;
-  const groups = kineticGroups(words.filter((w) => w.startSec < captionEnd));
+  // Native captions show a longer phrase (≤ 2 lines); kinetic ones 2–3 words.
+  const groups = captionStyle === "native" ? kineticGroups(words.filter((w) => w.startSec < captionEnd), 5, 26) : kineticGroups(words.filter((w) => w.startSec < captionEnd));
   const windows = captionWindows(groups, captionEnd);
   const overlays: Overlay[] = [];
   // Layout slots: every readable layer inside the strict safe box on 9:16 (y 288–1220).
@@ -490,11 +580,19 @@ export async function renderEditV2(input: {
   for (const [i, win] of windows.entries()) {
     if (!fixes.allCaptions && repeatsCard(win)) continue;
     const file = path.join(dir, `v2cap${String(i).padStart(3, "0")}.png`);
+    if (captionStyle === "native") {
+      const png = await nativeCaptionPng(groups[win.group].map((x) => x.text), win.word, canvas, look);
+      await writeFile(file, png);
+      const sharp = (await import("sharp")).default;
+      const m = await sharp(png).metadata();
+      overlays.push({ file, startSec: win.startSec, endSec: win.endSec, y: slots.caption, at: nativeCaptionBox(canvas, m.width ?? 1, m.height ?? 1), role: "caption" });
+      continue;
+    }
     await writeFile(file, await kineticCaptionPng(groups[win.group].map((x) => x.text), win.word, tc, look));
     overlays.push({ file, startSec: win.startSec, endSec: win.endSec, y: slots.caption, role: "caption" });
   }
   // End-card template (creative library E01–E12) from the CTA frame; facts missing → the default close.
-  const ecFrame = input.frames.find((f) => f.endCard?.id);
+  const ecFrame = frames.find((f) => f.endCard?.id);
   const template = ecFrame?.endCard && plan.ctaSec !== null && (RENDERABLE_END_CARDS as string[]).includes(ecFrame.endCard.id)
     ? await endCardLayers(ecFrame.endCard.id as EndCardTemplate, { headline: plan.cards.find((c) => c.role === "offer")?.text ?? null, ...ecFrame.endCard.data }, tc, look, { durationSec: total - (plan.ctaSec ?? total) }).catch((err) => {
         console.warn(`[edit-v2] end card ${ecFrame.endCard?.id} failed, using the default close:`, err instanceof Error ? err.message.slice(0, 160) : err);
@@ -523,7 +621,7 @@ export async function renderEditV2(input: {
             : await claimChipPng(card.text, tc, look);
     await writeFile(file, png);
     // A hook over a person sits in the lower half, off the face (AI director finding).
-    const hookOverPerson = card.role === "hook" && input.frames.some((f) => (f.segment ?? "").toUpperCase() === "HOOK" && f.hasPerson);
+    const hookOverPerson = card.role === "hook" && frames.some((f) => (f.segment ?? "").toUpperCase() === "HOOK" && f.hasPerson);
     // During a comparison shot a claim belongs to our half (under its label), not over the other side.
     const overCompare = card.role === "claim" && plan.shots.some((s) => s.compare && s.startSec < card.endSec && s.endSec > card.startSec);
     const y = card.role === "fine" ? (template?.fineY ?? slots.fine) : card.role === "offer" ? slots.headline : card.role === "claim" ? (overCompare ? Math.min(0.6, 0.63) : 0.3) : hookOverPerson ? 0.52 : 0.22;
@@ -573,7 +671,7 @@ export async function renderEditV2(input: {
   if (track) {
     await run(ff, ["-y", "-v", "error", "-ss", f3(track.startSec), "-t", f3(total), "-i", track.file, "-af", `afade=t=out:st=${f3(Math.max(0, total - 0.4))}:d=0.4,aresample=44100`, "-ac", "2", musicFile], { timeout: 60_000 });
   } else {
-    const mood = input.musicMood ?? musicMood(input.frames);
+    const mood = input.musicMood ?? musicMood(frames);
     const music = synthesizeMusic({ durationSec: total, bpm: plan.grid.bpm, dropSec: plan.dropSec, breakdownSec: plan.breakdownSec, ctaSec: plan.ctaSec, energy: mood === "holiday" ? 0.55 : 0.8, seed: input.runId.length, mood });
     await writeFile(musicFile, toWav(music.left, music.right));
   }
@@ -582,9 +680,10 @@ export async function renderEditV2(input: {
   await writeFile(sfxFile, toWav(sfx.left, sfx.right));
 
   // 4b. The final encode.
-  const inputs = ["-i", body, ...(vo ? ["-i", vo.voiceoverFile] : []), "-i", musicFile, "-i", sfxFile, ...overlays.flatMap((o) => layerInputArgs(o.file, o.anim, total))];
+  const inputs = ["-i", body, ...(vo ? ["-i", vo.voiceoverFile] : []), ...(nativeFile ? ["-i", nativeFile] : []), "-i", musicFile, "-i", sfxFile, ...overlays.flatMap((o) => layerInputArgs(o.file, o.anim, total))];
   const voIdx = vo ? 1 : -1;
-  const musicIdx = vo ? 2 : 1;
+  const nativeIdx = nativeFile ? (vo ? 2 : 1) : -1;
+  const musicIdx = 1 + (vo ? 1 : 0) + (nativeFile ? 1 : 0);
   const sfxIdx = musicIdx + 1;
   const firstOverlay = sfxIdx + 1;
   const video = [`[0:v]${fxFilter(plan, canvas)}[fx]`];
@@ -595,21 +694,16 @@ export async function renderEditV2(input: {
       return;
     }
     // A bouncing overlay falls from 9% of the height and bounces to rest (decaying |cos|).
-    const y = o.bounce ? `'H*${o.y}-h/2-H*0.09*abs(cos(2*PI*1.6*(t-${f3(o.startSec)})))*exp(-3.2*(t-${f3(o.startSec)}))'` : `H*${o.y}-h/2`;
-    video.push(`${from}[${firstOverlay + i}:v]overlay=x=${overlayX(o.cx)}:y=${y}:eval=${o.bounce ? "frame" : "init"}:enable='between(t,${f3(o.startSec)},${f3(o.endSec)})'[o${i}]`);
+    const y = o.at ? String(o.at.y) : o.bounce ? `'H*${o.y}-h/2-H*0.09*abs(cos(2*PI*1.6*(t-${f3(o.startSec)})))*exp(-3.2*(t-${f3(o.startSec)}))'` : `H*${o.y}-h/2`;
+    const x = o.at ? String(o.at.x) : overlayX(o.cx);
+    video.push(`${from}[${firstOverlay + i}:v]overlay=x=${x}:y=${y}:eval=${o.bounce ? "frame" : "init"}:enable='between(t,${f3(o.startSec)},${f3(o.endSec)})'[o${i}]`);
   });
   const lastV = overlays.length ? `[o${overlays.length - 1}]` : "[fx]";
   video.push(`${lastV}format=yuv420p[v]`);
   // The loudness target (auto-fix nudges it when the measured mix landed off −14 LUFS).
-  const lufs = Math.min(-9, Math.max(-20, fixes.loudnessTarget ?? -14)).toFixed(1);
-  const audio = vo
-    ? [
-        `[${voIdx}:a]aresample=44100,asplit=2[vo][vosc]`,
-        `[${musicIdx}:a]volume=0.26[mus]`,
-        `[mus][vosc]sidechaincompress=threshold=0.02:ratio=6:attack=15:release=350[duck]`,
-        `[duck][vo][${sfxIdx}:a]amix=inputs=3:normalize=0,loudnorm=I=${lufs}:TP=-1.5:LRA=7,alimiter=limit=0.79:attack=2:release=40:level=disabled,atrim=0:${f3(total)}[a]`,
-      ]
-    : [`[${musicIdx}:a]volume=0.6[mus]`, `[mus][${sfxIdx}:a]amix=inputs=2:normalize=0,loudnorm=I=${lufs}:TP=-1.5:LRA=7,alimiter=limit=0.79:attack=2:release=40:level=disabled,atrim=0:${f3(total)}[a]`];
+  const lufs = Math.min(-9, Math.max(-20, fixes.loudnessTarget ?? -14));
+  // Voice bus (TTS + the talk clips' own audio) → the music ducks under all of it (edit/native-audio.ts).
+  const audio = audioMixGraph({ ttsIdx: voIdx, nativeIdx, musicIdx, sfxIdx, totalSec: total, lufs });
   const master = path.join(dir, "v2master.mp4");
   await run(
     ff,
@@ -637,7 +731,7 @@ export async function renderEditV2(input: {
     plannedCuts: plan.boundaries.map((b) => b.atSec),
     hookHeadline: plan.cards.some((c) => c.role === "hook" && c.startSec < 2),
     // A script with a voiceover but no spoken words means the voice failed: fail the check, never ship it silent.
-    captionCoverage: spokenBeforeCta.length ? covered / Math.max(0.01, wordSpan) : input.frames.some((f) => f.voiceover?.trim()) ? 0 : null,
+    captionCoverage: spokenBeforeCta.length ? covered / Math.max(0.01, wordSpan) : frames.some((f) => f.voiceover?.trim()) ? 0 : null,
     ctaSec: plan.ctaSec,
   });
   qc.layout = { platform: input.platform ?? null, inset: fixes.layoutInset ?? 0 };
@@ -653,9 +747,11 @@ export async function renderEditV2(input: {
   const contactSheetFile = path.join(dir, "v2sheet.jpg");
   await run(ff, ["-y", "-v", "error", "-i", master, "-vf", `fps=6/${f3(total)},scale=270:-2,tile=6x1`, "-frames:v", "1", "-q:v", "4", contactSheetFile], { timeout: 60_000 });
 
-  const srt = vo
-    ? toSrt(vo.words.flatMap((w, i) => subtitleCues(w, vo.placements[i], 32, vo.lines[i].text)).map((c) => ({ ...c, endSec: Math.min(c.endSec, total) })).filter((c) => c.endSec - c.startSec > 0.2))
-    : null;
+  // Subtitles: the TTS lines from their word timings, the talk lines from their estimated timings.
+  const ttsCues: SubtitleCue[] = vo ? vo.words.flatMap((w, i) => subtitleCues(w, vo.placements[i], 32, vo.lines[i].text)) : [];
+  const talkCues: SubtitleCue[] = talkWordsByFrame.flatMap((ws) => subtitleCues(ws.map((x) => ({ text: x.text, startSec: x.startSec, durSec: x.endSec - x.startSec })), { startSec: 0, tempo: 1 }, 32));
+  const cues = [...ttsCues, ...talkCues].sort((a, b) => a.startSec - b.startSec).map((c) => ({ ...c, endSec: Math.min(c.endSec, total) })).filter((c) => c.endSec - c.startSec > 0.2);
+  const srt = cues.length ? toSrt(cues) : null;
   // Cover frames: the best-scoring frame of the clean cut (no captions / cards burned in yet) with the hook
   // headline, for feed and Reels covers (local, never blocks).
   const headline = plan.cards.find((c) => c.role === "hook")?.text ?? null;
