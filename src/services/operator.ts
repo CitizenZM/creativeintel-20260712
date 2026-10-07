@@ -224,3 +224,21 @@ export function freeRunRefusal(
   }
   return null;
 }
+
+export type OperatorActionOf<A extends OperatorAction["action"]> = Extract<OperatorAction, { action: A }>;
+
+/**
+ * Validate a session route's body with the operator schema of one action, so the Studio routes and
+ * the worker operator accept exactly the same input. The route supplies projectId / runId from its path.
+ */
+export function parseOperatorAction<A extends OperatorAction["action"]>(
+  action: A,
+  input: Record<string, unknown>
+): { ok: true; data: OperatorActionOf<A> } | { ok: false; error: string; issues: z.core.$ZodIssue[] } {
+  const parsed = operatorActionSchema.safeParse({ ...input, action });
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    return { ok: false, error: first ? `Invalid ${first.path.join(".") || "input"}: ${first.message}` : "Invalid input", issues: parsed.error.issues };
+  }
+  return { ok: true, data: parsed.data as OperatorActionOf<A> };
+}

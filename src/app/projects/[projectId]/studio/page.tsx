@@ -6,6 +6,8 @@ import { Loader2, Palette } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StoryboardTimeline } from "@/components/studio/storyboard-timeline";
 import { LibtvRunPanel } from "@/components/studio/libtv-run-panel";
+import { SpendPanel, type SpendTarget } from "@/components/workbench/spend-panel";
+import { RunWorkbench } from "@/components/workbench/run-workbench";
 import { NextStepHint } from "@/components/layout/next-step-hint";
 import { StageGuideClient } from "@/components/layout/stage-guide-client";
 import { AUTOPILOT_DONE } from "@/components/autopilot/step-runner";
@@ -140,6 +142,15 @@ export default function StudioPage() {
     return storyboards.find((s) => s.id === activeRun.storyboardId) ?? storyboard;
   }, [activeRun, storyboards, storyboard]);
 
+  // Forecast targets: the selected storyboard (before compiling) and the active run.
+  const spendTargets = useMemo<SpendTarget[]>(() => {
+    const out: SpendTarget[] = [];
+    if (activeRun) out.push({ key: `run:${activeRun.id}`, label: `Run · ${activeRun.canvasName ?? activeRun.id.slice(-6)} (${activeRun.status})`, runId: activeRun.id });
+    if (storyboard) out.push({ key: `sb:${storyboard.id}`, label: `Storyboard · ${storyboard.title}`, storyboardId: storyboard.id });
+    return out;
+  }, [activeRun, storyboard]);
+  const workbenchRuns = useMemo(() => (activeRun ? [{ id: activeRun.id, label: activeRun.canvasName ?? activeRun.id }] : []), [activeRun]);
+
   const selectStoryboard = useCallback(
     (id: string) => {
       setStoryboardId(id);
@@ -251,6 +262,9 @@ export default function StudioPage() {
             onRunsChanged={handleRunChanged}
             onPlanChange={setPlan}
           />
+
+          {activeRun && <RunWorkbench projectId={projectId} runs={workbenchRuns} selectedRunId={activeRun.id} />}
+          <SpendPanel projectId={projectId} targets={spendTargets} />
         </>
       )}
     </div>
