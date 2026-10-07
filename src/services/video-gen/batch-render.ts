@@ -20,6 +20,7 @@ import type { CampaignPlan } from "@/services/creative/campaign-plan.types";
 import { renderFromRun } from "./glm-assemble";
 import { isServerEngine } from "./libtv-pricing";
 import { storyboardFrames } from "./server-executor";
+import { patchQcReport } from "./qc-report";
 
 const MAX_BATCHES = 10;
 
@@ -27,13 +28,17 @@ type Qc = Record<string, unknown> & { batches?: BatchMatrix[]; durationSec?: num
 
 const qcOf = (v: unknown): Qc => (v && typeof v === "object" ? (v as Qc) : {});
 
+/**
+ * Optimistic (qc-report.patchQcReport): a concurrent write re-runs `fn` on the fresh batch, so two
+ * claims can never take the same variant and a render result is never lost. `fn` may run more than once.
+ */
 async function patchBatch(runId: string, batchId: string, fn: (b: BatchMatrix) => BatchMatrix): Promise<BatchMatrix | null> {
-  const run = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true } });
-  const qc = qcOf(run?.qcReport);
   let out: BatchMatrix | null = null;
-  const batches = (qc.batches ?? []).map((b) => (b.id === batchId ? (out = fn(b)) : b));
-  if (!out) return null;
-  await prisma.libtvRun.update({ where: { id: runId }, data: { qcReport: { ...qc, batches } as never } });
+  await patchQcReport<Qc>(runId, (qc) => {
+    out = null;
+    const batches = (qc.batches ?? []).map((b) => (b.id === batchId ? (out = fn(b)) : b));
+    return out ? { ...qc, batches } : null;
+  });
   return out;
 }
 
@@ -98,10 +103,7 @@ export async function planBatchForRun(input: { runId: string; dims: BatchDims; d
   });
   const matrix = buildBatchMatrix({ source, dims: input.dims, design: input.design, maxVariants: input.maxVariants });
   matrix.cost = estimateBatchCost(matrix.variants, { imageModel: ctx.run.imageModel, videoModel: ctx.run.videoModel, hookSec: input.hookSec ?? 3 });
-  const fresh = await prisma.libtvRun.findUnique({ where: { id: input.runId }, select: { qcReport: true } });
-  const qc = qcOf(fresh?.qcReport);
-  const batches = [...(qc.batches ?? []).filter((b) => b.id !== matrix.id), matrix].slice(-MAX_BATCHES);
-  await prisma.libtvRun.update({ where: { id: input.runId }, data: { qcReport: { ...qc, batches } as never } });
+  await patchQcReport<Qc>(input.runId, (qc) => ({ ...qc, batches: [...(qc.batches ?? []).filter((b) => b.id !== matrix.id), matrix].slice(-MAX_BATCHES) }));
   return matrix;
 }
 

@@ -14,7 +14,7 @@
  */
 import { prisma } from "@/lib/db";
 import type { LibtvJob } from "@/generated/prisma/client";
-import { jobDone, jobFailed, runDone, runFailed } from "./libtv-queue";
+import { jobDone, jobDoneIf, jobFailed, jobFailedIf, runDone, runFailed, type JobGuard } from "./libtv-queue";
 import { assembleGlmMaster, type AssembleFrame } from "./glm-assemble";
 import { isTalkFrame } from "./locked-script";
 import { personaById } from "@/services/creative/personas";
@@ -22,10 +22,10 @@ import type { ServerEngine } from "./libtv-pricing";
 import { cleanFramePrompt, hasPeople, motionSafePrompt } from "./prompt-safety";
 import { consistencyGateEnabled, keyframeQcEnabled, MAX_KEYFRAME_REROLLS, reviewKeyframe, shouldReroll } from "./keyframe-qc";
 import { applyCorrections, correctionsFor } from "./consistency/corrections";
-import { consistencyRecord, consistencyRepairEnabled, decideKeyframe, repairReason, type KeyframeCandidate } from "./consistency/gate";
+import { bestCandidate, consistencyRecord, consistencyRepairEnabled, decideKeyframe, repairReason, type KeyframeCandidate } from "./consistency/gate";
 import { isShotType } from "./consistency/thresholds";
 import { finishDirectedMotion, finishDirectedStill } from "./shot-director";
-import { guardJobCall, guardQc, settleClipOnPoll } from "@/services/ops/spend";
+import { guardJobCall, guardQc, releaseJobReservations, settleClipOnPoll, type RunRef } from "@/services/ops/spend";
 import { isBudgetExceeded } from "@/services/ops/budget-guard";
 
 export type TickResult = "idle" | "running" | "done" | "failed";
@@ -58,6 +58,11 @@ export interface JobContext {
   referenceUrls?: string[];
   /** Clips: the segment's keyframes and the references they were edited from (drift check). */
   consistency?: ClipConsistencyRefs;
+  /**
+   * Polls: take the right to finish this job before downloading / scoring a finished result. False =
+   * another tick is finishing it — return PROCESSING and do nothing (no drift QC, no usage log).
+   */
+  claimFinish?: () => Promise<boolean>;
 }
 
 export interface ClipConsistencyRefs {
@@ -144,26 +149,92 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function applyTaskResult(adapter: EngineAdapter, job: LibtvJob, result: TaskResult) {
+/** A finished poll being finalized (downloaded, drift-scored) by another tick this recently is left to it. */
+export const FINALIZE_STALE_MS = 6 * 60_000;
+
+const settingsOf = (j: Pick<LibtvJob, "settings">) => ((j.settings ?? {}) as Record<string, unknown>);
+
+/** Another tick claimed this job's finished result (for its current task) less than FINALIZE_STALE_MS ago. */
+export function finalizingElsewhere(j: Pick<LibtvJob, "settings" | "nodeId">, now = Date.now()): boolean {
+  const s = settingsOf(j);
+  const at = Date.parse(String(s.finalizingAt ?? ""));
+  return s.finalizingTask === j.nodeId && Number.isFinite(at) && now - at < FINALIZE_STALE_MS;
+}
+
+interface FinishClaim {
+  /** Take the claim (once; later calls return the first answer). */
+  take(): Promise<boolean>;
+  /** The guard the final write re-checks (null until taken). */
+  guard(): JobGuard | null;
+  /** The job's settings without the claim marker. */
+  base(): Record<string, unknown>;
+  /** Drop a taken claim without finishing (the poll threw or reported no result). */
+  release(): Promise<void>;
+}
+
+/**
+ * The right to finish a polled job: a compare-and-set on the job's version (updatedAt) that stamps
+ * `finalizingAt`, taken before the result is downloaded and scored (adapters call ctx.claimFinish;
+ * the executor takes it otherwise). A second tick polling the same finished task loses the claim and
+ * skips the paid drift QC, the usage log and the result write. A claim older than FINALIZE_STALE_MS
+ * (its invocation died) can be taken again.
+ */
+function finishClaim(j: LibtvJob): FinishClaim {
+  const { finalizingAt: _at, finalizingTask: _task, ...base } = settingsOf(j);
+  void _at;
+  void _task;
+  let pending: Promise<{ updatedAt: Date } | null> | null = null;
+  let won: { updatedAt: Date } | null = null;
+  return {
+    async take() {
+      pending ??= (async () => {
+        const { count } = await prisma.libtvJob.updateMany({
+          where: { id: j.id, status: "running", nodeId: j.nodeId, updatedAt: j.updatedAt },
+          data: { settings: { ...base, finalizingAt: new Date().toISOString(), finalizingTask: j.nodeId } as never },
+        });
+        if (count !== 1) return null;
+        const row = await prisma.libtvJob.findUnique({ where: { id: j.id }, select: { updatedAt: true } });
+        return row ? { updatedAt: row.updatedAt } : null;
+      })();
+      won = await pending;
+      return !!won;
+    },
+    guard: () => (won ? { status: "running", nodeId: j.nodeId, updatedAt: won.updatedAt } : null),
+    base: () => base,
+    async release() {
+      if (!won) return;
+      await prisma.libtvJob.updateMany({ where: { id: j.id, status: "running", updatedAt: won.updatedAt }, data: { settings: base as never } }).catch(() => undefined);
+      won = null;
+    },
+  };
+}
+
+async function applyTaskResult(run: RunRef, job: LibtvJob, result: TaskResult, claim: FinishClaim) {
+  if (result.status === "PROCESSING") return claim.release();
+  // Only the tick holding the claim writes the result (and re-queues / fails the job).
+  if (!(await claim.take())) return;
+  const guard = claim.guard()!;
+  const s = claim.base();
   if (result.status === "SUCCESS") {
-    const s = (job.settings ?? {}) as Record<string, unknown>;
     const prior = Number(s.priorCreditsSpent) || 0;
     if (result.regenerate) {
       // Drift: keep the rejected clip on record and run the clip once more (its cost still counts).
-      await prisma.libtvJob.update({
-        where: { id: job.id },
+      // A QC re-generation is not a transient failure: it gives back the attempt its claim used.
+      await prisma.libtvJob.updateMany({
+        where: { id: job.id, status: guard.status, nodeId: guard.nodeId, updatedAt: guard.updatedAt },
         data: {
           status: "queued",
           nodeId: null,
+          attempts: { decrement: 1 },
           settings: { ...s, ...result.settingsPatch, driftRegens: (Number(s.driftRegens) || 0) + 1, driftRejectedUrl: result.url, priorCreditsSpent: prior + (result.creditsSpent ?? 0) } as never,
         },
       });
       return;
     }
-    if (result.settingsPatch) await prisma.libtvJob.update({ where: { id: job.id }, data: { settings: { ...s, ...result.settingsPatch } as never } });
-    await jobDone({ jobId: job.id, resultUrl: result.url, remoteUrl: result.remoteUrl, creditsSpent: (result.creditsSpent ?? 0) + prior });
+    await jobDoneIf({ jobId: job.id, resultUrl: result.url, remoteUrl: result.remoteUrl, creditsSpent: (result.creditsSpent ?? 0) + prior, settings: { ...s, ...result.settingsPatch } }, guard);
   } else if (result.status === "FAIL") {
-    await jobFailed(job.id, result.error);
+    // The provider failed the generation: anything still reserved for it is unbilled.
+    if (await jobFailedIf(job.id, result.error, guard, s)) await releaseJobReservations(run, job.id, "unbilled", job.kind === "video" ? "video" : "image");
   }
 }
 
@@ -271,8 +342,10 @@ export async function tickRun(
     if (d.action === "reroll") {
       await prisma.libtvJob.update({
         where: { id: j.id },
+        // A QC re-roll is not a transient failure: it gives back the attempt its claim used.
         data: {
           status: "queued",
+          attempts: { decrement: 1 },
           settings: { ...s, qcAttempts: attempts + 1, qcCandidates: d.candidates, qcCorrections: d.corrections, qcIssues: result.defects.slice(0, 5), qcRejectedUrl: url } as never,
         },
       });
@@ -335,14 +408,19 @@ export async function tickRun(
     if (!j.startedAt || Date.now() - new Date(j.startedAt).getTime() < IMAGE_STALE_MS) continue;
     if ((j.attempts ?? 0) >= MAX_IMAGE_ATTEMPTS) await jobFailed(j.id, `${j.kind === "video" ? "Clip" : "Keyframe"} submission timed out repeatedly`);
     else await prisma.libtvJob.updateMany({ where: { id: j.id, status: "running" }, data: { status: "queued" } });
+    // Whether that submit reached the provider is unknown: its reservation closes at the estimate (a resubmit reserves afresh).
+    if (j.kind === "video") await releaseJobReservations(run, j.id, "estimate");
   }
 
   // Keyframes that finish asynchronously (engines with pollImage).
   if (adapter.pollImage) {
     for (const j of run.jobs.filter((x) => x.kind === "image" && x.status === "running" && x.nodeId)) {
+      if (finalizingElsewhere(j)) continue;
+      const claim = finishClaim(j);
       try {
-        await applyTaskResult(adapter, j, await adapter.pollImage(j.nodeId!, ctxFor(j)));
+        await applyTaskResult(run, j, await adapter.pollImage(j.nodeId!, { ...ctxFor(j), claimFinish: claim.take }), claim);
       } catch (err) {
+        await claim.release();
         console.warn(`[${adapter.engine}] poll ${j.nodeName} failed:`, errorText(err));
       }
     }
@@ -392,8 +470,10 @@ export async function tickRun(
             if (shouldReroll(verdict, attempts, refImages.length ? Math.max(2, MAX_KEYFRAME_REROLLS) : MAX_KEYFRAME_REROLLS)) {
               await prisma.libtvJob.update({
                 where: { id: j.id },
+                // Not a transient failure: the re-roll gives back the attempt its claim used.
                 data: {
                   status: "queued",
+                  attempts: { decrement: 1 },
                   settings: { ...s, qcAttempts: attempts + 1, qcIssues: verdict!.issues.slice(0, 5), qcCorrections: correctionsFor(verdict!.issues), qcRejectedUrl: out.url } as never,
                 },
               });
@@ -406,8 +486,10 @@ export async function tickRun(
           await jobDone({ jobId: j.id, resultUrl: out.url, creditsSpent: 0 });
         } else await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: out.taskId } });
       } catch (err) {
-        // No budget for a QC reroll: keep the keyframe QC rejected rather than fail the run or overspend.
-        const rejected = (j.settings as { qcRejectedUrl?: string } | null)?.qcRejectedUrl;
+        // No budget for a QC reroll: keep the best attempt so far (the consistency gate's best-scoring
+        // candidate, else the last QC-rejected one) rather than fail the run or overspend.
+        const prev = (j.settings ?? {}) as { qcRejectedUrl?: string; qcCandidates?: KeyframeCandidate[] };
+        const rejected = prev.qcCandidates?.length ? bestCandidate(prev.qcCandidates).url : prev.qcRejectedUrl;
         if (isBudgetExceeded(err) && rejected) await jobDone({ jobId: j.id, resultUrl: rejected, creditsSpent: 0 });
         else await jobFailed(j.id, errorText(err));
       }
@@ -418,9 +500,13 @@ export async function tickRun(
   const fresh = await prisma.libtvJob.findMany({ where: { runId } });
   const videos = fresh.filter((x) => x.kind === "video");
   for (const j of videos.filter((x) => x.status === "running" && x.nodeId)) {
+    // Another tick is downloading / scoring this clip's result: leave it (it still counts in flight).
+    if (finalizingElsewhere(j)) continue;
+    const claim = finishClaim(j);
     try {
-      await applyTaskResult(adapter, j, await settleClipOnPoll(run, j, () => adapter.pollVideo(j.nodeId!, ctxFor(j))));
+      await applyTaskResult(run, j, await settleClipOnPoll(run, j, () => adapter.pollVideo(j.nodeId!, { ...ctxFor(j), claimFinish: claim.take })), claim);
     } catch (err) {
+      await claim.release();
       console.warn(`[${adapter.engine}] poll ${j.nodeName} failed:`, errorText(err));
     }
   }
@@ -462,6 +548,9 @@ export async function tickRun(
       inFlight++;
     } catch (err) {
       await jobFailed(j.id, errorText(err));
+      // A submit whose outcome is unknown (timeout, 5xx) stays reserved at its estimate: close it, so the
+      // resubmit's own reservation is the one its poll settles.
+      await releaseJobReservations(run, j.id, "estimate");
     }
   }
 

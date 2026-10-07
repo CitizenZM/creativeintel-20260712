@@ -12,13 +12,13 @@ import { storyboardFrames } from "./server-executor";
 import { variantAdName } from "./variants";
 import { captionFontFor, localeAdName, localeProfile, localizeFrames, missingLocales, type LlmFn, type LocaleEntry, type LocaleId, type VoiceGender } from "./localize";
 import type { BrandFont } from "./edit/brand-style";
+import { patchQcReport } from "./qc-report";
 
 type Qc = Record<string, unknown> & { locales?: LocaleEntry[]; localesPending?: Record<string, string> };
 
+/** Optimistic qcReport write (qc-report.patchQcReport): other writers' keys are never lost. */
 async function patchQc(runId: string, fn: (qc: Qc) => Qc) {
-  const run = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true } });
-  const qc = (run?.qcReport && typeof run.qcReport === "object" ? run.qcReport : {}) as Qc;
-  await prisma.libtvRun.update({ where: { id: runId }, data: { qcReport: fn(qc) as never } });
+  await patchQcReport<Qc>(runId, fn);
 }
 
 /** A face with the locale's glyphs: a local file when one exists, else the Noto family from Google Fonts. */
@@ -61,7 +61,11 @@ export async function renderLocalizedVariant(runId: string, locale: LocaleId, op
     const brand = await loadBrandStyle(run.projectId);
     const product = ((project?.productBrief ?? {}) as { product?: { name?: string; brand?: string; model?: string } }).product ?? {};
     const terms = [project?.brandName, project?.productName, product.name, product.brand, product.model].filter((t): t is string => !!t?.trim());
-    const loc = await localizeFrames(frames, locale, { terms, ctaText: brand.ctaText, gender: opts.gender, llm: opts.llm });
+    // The translation is a paid call: under the run's spend guard (refused over budget → the locale fails).
+    const { guardLlmFn } = await import("@/services/ops/spend");
+    const { defaultLocalizeLlm } = await import("./localize");
+    const llm = opts.llm ?? guardLlmFn({ projectId: run.projectId, runId }, defaultLocalizeLlm, { outTokens: 4000 });
+    const loc = await localizeFrames(frames, locale, { terms, ctaText: brand.ctaText, gender: opts.gender, llm });
     const font = await resolveCaptionFont(locale);
     const qc0 = (run.qcReport ?? {}) as Qc;
     const hookStyle = qc0.hookStyle === "c" || qc0.hookStyle === "p" || qc0.hookStyle === "q" ? qc0.hookStyle : undefined;

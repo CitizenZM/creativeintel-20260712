@@ -248,6 +248,9 @@ export function LibtvRunPanel({
     }
   }
 
+  // A paid server run's cap (US cents) is its USD spend cap: the approve route requires it.
+  const paidServerRun = !!activeRun && isServerEngine(activeRun.executor) && activeRun.creditsEstimated > 0;
+
   async function approve() {
     if (!activeRun) return;
     setBusy("approve");
@@ -600,7 +603,7 @@ export function LibtvRunPanel({
             <div className="flex flex-wrap items-end gap-2">
               <label className="block">
                 <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Credit cap (optional)
+                  {paidServerRun ? "Spend cap (US cents, required)" : "Credit cap (optional)"}
                 </span>
                 <input
                   type="number"
@@ -613,7 +616,7 @@ export function LibtvRunPanel({
               </label>
               <Button
                 onClick={approve}
-                disabled={busy === "approve" || (!!(brandKit && !brandKit.ready.studio) && activeRun.creditsEstimated > 0)}
+                disabled={busy === "approve" || (!!(brandKit && !brandKit.ready.studio) && activeRun.creditsEstimated > 0) || (paidServerRun && !(Number(creditCap) >= activeRun.creditsEstimated))}
                 size="sm"
                 data-testid="approve-run"
                 className={cn(
@@ -931,7 +934,12 @@ function QcCard({
           ))}
         </tbody>
       </table>
-      {qc.director && (
+      {qc.director?.skipped && (
+        <p className="mt-2 text-muted-foreground" data-testid="director-skipped">
+          AI director review skipped: {qc.director.reason}
+        </p>
+      )}
+      {qc.director && !qc.director.skipped && (
         <div className="mt-2 rounded-md bg-muted/50 px-2 py-1.5" data-testid="director-review">
           <p>
             <span className="font-medium">AI director: {qc.director.score}/100</span>{" "}
@@ -951,7 +959,7 @@ function QcCard({
           {onFixShots && qc.director.shotIndexes.length > 0 && (
             <button
               type="button"
-              onClick={() => onFixShots(qc.director!.shotIndexes)}
+              onClick={() => onFixShots((qc.director as { shotIndexes: number[] }).shotIndexes)}
               className="mt-1 rounded-md border border-border px-2 py-1 font-medium hover:border-foreground/40"
               data-testid="director-fix"
             >

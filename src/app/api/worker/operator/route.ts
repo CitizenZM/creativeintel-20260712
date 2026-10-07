@@ -57,6 +57,7 @@ import { renderExportForRun } from "@/services/video-gen/exports";
 import { storyboardFrames } from "@/services/video-gen/server-executor";
 import { driveServerRun } from "@/services/video-gen/server-engines";
 import { loadAiSettings } from "@/services/settings/ai-settings";
+import { serverApprovalBudget } from "@/services/ops/approval-budget";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -226,9 +227,14 @@ export async function POST(request: Request) {
       subtitlesUrl: master.subtitlesUrl,
       previewMp4Url: master.previewUrl ?? null,
       contactSheetUrl: master.contactSheetUrl ?? null,
-      qcReport: master.qcReport ? { ...master.qcReport, variants: ((run.qcReport as { variants?: unknown[] } | null)?.variants ?? []), batches: ((run.qcReport as { batches?: unknown[] } | null)?.batches ?? []) } : null,
       creditsSpent: run.creditsSpent,
     });
+    // The new cut's measurements replace the old ones; every other key (variants, batches, locales, exports,
+    // the export pack, auto-fix, the director review…) is kept — written conditionally, on the fresh report.
+    if (master.qcReport) {
+      const { mergeReassembledQc, patchQcReport } = await import("@/services/video-gen/qc-report");
+      await patchQcReport(run.id, (qc) => mergeReassembledQc(qc, master.qcReport as unknown as Record<string, unknown>));
+    }
     return NextResponse.json({ ok: true, run: summarize((await getRunWithJobs(run.id))!), qc: master.qcReport ?? null });
   }
 
@@ -597,7 +603,10 @@ export async function POST(request: Request) {
   }
   const refusal = freeRunRefusal(existing, isServerEngine(existing.executor), input);
   if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
-  const run = await approveRun(input.runId, existing.creditsEstimated > 0 ? (input.creditCap ?? null) : null);
+  // The paid cap (US cents) becomes the run's USD spend cap — the number the spend guard enforces.
+  const budget = serverApprovalBudget(existing, existing.creditsEstimated > 0 ? (input.creditCap ?? null) : null);
+  if (!budget.ok) return NextResponse.json({ error: budget.error }, { status: 403 });
+  const run = await approveRun(input.runId, existing.creditsEstimated > 0 ? (input.creditCap ?? null) : null, { capBudgetUsd: budget.capBudgetUsd });
   if (!run) {
     return NextResponse.json({ error: `Run cannot be approved from status "${existing.status}"` }, { status: 409 });
   }

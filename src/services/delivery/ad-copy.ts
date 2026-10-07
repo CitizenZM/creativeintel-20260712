@@ -293,7 +293,8 @@ export function scaffoldVariants(channel: CopyChannel, input: AdCopyInput, count
   });
 }
 
-const defaultLlm: CopyLlm = async ({ system, user }) => {
+/** The default copy model call (export-pack runs it under the spend guard). */
+export const defaultAdCopyLlm: CopyLlm = async ({ system, user }) => {
   const { analyzeWithClaude } = await import("@/services/ai/claude-client");
   return analyzeWithClaude({ systemPrompt: system, userPrompt: user, responseSchema: adCopySchema, maxTokens: 3000 });
 };
@@ -307,7 +308,7 @@ export async function generateAdCopy(input: AdCopyInput): Promise<AdCopySet[]> {
   if (groups.size) {
     try {
       const { system, user } = adCopyPrompts(input);
-      raw = adCopySchema.parse((await (input.llm ?? defaultLlm)({ system, user })) ?? {});
+      raw = adCopySchema.parse((await (input.llm ?? defaultAdCopyLlm)({ system, user })) ?? {});
       llmOk = true;
     } catch (err) {
       console.warn("[ad-copy] model copy failed, using the scaffold:", err instanceof Error ? err.message.slice(0, 200) : err);

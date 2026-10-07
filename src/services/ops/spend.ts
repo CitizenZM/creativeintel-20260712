@@ -2,7 +2,7 @@
  * The spend guard at the executor call sites: one wrapper per kind of paid call, scoped to the run and
  * job, estimated from the live price table. See budget-guard.ts for the reserve → call → reconcile cycle.
  */
-import { isBudgetExceeded, settleOpenJob, withSpendGuard, type SpendKind } from "./budget-guard";
+import { guardDisabled, isBudgetExceeded, settleOpenJob, spendLedger, withSpendGuard, type SpendKind } from "./budget-guard";
 import { jobModel, jobUnitUsd, llmCostUsd, qcCallUsd, type CostJob } from "./cost-model";
 import { loadPriceTable } from "./prices";
 
@@ -27,9 +27,34 @@ export async function guardJobCall<T>(kind: "image" | "video", run: RunRef, job:
   return withSpendGuard({ projectId: run.projectId, runId: run.id, jobId: job.id, kind, model: jobModel(job) }, est, call, { prices, settle: kind === "video" ? "later" : "now" });
 }
 
-/** Poll of a submitted clip: reconcile its reservation with the reported cost once it finishes. */
+/**
+ * Poll of a submitted clip: reconcile its reservation once the provider settles it — SUCCESS at the
+ * reported cost (else the estimate), FAIL at the reported cost or $0 (a failed generation is unbilled).
+ */
 export function settleClipOnPoll<T extends { status: string }>(run: RunRef, job: { id: string }, poll: () => Promise<T>): Promise<T> {
-  return settleOpenJob(run.projectId, job.id, "video", poll, { done: (r) => r.status === "SUCCESS" });
+  return settleOpenJob(run.projectId, job.id, "video", poll, { done: (r) => r.status === "SUCCESS" || r.status === "FAIL", unbilled: (r) => r.status === "FAIL" });
+}
+
+/**
+ * Close every open reservation of a job that is re-queued or failed outside a poll (a submit that
+ * timed out, an invocation that died before the task id was saved): $0 when the provider said FAIL
+ * ("unbilled"), else at the estimate. A resubmit then reserves afresh, and the next poll settles that one.
+ */
+export async function releaseJobReservations(run: RunRef, jobId: string, mode: "unbilled" | "estimate", kind: SpendKind = "video"): Promise<number> {
+  if (!run.projectId || guardDisabled()) return 0;
+  const ledger = await spendLedger();
+  let closed = 0;
+  for (let i = 0; i < 20; i++) {
+    const open = await ledger.openEntryForJob(jobId, kind).catch(() => null);
+    if (!open) break;
+    try {
+      await ledger.settle(open.id, mode === "unbilled" ? 0 : open.estUsd);
+    } catch {
+      break;
+    }
+    closed++;
+  }
+  return closed;
 }
 
 /**
@@ -60,6 +85,22 @@ export async function guardLlm<T>(
   const model = est.model ?? (scope.kind === "vision_qc" ? (qcEstimateModel() ?? prices.qc.defaultModel) : DEFAULT_TEXT_MODEL);
   const usd = llmCostUsd(prices, model, est.inTokens, est.outTokens).usd ?? 0;
   return withSpendGuard({ projectId: scope.projectId, runId: scope.runId ?? null, kind: scope.kind ?? "llm", model }, usd, call, { prices });
+}
+
+/**
+ * An LLM function ({ system, user } → result) under the spend guard: every call is reserved under the
+ * scope (estimated from the prompt length and `outTokens`), reconciled with the usage it logged, and
+ * refused (BudgetExceededError) when the run's or project's budget can't cover it.
+ */
+export function guardLlmFn<A extends { system: string; user: unknown }, R>(
+  scope: { projectId?: string | null; runId?: string | null; kind?: SpendKind },
+  fn: (args: A) => Promise<R>,
+  est: { outTokens: number; model?: string }
+): (args: A) => Promise<R> {
+  return (args) => {
+    const chars = args.system.length + (typeof args.user === "string" ? args.user.length : JSON.stringify(args.user ?? "").length);
+    return guardLlm(scope, { model: est.model, inTokens: Math.ceil(chars / 4), outTokens: est.outTokens }, () => fn(args));
+  };
 }
 
 /** OpenRouter's standard text tier (claude-client.ts) — what a text call is estimated at. */

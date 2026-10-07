@@ -15,6 +15,7 @@ type Job = {
   settings: Record<string, unknown> | null;
   attempts: number;
   error: string | null;
+  updatedAt: Date;
 };
 type Run = {
   id: string;
@@ -28,12 +29,29 @@ type Run = {
   masterMp4Url: string | null;
 };
 
-const store = vi.hoisted(() => ({ runs: new Map<string, Run>(), jobs: [] as Job[] }));
+const store = vi.hoisted(() => ({ runs: new Map<string, Run>(), jobs: [] as Job[], clock: 1, retryable: false }));
 
 const db = vi.hoisted(() => {
   const matches = (value: unknown, cond: unknown) =>
     cond && typeof cond === "object" && "in" in (cond as object) ? (cond as { in: unknown[] }).in.includes(value) : value === cond;
+  // Field-by-field where (status / nodeId / updatedAt are what the conditional transitions re-check).
+  const jobMatches = (job: Record<string, unknown>, where: Record<string, unknown>) =>
+    Object.entries(where).every(([k, cond]) =>
+      cond instanceof Date ? job[k] instanceof Date && (job[k] as Date).getTime() === cond.getTime() : matches(job[k], cond)
+    );
+  // Prisma data semantics: { increment } / { decrement }, undefined = untouched; @updatedAt bumps.
+  const applyData = (job: Record<string, unknown>, data: Record<string, unknown>) => {
+    for (const [k, v] of Object.entries(data)) {
+      if (v === undefined) continue;
+      if (v && typeof v === "object" && "increment" in v) job[k] = Number(job[k] ?? 0) + (v as { increment: number }).increment;
+      else if (v && typeof v === "object" && "decrement" in v) job[k] = Number(job[k] ?? 0) - (v as { decrement: number }).decrement;
+      else job[k] = v;
+    }
+    job.updatedAt = new Date(++store.clock);
+  };
   return {
+    applyData,
+    jobMatches,
     libtvRun: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
         const run = store.runs.get(where.id);
@@ -57,17 +75,20 @@ const db = vi.hoisted(() => {
       ),
     },
     libtvJob: {
-      updateMany: vi.fn(async ({ where, data }: { where: { id: string; status: string }; data: { status: string } }) => {
+      updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
         const job = store.jobs.find((j) => j.id === where.id);
-        if (!job || job.status !== where.status) return { count: 0 };
-        job.status = data.status;
-        job.attempts += 1;
+        if (!job || !jobMatches(job, where)) return { count: 0 };
+        applyData(job, data);
         return { count: 1 };
       }),
       findMany: vi.fn(async ({ where }: { where: { runId: string } }) => store.jobs.filter((j) => j.runId === where.runId).map((j) => ({ ...j }))),
-      update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<Job> }) => {
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
+        const job = store.jobs.find((j) => j.id === where.id);
+        return job ? { ...job } : null;
+      }),
+      update: vi.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
         const job = store.jobs.find((j) => j.id === where.id)!;
-        Object.assign(job, data);
+        applyData(job, data);
         return job;
       }),
     },
@@ -79,25 +100,40 @@ const db = vi.hoisted(() => {
 
 vi.mock("@/lib/db", () => ({ prisma: db }));
 
-const queue = vi.hoisted(() => ({
-  jobDone: vi.fn(async (input: { jobId: string; resultUrl?: string | null; remoteUrl?: string | null; skipped?: boolean }) => {
+type DoneInput = { jobId: string; resultUrl?: string | null; remoteUrl?: string | null; skipped?: boolean; settings?: Record<string, unknown> };
+type Guard = { status: string; nodeId?: string | null; updatedAt?: Date };
+const queue = vi.hoisted(() => {
+  const done = (input: DoneInput) => {
     const job = store.jobs.find((j) => j.id === input.jobId)!;
-    job.status = input.skipped ? "skipped" : "completed";
-    job.resultUrl = input.resultUrl ?? job.resultUrl;
-    job.remoteUrl = input.remoteUrl ?? job.remoteUrl;
-  }),
-  jobFailed: vi.fn(async (jobId: string, error: string) => {
+    db.applyData(job, {
+      status: input.skipped ? "skipped" : "completed",
+      resultUrl: input.resultUrl ?? job.resultUrl,
+      remoteUrl: input.remoteUrl ?? job.remoteUrl,
+      ...(input.settings ? { settings: input.settings } : {}),
+    });
+  };
+  // The test double fails a job for good unless store.retryable (then it re-queues, like attempts < 3).
+  const fail = (jobId: string, error: string, settings?: Record<string, unknown>) => {
     const job = store.jobs.find((j) => j.id === jobId)!;
-    job.status = "failed";
-    job.error = error;
-  }),
+    db.applyData(job, { status: store.retryable ? "queued" : "failed", error, ...(settings ? { settings } : {}) });
+  };
+  const guardOk = (jobId: string, g: Guard) => {
+    const job = store.jobs.find((j) => j.id === jobId);
+    return !!job && db.jobMatches(job, { status: g.status, ...(g.nodeId !== undefined ? { nodeId: g.nodeId } : {}), ...(g.updatedAt ? { updatedAt: g.updatedAt } : {}) });
+  };
+  return {
+  jobDone: vi.fn(async (input: DoneInput) => done(input)),
+  jobDoneIf: vi.fn(async (input: DoneInput, g: Guard) => (guardOk(input.jobId, g) ? (done(input), true) : false)),
+  jobFailed: vi.fn(async (jobId: string, error: string) => fail(jobId, error)),
+  jobFailedIf: vi.fn(async (jobId: string, error: string, g: Guard, settings?: Record<string, unknown>) => (guardOk(jobId, g) ? (fail(jobId, error, settings), true) : false)),
   runDone: vi.fn(async ({ runId, masterMp4Url }: { runId: string; masterMp4Url: string }) => {
     Object.assign(store.runs.get(runId)!, { status: "completed", masterMp4Url });
   }),
   runFailed: vi.fn(async (runId: string, error: string) => {
     Object.assign(store.runs.get(runId)!, { status: "failed", error });
   }),
-}));
+  };
+});
 vi.mock("./libtv-queue", () => queue);
 
 const assemble = vi.hoisted(() =>
@@ -131,11 +167,13 @@ function job(partial: Partial<Job> & Pick<Job, "id" | "nodeName" | "kind">): Job
     settings: null,
     attempts: 0,
     error: null,
+    updatedAt: new Date(0),
     ...partial,
   };
 }
 
 function seed(executor = "comfyui") {
+  store.retryable = false;
   store.runs.clear();
   store.runs.set("run1", {
     id: "run1",
@@ -529,7 +567,7 @@ describe("clip drift results", () => {
     adapter.videoTasks.set("task-V1", { status: "SUCCESS", url: "https://cdn/V1-b.mp4", creditsSpent: 20, settingsPatch: { drift: { driftFlag: false, reasons: [] }, driftFlag: false } });
     expect(await tickRun(adapter, "run1")).toBe("done");
     expect(store.jobs.find((j) => j.id === "v1")!.settings).toMatchObject({ driftFlag: false, driftRegens: 1 });
-    expect(queue.jobDone).toHaveBeenCalledWith(expect.objectContaining({ jobId: "v1", resultUrl: "https://cdn/V1-b.mp4", creditsSpent: 40 }));
+    expect(queue.jobDoneIf).toHaveBeenCalledWith(expect.objectContaining({ jobId: "v1", resultUrl: "https://cdn/V1-b.mp4", creditsSpent: 40 }), expect.objectContaining({ status: "running", nodeId: "task-V1" }));
   });
 });
 
@@ -586,5 +624,186 @@ describe("spend guard at the paid call sites", () => {
     expect(adapter.generateImage).not.toHaveBeenCalled();
     expect(statusOf("k1")).toBe("completed");
     expect(store.jobs.find((j) => j.id === "k1")!.resultUrl).toBe("https://cdn/K1-rejected.png");
+  });
+});
+
+describe("overlapping ticks on a finished clip", () => {
+  /** Both ticks are inside pollVideo before either claims: the claim (CAS on the job version) decides. */
+  async function racePolls(adapter: ReturnType<typeof fakeAdapter>, poll: (ctx: { claimFinish?: () => Promise<boolean> }) => Promise<TaskResult>) {
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    let entered = 0;
+    adapter.pollVideo = vi.fn(async (_taskId: string, ctx) => {
+      entered++;
+      await gate;
+      return poll(ctx);
+    });
+    const a = tickRun(adapter, "run1");
+    const b = tickRun(adapter, "run1");
+    await vi.waitFor(() => expect(entered).toBe(2));
+    open();
+    await Promise.all([a, b]);
+  }
+
+  it("finalizes the clip once: one claim, one drift check / download, one write", async () => {
+    const adapter = fakeAdapter();
+    await tickRun(adapter, "run1"); // submits V1
+    let finalized = 0;
+    await racePolls(adapter, async (ctx) => {
+      if (ctx.claimFinish && !(await ctx.claimFinish())) return { status: "PROCESSING" };
+      finalized++; // download + paid drift QC + usage log happen here
+      return { status: "SUCCESS", url: "https://cdn/V1.mp4", settingsPatch: { driftFlag: false } };
+    });
+    expect(finalized).toBe(1);
+    expect(statusOf("v1")).toBe("completed");
+    expect(store.jobs.find((j) => j.id === "v1")!.settings).not.toHaveProperty("finalizingAt");
+    expect(store.jobs.find((j) => j.id === "v1")!.settings).not.toHaveProperty("finalizingTask");
+  });
+
+  it("re-generates a drifted clip once, not once per tick", async () => {
+    const adapter = fakeAdapter();
+    await tickRun(adapter, "run1");
+    await racePolls(adapter, async (ctx) => {
+      if (ctx.claimFinish && !(await ctx.claimFinish())) return { status: "PROCESSING" };
+      return { status: "SUCCESS", url: "https://cdn/V1-a.mp4", regenerate: true, settingsPatch: { driftFlag: true } };
+    });
+    expect(store.jobs.find((j) => j.id === "v1")!.settings).toMatchObject({ driftRegens: 1 });
+    const requeues = db.libtvJob.updateMany.mock.calls.filter(([a]) => a.where.id === "v1" && a.data.status === "queued");
+    expect(requeues).toHaveLength(1);
+  });
+
+  it("claims for an adapter that doesn't: only one tick writes the result", async () => {
+    const adapter = fakeAdapter();
+    await tickRun(adapter, "run1");
+    await racePolls(adapter, async () => ({ status: "SUCCESS", url: "https://cdn/V1.mp4" }));
+    expect(statusOf("v1")).toBe("completed");
+    expect(queue.jobDoneIf.mock.calls.filter(([i]) => i.jobId === "v1")).toHaveLength(1);
+    expect(queue.jobDone.mock.calls.filter(([i]) => i.jobId === "v1")).toHaveLength(0);
+  });
+
+  it("leaves a clip another tick is finalizing alone, and takes over a stale claim", async () => {
+    const adapter = fakeAdapter();
+    await tickRun(adapter, "run1");
+    const v1 = store.jobs.find((j) => j.id === "v1")!;
+    adapter.videoTasks.set("task-V1", { status: "SUCCESS", url: "https://cdn/V1.mp4" });
+    v1.settings = { ...v1.settings, finalizingAt: new Date().toISOString(), finalizingTask: "task-V1" };
+    await tickRun(adapter, "run1");
+    expect(adapter.pollVideo).not.toHaveBeenCalled();
+    expect(statusOf("v1")).toBe("running");
+    v1.settings = { ...v1.settings, finalizingAt: new Date(Date.now() - 10 * 60_000).toISOString(), finalizingTask: "task-V1" };
+    await tickRun(adapter, "run1");
+    expect(statusOf("v1")).toBe("completed");
+  });
+});
+
+describe("QC re-queues don't use up the attempt limit", () => {
+  it("a consistency re-roll gives back its attempt", async () => {
+    process.env.KEYFRAME_QC = "on";
+    try {
+      seed();
+      const k1 = store.jobs.find((j) => j.id === "k1")!;
+      k1.settings = { coversFrames: [1, 2], editFrom: "product", directedKeyframe: "Close-up", productSpec: "thin" };
+      const fail = { score: 0.4, pass: false, reviewed: true, shotType: "product-closeup", product: null, cast: [], defects: ["bezel thicker"], reasons: ["low"], majorDefects: 1, sceneConsistent: null };
+      consistency.scoreFrame.mockReset();
+      consistency.scoreFrame.mockResolvedValueOnce(fail).mockResolvedValueOnce(fail).mockResolvedValueOnce({ ...fail, score: 0.9, pass: true, defects: [], reasons: [], majorDefects: 0 });
+      const adapter = fakeAdapter();
+      for (let i = 0; i < 3; i++) await tickRun(adapter, "run1");
+      expect(statusOf("k1")).toBe("completed");
+      expect(k1.attempts).toBe(1); // three generations, one real attempt
+    } finally {
+      delete process.env.KEYFRAME_QC;
+    }
+  });
+
+  it("a drift re-generation gives back its attempt", async () => {
+    seed();
+    const adapter = fakeAdapter();
+    await tickRun(adapter, "run1");
+    adapter.videoTasks.set("task-V1", { status: "SUCCESS", url: "https://cdn/V1-a.mp4", regenerate: true });
+    await tickRun(adapter, "run1");
+    await tickRun(adapter, "run1");
+    adapter.videoTasks.set("task-V1", { status: "SUCCESS", url: "https://cdn/V1-b.mp4" });
+    await tickRun(adapter, "run1");
+    expect(statusOf("v1")).toBe("completed");
+    expect(store.jobs.find((j) => j.id === "v1")!.attempts).toBe(1);
+  });
+});
+
+describe("clip reservations are released", () => {
+  async function paidClipRun(budgetUsd = 1) {
+    const { MemorySpendLedger, setSpendLedger } = await import("@/services/ops/budget-guard");
+    const ledger = new MemorySpendLedger();
+    setSpendLedger(ledger);
+    await ledger.setBudget({ projectId: "p1", runId: "run1" }, budgetUsd);
+    seed("openrouter");
+    Object.assign(store.runs.get("run1")!, { projectId: "p1" });
+    // The keyframe is done already: only the clip spends.
+    Object.assign(store.jobs.find((j) => j.id === "k1")!, { status: "completed", resultUrl: "https://cdn/K1.png" });
+    store.jobs.find((j) => j.id === "v1")!.settings = { coversFrames: [1, 2], duration: 4, openrouterModel: "google/veo-3.1-lite" };
+    return ledger;
+  }
+  const clips = async (ledger: { entries: (f: { projectId: string }) => Promise<{ kind: string; estUsd: number; actualUsd: number | null }[]> }) =>
+    (await ledger.entries({ projectId: "p1" })).filter((e) => e.kind === "video");
+  afterEach(async () => (await import("@/services/ops/budget-guard")).setSpendLedger(null));
+
+  it("settles a failed clip's reservation to $0 and reserves afresh on the resubmit", async () => {
+    const ledger = await paidClipRun();
+    store.retryable = true;
+    const adapter = fakeAdapter({ engine: "openrouter" });
+    await tickRun(adapter, "run1");
+    expect(await clips(ledger)).toEqual([expect.objectContaining({ actualUsd: null })]);
+    adapter.videoTasks.set("task-V1", { status: "FAIL", error: "content filter" });
+    await tickRun(adapter, "run1"); // FAIL → settled at $0, re-queued
+    expect((await clips(ledger))[0].actualUsd).toBe(0);
+    await tickRun(adapter, "run1"); // resubmitted with a fresh reservation
+    const after = await clips(ledger);
+    expect(after).toHaveLength(2);
+    expect(after[0].actualUsd).toBe(0);
+    expect(after[1].actualUsd).toBeNull();
+    expect(adapter.submitVideo).toHaveBeenCalledTimes(2);
+  });
+
+  it("closes a submit with an unknown outcome at its estimate", async () => {
+    const ledger = await paidClipRun();
+    const adapter = fakeAdapter({ engine: "openrouter", submitVideo: vi.fn(async () => Promise.reject(new Error("request timed out"))) });
+    await tickRun(adapter, "run1");
+    const [clip] = await clips(ledger);
+    expect(clip.actualUsd).toBe(clip.estUsd);
+    expect(await ledger.openEntryForJob("v1", "video")).toBeNull();
+  });
+
+  it("closes the reservation of a clip whose invocation died before it got a task id", async () => {
+    const ledger = await paidClipRun();
+    const { reserve } = { reserve: ledger.reserve.bind(ledger) };
+    await reserve({ projectId: "p1", runId: "run1", jobId: "v1", kind: "video", model: "google/veo-3.1-lite" }, 0.126);
+    Object.assign(store.jobs.find((j) => j.id === "v1")!, { status: "running", nodeId: null, attempts: 1, startedAt: new Date(Date.now() - 10 * 60_000) });
+    Object.assign(store.runs.get("run1")!, { status: "running" });
+    await tickRun(fakeAdapter({ engine: "openrouter" }), "run1");
+    const all = await clips(ledger);
+    expect(all[0].actualUsd).toBe(0.126);
+  });
+});
+
+describe("budget refusal on a consistency re-roll", () => {
+  afterEach(async () => (await import("@/services/ops/budget-guard")).setSpendLedger(null));
+  it("keeps the best-scoring earlier candidate, not the last rejected one", async () => {
+    const { MemorySpendLedger, setSpendLedger } = await import("@/services/ops/budget-guard");
+    const ledger = new MemorySpendLedger();
+    setSpendLedger(ledger);
+    await ledger.setBudget({ projectId: "p1", runId: "run1" }, 0.01);
+    seed("openrouter");
+    Object.assign(store.runs.get("run1")!, { projectId: "p1" });
+    store.jobs.find((j) => j.id === "k1")!.settings = {
+      openrouterModel: "bytedance-seed/seedream-5-0-flash",
+      qcAttempts: 2,
+      qcRejectedUrl: "https://cdn/K1-last.png",
+      qcCandidates: [
+        { url: "https://cdn/K1-best.png", score: 0.71, pass: false, defects: [] },
+        { url: "https://cdn/K1-last.png", score: 0.42, pass: false, defects: [] },
+      ],
+    };
+    await tickRun(fakeAdapter({ engine: "openrouter" }), "run1");
+    expect(statusOf("k1")).toBe("completed");
+    expect(store.jobs.find((j) => j.id === "k1")!.resultUrl).toBe("https://cdn/K1-best.png");
   });
 });

@@ -244,8 +244,18 @@ export async function withSpendGuard<T>(scope: SpendScope, estUsd: number, call:
   return result;
 }
 
-/** Reconcile a job's open reservation (a clip) with the usage logged while `call` ran (its poll). */
-export async function settleOpenJob<T>(projectId: string | null | undefined, jobId: string, kind: SpendKind, call: () => Promise<T>, opts: { ledger?: SpendLedger; prices?: PriceTable; done?: (r: T) => boolean } = {}): Promise<T> {
+/**
+ * Reconcile a job's open reservation (a clip) with the usage logged while `call` ran (its poll).
+ * `done` = the provider settled the job; without a reported cost it is settled at the estimate, or at
+ * $0 when `unbilled` says the provider did not bill it (a failed generation).
+ */
+export async function settleOpenJob<T>(
+  projectId: string | null | undefined,
+  jobId: string,
+  kind: SpendKind,
+  call: () => Promise<T>,
+  opts: { ledger?: SpendLedger; prices?: PriceTable; done?: (r: T) => boolean; unbilled?: (r: T) => boolean } = {}
+): Promise<T> {
   if (!projectId || guardDisabled()) return call();
   const usage: AiUsageEntry[] = [];
   const result = await captureAiUsage(usage, call);
@@ -253,7 +263,7 @@ export async function settleOpenJob<T>(projectId: string | null | undefined, job
   if (actual != null || opts.done?.(result)) {
     const ledger = opts.ledger ?? (await spendLedger());
     const open = await ledger.openEntryForJob(jobId, kind).catch(() => null);
-    if (open) await ledger.settle(open.id, actual ?? open.estUsd).catch(() => {});
+    if (open) await ledger.settle(open.id, actual ?? (opts.unbilled?.(result) ? 0 : open.estUsd)).catch(() => {});
   }
   return result;
 }

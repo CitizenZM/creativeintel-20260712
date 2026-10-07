@@ -8,7 +8,7 @@
  */
 import type { BatchMatrix } from "@/services/creative/batch-matrix";
 import type { CampaignPlan } from "@/services/creative/campaign-plan.types";
-import { generateAdCopy, type AdCopySet, type CopyLlm } from "./ad-copy";
+import { defaultAdCopyLlm, generateAdCopy, type AdCopySet, type CopyLlm } from "./ad-copy";
 import { copyCsv, metaBulkCsv, tiktokBulkCsv, type BulkContext, type PackVariant } from "./bulk-export";
 
 export interface PackFile {
@@ -165,7 +165,10 @@ export async function buildExportPack(runId: string, opts: { platforms?: string[
   const folder = `export-packs/${runId}/${now.getTime().toString(36)}`;
   const plan = project?.campaignPlan as CampaignPlan | null;
   const platforms = opts.platforms?.length ? opts.platforms : plan?.platforms?.map((p) => p.platform) ?? ["meta_feed", "instagram_reels", "tiktok"];
-  const copy = await generateAdCopy({ product: { brand, name: product, url: project?.productUrl }, brief: project?.productBrief as never, plan, platforms, llm: opts.llm });
+  // The copy model call is paid: under the run's spend guard (refused over budget → the scaffold copy).
+  const { guardLlmFn } = await import("@/services/ops/spend");
+  const llm = opts.llm ?? guardLlmFn({ projectId: run.projectId, runId }, defaultAdCopyLlm, { outTokens: 3000 });
+  const copy = await generateAdCopy({ product: { brand, name: product, url: project?.productUrl }, brief: project?.productBrief as never, plan, platforms, llm });
 
   // Thumbnails: one frame per video (2 at a time; failures just leave the thumbnail empty).
   const thumbs = new Map<string, Buffer>();
@@ -209,11 +212,7 @@ export async function buildExportPack(runId: string, opts: { platforms?: string[
   const mUp = await uploadBuffer({ buffer: Buffer.from(JSON.stringify(manifest, null, 2), "utf8"), filename: "manifest.json", contentType: "application/json", folder }).catch(() => null);
   const manifestUrl = mUp && mUp.provider !== "inline" ? mUp.url : null;
 
-  const fresh = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true } });
-  const freshQc = (fresh?.qcReport && typeof fresh.qcReport === "object" ? fresh.qcReport : {}) as Record<string, unknown>;
-  await prisma.libtvRun.update({
-    where: { id: runId },
-    data: { qcReport: { ...freshQc, exportPack: { manifestUrl, zipUrl: manifest.zipUrl, createdAt: manifest.createdAt, videos: videos.length, campaignName } } as never },
-  });
+  const { patchQcReport } = await import("@/services/video-gen/qc-report");
+  await patchQcReport(runId, (qc) => ({ ...qc, exportPack: { manifestUrl, zipUrl: manifest.zipUrl, createdAt: manifest.createdAt, videos: videos.length, campaignName } }));
   return { manifestUrl, zipUrl: manifest.zipUrl, manifest };
 }

@@ -73,6 +73,8 @@ export const matrixAdapter: EngineAdapter = {
   async pollVideo(taskId, ctx): Promise<TaskResult> {
     const task = await getSeedanceTask(taskId);
     if (task.status === "SUCCESS" && task.videoUrl) {
+      // Overlapping ticks: only the one holding the claim persists and logs the clip.
+      if (ctx.claimFinish && !(await ctx.claimFinish())) return { status: "PROCESSING" };
       const url = await persistResult(task.videoUrl, `matrix-runs/${ctx.runId}`, `${ctx.nodeName}.mp4`);
       const cents = ctx.creditsEstimated ?? 0;
       logAiUsage({

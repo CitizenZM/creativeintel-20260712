@@ -182,3 +182,54 @@ describe("jobUnitUsd on free engines", () => {
     expect(jobUnitUsd(DEFAULT_PRICES, { nodeName: "K1", kind: "image", modelName: "x", settings: { openrouterModel: "bytedance-seed/seedream-5-0-flash" } }, "glm").usd).toBe(0.018);
   });
 });
+
+describe("estimateRunCost: clip drift QC, drift re-generations and clip retries", () => {
+  const veo = { openrouterModel: "google/veo-3.1-lite", duration: 4 };
+  const clipJobs: CostJob[] = [
+    { nodeName: "K1", kind: "image", modelName: "Seedream 5 Flash (OpenRouter)", settings: { openrouterModel: "bytedance-seed/seedream-5-0-flash" } },
+    { nodeName: "V1", kind: "video", modelName: "Veo 3.1 Lite 720p (OpenRouter)", settings: veo },
+    { nodeName: "V2", kind: "video", modelName: "Veo 3.1 Lite 720p (OpenRouter)", settings: { ...veo, autoRegenOnDrift: 1 } },
+  ];
+  const qc = { enabled: false, model: "google/gemini-2.5-flash" };
+  const driftLine = (f: ReturnType<typeof estimateRunCost>) => f.lines.find((l) => l.kind === "qc" && /drift/i.test(l.label));
+
+  it("adds the clip drift check's 3 vision calls per clip when drift QC is on", () => {
+    const off = estimateRunCost({ executor: "openrouter", jobs: clipJobs }, { qc, clips: { driftMode: "off" } });
+    const on = estimateRunCost({ executor: "openrouter", jobs: clipJobs }, { qc, clips: { driftMode: "on" } });
+    expect(driftLine(off)).toBeUndefined();
+    const line = driftLine(on)!;
+    expect(line.qty.low).toBe(6);
+    // V2 auto-regenerates on drift: its second take is scored too (expected 20 % drift, worst case 1 re-generation).
+    expect(line.qty.expected).toBeCloseTo(3 + 3 * 1.2, 6);
+    expect(line.qty.high).toBe(3 + 3 * 2);
+    expect(on.counts.qcCalls.high).toBe(9);
+    close(line.usd.low, 6 * qcCallUsd(DEFAULT_PRICES, "google/gemini-2.5-flash", 2, "low"));
+    expect(on.totals.low).toBeGreaterThan(off.totals.low);
+  });
+
+  it("prices drift re-generations for clips that auto-regenerate, in pixel mode too (no paid drift calls)", () => {
+    const f = estimateRunCost({ executor: "openrouter", jobs: clipJobs }, { qc, clips: { driftMode: "pixel" } });
+    expect(driftLine(f)).toBeUndefined();
+    const regen = f.lines.find((l) => l.kind === "clip_regen")!;
+    expect(regen.qty).toEqual({ low: 0, expected: 0.2, high: 1 });
+    close(regen.usd.high, 0.12);
+    // auto-regen for every clip (AUTO_REGEN_ON_DRIFT=on)
+    const all = estimateRunCost({ executor: "openrouter", jobs: clipJobs }, { qc, clips: { driftMode: "pixel", autoRegen: true } });
+    expect(all.lines.find((l) => l.kind === "clip_regen")!.qty.high).toBe(2);
+    // no drift check, no drift re-generation
+    expect(estimateRunCost({ executor: "openrouter", jobs: clipJobs }, { qc, clips: { driftMode: "off", autoRegen: true } }).lines.some((l) => l.kind === "clip_regen")).toBe(false);
+  });
+
+  it("adds billed clip retries: an expected share and a worst case", () => {
+    const f = estimateRunCost({ executor: "openrouter", jobs: clipJobs }, { qc, clips: { driftMode: "off", retryRate: 0.05, retryHighRate: 0.25 } });
+    const retry = f.lines.find((l) => l.kind === "clip_retry")!;
+    expect(retry.qty).toEqual({ low: 0, expected: 0.1, high: 0.5 });
+    close(retry.usd.high, 0.5 * 0.12);
+    expect(f.totals.high).toBeGreaterThan(estimateRunCost({ executor: "openrouter", jobs: clipJobs }, { qc }).totals.high);
+  });
+
+  it("drift QC only runs on the OpenRouter engine's clips", () => {
+    const f = estimateRunCost({ executor: "matrix", jobs: [{ nodeName: "V1", kind: "video", modelName: "Seedance", settings: { matrixModel: "seedance-2.0-fast", duration: 5 }, creditsEstimated: 25 }] }, { qc, clips: { driftMode: "on" } });
+    expect(driftLine(f)).toBeUndefined();
+  });
+});

@@ -273,7 +273,8 @@ RULES
   return { system, user };
 }
 
-const defaultLlm: LlmFn = async ({ system, user }) => {
+/** The default translation call (localize-run runs it under the spend guard). */
+export const defaultLocalizeLlm: LlmFn = async ({ system, user }) => {
   const { analyzeWithClaude } = await import("@/services/ai/claude-client");
   return analyzeWithClaude({ systemPrompt: system, userPrompt: user, responseSchema: localizeResponseSchema, maxTokens: 4000 });
 };
@@ -321,7 +322,7 @@ function check(u: Unit, text: string | undefined, spoken: Record<string, string>
  */
 export async function localizeFrames(frames: AssembleFrame[], locale: LocaleId, opts: LocalizeOptions = {}): Promise<LocalizedFrames> {
   const p = localeProfile(locale);
-  const llm = opts.llm ?? defaultLlm;
+  const llm = opts.llm ?? defaultLocalizeLlm;
   const terms = opts.terms ?? [];
   const spellingIds = new Map<string, string>();
   const units: Unit[] = [];
@@ -421,6 +422,15 @@ export async function localizeFrames(frames: AssembleFrame[], locale: LocaleId, 
       const d = { ...(f.endCard.data as Record<string, unknown>) };
       for (const k of ["headline", "tag", "sticker", "button"]) if (typeof d[k] === "string") d[k] = txt.get(sq(d[k] as string)) ?? d[k];
       next.endCard = { ...f.endCard, data: d as never };
+    }
+    // Talking head: the clip's own (source-language) speech can't be kept. The translated line is spoken
+    // by TTS in the locale's voice (not the persona's source voice) and the captions come from it.
+    if (f.nativeAudio || sq(f.talkLine)) {
+      const line = vo.get(sq(f.talkLine)) ?? vo.get(sq(f.voiceover)) ?? next.voiceover ?? f.talkLine ?? null;
+      next.talkLine = line;
+      next.voiceover = line;
+      next.nativeAudio = false;
+      next.ttsVoice = null;
     }
     return next;
   });

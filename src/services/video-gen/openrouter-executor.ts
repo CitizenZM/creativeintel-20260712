@@ -112,6 +112,8 @@ export const openrouterAdapter: EngineAdapter = {
     const task = await getOpenRouterVideoTask(taskId);
     if (task.status === "FAIL") return { status: "FAIL", error: task.error ?? "OpenRouter video failed" };
     if (task.status !== "SUCCESS") return { status: "PROCESSING" };
+    // Overlapping ticks: only the one holding the claim downloads, drift-scores (paid) and logs the clip.
+    if (ctx.claimFinish && !(await ctx.claimFinish())) return { status: "PROCESSING" };
     const buffer = await downloadOpenRouterVideo(taskId);
     // Drift check on the clip we already hold: sample 0 / 50 / 100 %, score against cast + product refs (free when "pixel").
     const mode = clipDriftMode();

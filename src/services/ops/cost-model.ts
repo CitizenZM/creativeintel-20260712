@@ -260,7 +260,7 @@ export function mergePriceOverrides(base: PriceTable, raw: unknown, today = new 
 
 // ─── run forecast ────────────────────────────────────────────────────────────
 
-export type CostLineKind = "cast" | "keyframe" | "end_keyframe" | "reroll" | "video" | "qc" | "llm" | "tts";
+export type CostLineKind = "cast" | "keyframe" | "end_keyframe" | "reroll" | "video" | "clip_regen" | "clip_retry" | "qc" | "llm" | "tts";
 export interface Range {
   low: number;
   expected: number;
@@ -310,6 +310,34 @@ export interface EstimateOptions {
   /** Only jobs not yet completed / skipped / failed (a run in progress). */
   remainingOnly?: boolean;
   llm?: LlmCallEstimate[];
+  /** What happens to a clip after it renders (OpenRouter engine: openrouter-executor.pollVideo). Default: nothing. */
+  clips?: {
+    /** keyframe-qc clipDriftMode: "on" = 3 vision calls per clip (0 / 50 / 100 %), "pixel" = free local checks only. */
+    driftMode?: "on" | "pixel" | "off";
+    /** AUTO_REGEN_ON_DRIFT for every clip (a job's own autoRegenOnDrift setting wins). */
+    autoRegen?: boolean;
+    /** Chance a clip is flagged as drifted (default 0.2). */
+    driftRate?: number;
+    /** Drift re-generations per clip at most (consistency/drift MAX_DRIFT_REGENS, default 1). */
+    maxRegens?: number;
+    /** Billed resubmits after a transient failure (a failed generation is unbilled): expected per clip. */
+    retryRate?: number;
+    /** ... and the worst case per clip. */
+    retryHighRate?: number;
+  };
+}
+
+/** Vision calls of one clip drift check (sampled at 0 / 50 / 100 %). */
+export const DRIFT_CALLS_PER_CLIP = 3;
+/** References a drift sample is scored against (cast + product). */
+const DRIFT_REF_IMAGES = 2;
+
+/** The job's own autoRegenOnDrift setting, else the default (consistency/drift autoRegenOnDrift). */
+function regenOnDrift(settings: Record<string, unknown>, fallback: boolean): boolean {
+  const v = settings.autoRegenOnDrift;
+  if (v === true || v === 1 || v === "on") return true;
+  if (v === false || v === 0 || v === "off") return false;
+  return fallback;
 }
 export interface RunCostForecast {
   lines: CostLine[];
@@ -398,6 +426,12 @@ export function estimateRunCost(input: RunCostInput, opts: EstimateOptions = {})
   const maxPlain = opts.qc?.maxRerolls ?? 1;
   const maxStrict = opts.qc?.strictMaxRerolls ?? Math.max(2, maxPlain);
   const qcModel = opts.qc?.model ?? table.qc.defaultModel;
+  // The clip drift check runs where the clip is downloaded: the OpenRouter engine.
+  const driftMode = executor === "openrouter" ? (opts.clips?.driftMode ?? "off") : "off";
+  const driftRate = opts.clips?.driftRate ?? 0.2;
+  const maxRegens = opts.clips?.maxRegens ?? 1;
+  const retryRate = opts.clips?.retryRate ?? 0;
+  const retryHighRate = opts.clips?.retryHighRate ?? 0;
   const warnings = new Set<string>();
   const groups = new Map<string, CostLine & { nodes: string[] }>();
 
@@ -412,6 +446,31 @@ export function estimateRunCost(input: RunCostInput, opts: EstimateOptions = {})
   };
 
   const counts: RunCostForecast["counts"] = { castSheets: 0, keyframes: 0, endKeyframes: 0, otherImages: 0, clips: 0, qcCalls: { low: 0, expected: 0, high: 0 }, rerolls: { expected: 0, worst: 0 } };
+
+  /** Vision QC calls: their cost varies by output length (thinking tokens), so the per-call price differs per level. */
+  const qcCalls = (label: string, refImages: number, qty: Range, group = "qc") => {
+    counts.qcCalls.low += qty.low;
+    counts.qcCalls.expected += qty.expected;
+    counts.qcCalls.high += qty.high;
+    const key = `${group}|${qcModel}|${refImages}`;
+    const g = groups.get(key) ?? {
+      kind: "qc" as const,
+      label,
+      model: qcModel,
+      qty: { low: 0, expected: 0, high: 0 },
+      unitUsd: qcCallUsd(table, qcModel, refImages, "expected"),
+      usd: { low: 0, expected: 0, high: 0 },
+      source: `${table.qc.source} (${table.qc.asOf})`,
+      nodes: [],
+    };
+    g.qty.low += qty.low;
+    g.qty.expected += qty.expected;
+    g.qty.high += qty.high;
+    g.usd.low += qty.low * qcCallUsd(table, qcModel, refImages, "low");
+    g.usd.expected += qty.expected * qcCallUsd(table, qcModel, refImages, "expected");
+    g.usd.high += qty.high * qcCallUsd(table, qcModel, refImages, "high");
+    groups.set(key, g);
+  };
 
   for (const j of jobs) {
     if (j.kind !== "image" && j.kind !== "video") continue;
@@ -428,6 +487,19 @@ export function estimateRunCost(input: RunCostInput, opts: EstimateOptions = {})
       counts.clips++;
       const label = price.billedSec ? `Video clips (${price.billedSec} s billed)` : "Video clips";
       add("video", label, model, price.usd, { low: 1, expected: 1, high: 1 }, price.source, j.nodeName);
+      if (price.free) continue;
+      // A drifted clip that auto-regenerates is rendered (and drift-checked) once more.
+      const regen = driftMode !== "off" && regenOnDrift(s, opts.clips?.autoRegen ?? false) ? { low: 0, expected: driftRate * Math.min(1, maxRegens), high: maxRegens } : null;
+      if (regen) add("clip_regen", "Drift re-generations (clips rendered again)", model, price.usd, regen, price.source, j.nodeName);
+      if (retryRate > 0 || retryHighRate > 0) add("clip_retry", "Clip retries (billed resubmits after a transient failure)", model, price.usd, { low: 0, expected: retryRate, high: retryHighRate }, price.source, j.nodeName);
+      if (driftMode === "on") {
+        const takes = { low: 1, expected: 1 + (regen?.expected ?? 0), high: 1 + (regen?.high ?? 0) };
+        qcCalls(`Clip drift QC (${DRIFT_CALLS_PER_CLIP} sampled frames + ${DRIFT_REF_IMAGES} refs)`, DRIFT_REF_IMAGES, {
+          low: DRIFT_CALLS_PER_CLIP * takes.low,
+          expected: DRIFT_CALLS_PER_CLIP * takes.expected,
+          high: DRIFT_CALLS_PER_CLIP * takes.high,
+        }, "drift");
+      }
       continue;
     }
     const kind: CostLineKind = j.nodeName === "CAST" || s.castSheet ? "cast" : /^K\d+E$/.test(j.nodeName) || s.editFrom === "end" ? "end_keyframe" : "keyframe";
@@ -446,29 +518,7 @@ export function estimateRunCost(input: RunCostInput, opts: EstimateOptions = {})
     counts.rerolls.worst += cap;
     add("reroll", "QC rerolls (regenerated keyframes)", model, price.usd, { low: 0, expected: exp, high: cap }, price.source, j.nodeName);
     const refImages = s.editFrom ? Math.min(3, refs) : 0;
-    const qty = { low: 1, expected: 1 + exp, high: 1 + cap };
-    counts.qcCalls.low += qty.low;
-    counts.qcCalls.expected += qty.expected;
-    counts.qcCalls.high += qty.high;
-    // QC cost varies by output length (thinking tokens), so the per-call price differs per level.
-    const key = `qc|${qcModel}|${refImages}`;
-    const g = groups.get(key) ?? {
-      kind: "qc" as const,
-      label: `Vision QC calls (${refImages ? `keyframe + ${refImages} ref${refImages > 1 ? "s" : ""}` : "keyframe only"})`,
-      model: qcModel,
-      qty: { low: 0, expected: 0, high: 0 },
-      unitUsd: qcCallUsd(table, qcModel, refImages, "expected"),
-      usd: { low: 0, expected: 0, high: 0 },
-      source: `${table.qc.source} (${table.qc.asOf})`,
-      nodes: [],
-    };
-    g.qty.low += qty.low;
-    g.qty.expected += qty.expected;
-    g.qty.high += qty.high;
-    g.usd.low += qty.low * qcCallUsd(table, qcModel, refImages, "low");
-    g.usd.expected += qty.expected * qcCallUsd(table, qcModel, refImages, "expected");
-    g.usd.high += qty.high * qcCallUsd(table, qcModel, refImages, "high");
-    groups.set(key, g);
+    qcCalls(`Vision QC calls (${refImages ? `keyframe + ${refImages} ref${refImages > 1 ? "s" : ""}` : "keyframe only"})`, refImages, { low: 1, expected: 1 + exp, high: 1 + cap });
   }
 
   for (const call of opts.llm ?? []) {
@@ -490,7 +540,7 @@ export function estimateRunCost(input: RunCostInput, opts: EstimateOptions = {})
       usd: { low: round(usd.low), expected: round(usd.expected), high: round(usd.high) },
     };
   });
-  const order: CostLineKind[] = ["cast", "keyframe", "end_keyframe", "reroll", "video", "qc", "llm", "tts"];
+  const order: CostLineKind[] = ["cast", "keyframe", "end_keyframe", "reroll", "video", "clip_regen", "clip_retry", "qc", "llm", "tts"];
   lines.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
   const totals = lines.reduce((t, l) => ({ low: t.low + l.usd.low, expected: t.expected + l.usd.expected, high: t.high + l.usd.high }), { low: 0, expected: 0, high: 0 });
   return {

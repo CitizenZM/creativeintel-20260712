@@ -93,15 +93,52 @@ export async function startAutopilot(input: AutopilotInput, store: AutopilotStor
 
 type Result = { ok: true; record: AutopilotRecord } | { ok: false; status: number; error: string };
 
-/** Owner approval of a USD budget. Allowed while waiting at a gate, or ahead of it (before render starts). */
+/** Optimistic writes retry this often before giving up (the approval) or writing anyway (a tick). */
+const CAS_TRIES = 5;
+
+/**
+ * The owner's fields — approvedBudgetUsd and the "approved" log entries — from the stored record onto
+ * a tick's state. A tick works on its own copy; an approval that landed meanwhile must win over it.
+ */
+export function withOwnerFields(state: AutopilotState, stored: AutopilotState): AutopilotState {
+  const own = state.log ?? [];
+  const key = (e: AutopilotLogEntry) => `${e.at}|${e.event}|${e.note ?? ""}`;
+  const seen = new Set(own.map(key));
+  const approvals = (stored.log ?? []).filter((e) => e.event === "approved" && !seen.has(key(e)));
+  const log = approvals.length ? [...own, ...approvals].sort((a, b) => a.at.localeCompare(b.at)).slice(-LOG_LIMIT) : own;
+  return { ...state, approvedBudgetUsd: stored.approvedBudgetUsd ?? null, log };
+}
+
+/**
+ * Owner approval of a USD budget. Allowed while waiting at a gate, or ahead of it (before render starts).
+ * Written optimistically (on the record's updatedAt), so it never rolls back progress a running tick
+ * saved meanwhile; the tick in turn never overwrites it (withOwnerFields).
+ */
 export async function approveAutopilot(id: string, approvedBudgetUsd: number, store: AutopilotStore, now = Date.now()): Promise<Result> {
   if (!(approvedBudgetUsd >= 0) || !Number.isFinite(approvedBudgetUsd)) return { ok: false, status: 400, error: "approvedBudgetUsd must be a number ≥ 0" };
-  const rec = await store.get(id);
-  if (!rec) return { ok: false, status: 404, error: "Autopilot not found" };
-  const beforeRender = rec.status === "running" && stepIndex(rec.step) < stepIndex("render");
-  if (rec.status !== "awaiting_approval" && !beforeRender) return { ok: false, status: 409, error: `Nothing to approve: the autopilot is ${rec.status} at ${rec.step}` };
-  const state = withLog({ ...rec.state, approvedBudgetUsd, awaiting: null }, { step: rec.step, event: "approved", note: `owner approved ${money(approvedBudgetUsd)}` }, now);
-  return { ok: true, record: await store.save(id, { status: "running", state, error: null }) };
+  for (let i = 0; i < CAS_TRIES; i++) {
+    const rec = await store.get(id);
+    if (!rec) return { ok: false, status: 404, error: "Autopilot not found" };
+    const beforeRender = rec.status === "running" && stepIndex(rec.step) < stepIndex("render");
+    if (rec.status !== "awaiting_approval" && !beforeRender) return { ok: false, status: 409, error: `Nothing to approve: the autopilot is ${rec.status} at ${rec.step}` };
+    const state = withLog({ ...rec.state, approvedBudgetUsd, awaiting: null }, { step: rec.step, event: "approved", note: `owner approved ${money(approvedBudgetUsd)}` }, now);
+    const saved = await store.saveIf(id, { status: "running", state, error: null }, rec.updatedAt);
+    if (saved) return { ok: true, record: saved };
+  }
+  return { ok: false, status: 409, error: "The autopilot kept changing while approving — try again" };
+}
+
+/** A tick's write: the owner's fields from the stored record win (optimistic, retried; written anyway at the end). */
+async function tickSave(store: AutopilotStore, id: string, patch: AutopilotPatch): Promise<AutopilotRecord> {
+  for (let i = 0; i < CAS_TRIES; i++) {
+    const stored = await store.get(id);
+    if (!stored) break;
+    const p = patch.state ? { ...patch, state: withOwnerFields(patch.state, stored.state) } : patch;
+    const saved = await store.saveIf(id, p, stored.updatedAt);
+    if (saved) return saved;
+  }
+  const stored = await store.get(id);
+  return store.save(id, patch.state && stored ? { ...patch, state: withOwnerFields(patch.state, stored.state) } : patch);
 }
 
 /** Re-open a failed autopilot at the step that failed, with that step's attempts reset. */
@@ -134,6 +171,12 @@ export async function tickAutopilot(id: string, deps: TickDeps): Promise<Autopil
     while (rec.status === "running" && rec.step !== "done") {
       if (deadline - now() < minStep) break;
       const step = rec.step as AutopilotStepName;
+      // The budget gate and the approve step read the owner's budget: take it from the store, not this tick's copy.
+      if (step === "await_budget" || step === "approve") {
+        const stored = await store.get(id);
+        if (!stored || stored.status !== "running") break;
+        rec = { ...rec, state: withOwnerFields(rec.state, stored.state) };
+      }
       const fn: StepFn = step === "await_budget" ? (deps.steps.await_budget ?? (async (ctx) => budgetGate(ctx.state))) : deps.steps[step];
       let state: AutopilotState = rec.state;
       const ctx: StepContext = {
@@ -143,9 +186,9 @@ export async function tickAutopilot(id: string, deps: TickDeps): Promise<Autopil
         deadline,
         now,
         save: async (patch) => {
-          state = { ...state, ...patch };
+          rec = await tickSave(store, id, { state: { ...state, ...patch } });
+          state = rec.state;
           ctx.state = state;
-          rec = await store.save(id, { state });
         },
       };
 
@@ -159,7 +202,7 @@ export async function tickAutopilot(id: string, deps: TickDeps): Promise<Autopil
         const msg = errText(err);
         const next = withLog({ ...state, attempts }, { step, event: "error", note: `${fatal ? "fatal: " : `attempt ${attempts[step]}/${maxAttempts}: `}${msg}` }, now());
         // A failing step is retried on the next tick (not in a tight loop within this one).
-        rec = await store.save(id, { state: next, error: msg, ...(failed ? { status: "failed" as const } : {}) });
+        rec = await tickSave(store, id, { state: next, error: msg, ...(failed ? { status: "failed" as const } : {}) });
         break;
       }
 
@@ -170,16 +213,22 @@ export async function tickAutopilot(id: string, deps: TickDeps): Promise<Autopil
         const to = nextStep(step);
         if (to === "render" && !next.renderStartedAt) next.renderStartedAt = new Date(now()).toISOString();
         next = withLog(next, { step, event: "done", note: out.note }, now());
-        rec = await store.save(id, { ...patch, state: next, step: to, error: null, ...(to === "done" ? { status: "completed" as const } : {}) });
+        rec = await tickSave(store, id, { ...patch, state: next, step: to, error: null, ...(to === "done" ? { status: "completed" as const } : {}) });
         continue;
       }
       if (out.kind === "wait") {
         next = withLog(next, { step, event: "wait", note: out.note }, now());
-        rec = await store.save(id, { ...patch, state: next, error: null });
+        rec = await tickSave(store, id, { ...patch, state: next, error: null });
         break;
       }
+      // An approval that landed while the gate decided on the old budget: decide again with it.
+      const stored = await store.get(id);
+      if (stored && (stored.state.approvedBudgetUsd ?? null) !== (state.approvedBudgetUsd ?? null)) {
+        rec = { ...rec, state: withOwnerFields({ ...state, ...(out.state ?? {}) }, stored.state) };
+        continue;
+      }
       next = withLog({ ...next, awaiting: out.awaiting }, { step, event: "await_approval", note: out.note ?? out.awaiting.reason }, now());
-      rec = await store.save(id, { ...patch, state: next, status: "awaiting_approval", error: null });
+      rec = await tickSave(store, id, { ...patch, state: next, status: "awaiting_approval", error: null });
       break;
     }
   } finally {
@@ -260,6 +309,11 @@ export class MemoryAutopilotStore implements AutopilotStore {
     if (!r) throw new Error(`Autopilot ${id} not found`);
     Object.assign(r, JSON.parse(JSON.stringify(patch)), { updatedAt: this.stamp() });
     return this.copy(r);
+  }
+  async saveIf(id: string, patch: AutopilotPatch, updatedAt: Date) {
+    const r = this.rows.get(id);
+    if (!r || r.updatedAt.getTime() !== updatedAt.getTime()) return null;
+    return this.save(id, patch);
   }
   async claim(id: string, until: Date, now: Date) {
     const r = this.rows.get(id);

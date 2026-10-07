@@ -118,6 +118,8 @@ export interface AutopilotStore {
   create(data: { projectId: string | null; input: AutopilotInput; state: AutopilotState }): Promise<AutopilotRecord>;
   get(id: string): Promise<AutopilotRecord | null>;
   save(id: string, patch: AutopilotPatch): Promise<AutopilotRecord>;
+  /** save only if the record is still at `updatedAt` (optimistic write); null when it changed meanwhile. */
+  saveIf(id: string, patch: AutopilotPatch, updatedAt: Date): Promise<AutopilotRecord | null>;
   /** Take the tick lease (one tick per record at a time); false when another tick holds it. */
   claim(id: string, until: Date, now: Date): Promise<boolean>;
   release(id: string): Promise<void>;

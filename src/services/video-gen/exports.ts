@@ -40,10 +40,10 @@ export interface ExportEntry {
 
 type Qc = Record<string, unknown> & { exports?: ExportEntry[]; exportsPending?: Record<string, string> };
 
+/** Optimistic qcReport write (qc-report.patchQcReport): other writers' keys are never lost. */
 async function patchQc(runId: string, fn: (qc: Qc) => Qc) {
-  const run = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true } });
-  const qc = (run?.qcReport && typeof run.qcReport === "object" ? run.qcReport : {}) as Qc;
-  await prisma.libtvRun.update({ where: { id: runId }, data: { qcReport: fn(qc) as never } });
+  const { patchQcReport } = await import("./qc-report");
+  await patchQcReport<Qc>(runId, fn);
 }
 
 export async function renderExportForRun(runId: string, format: ExportFormat): Promise<ExportEntry> {

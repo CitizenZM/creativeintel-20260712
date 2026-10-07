@@ -63,14 +63,29 @@ function orderJobs<T extends { kind: string; shotIndex: number; nodeName: string
 
 // ─── Approval ────────────────────────────────────────────────────────────────
 
-export async function approveRun(runId: string, creditCap?: number | null) {
+/**
+ * `capBudgetUsd` (a paid server run's creditCap in USD — ops/approval-budget.ts) becomes the run's
+ * approvedBudgetUsd, the number the spend guard enforces; an existing lower budget is kept. The
+ * write is conditional on the budget read, so a concurrent set-budget is never overwritten.
+ */
+export async function approveRun(runId: string, creditCap?: number | null, opts: { capBudgetUsd?: number | null } = {}) {
+  let budgetWhere: { approvedBudgetUsd?: number | null } = {};
+  let budgetData: { approvedBudgetUsd?: number } = {};
+  if (opts.capBudgetUsd != null) {
+    const cur = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { approvedBudgetUsd: true } });
+    if (!cur) return null;
+    const { minBudgetUsd } = await import("@/services/ops/approval-budget");
+    budgetWhere = { approvedBudgetUsd: cur.approvedBudgetUsd ?? null };
+    budgetData = { approvedBudgetUsd: minBudgetUsd(cur.approvedBudgetUsd, opts.capBudgetUsd) };
+  }
   const { count } = await prisma.libtvRun.updateMany({
-    where: { id: runId, status: { in: ["draft", "awaiting_approval"] } },
+    where: { id: runId, status: { in: ["draft", "awaiting_approval"] }, ...budgetWhere },
     data: {
       status: "approved",
       approvedAt: new Date(),
       creditCap: creditCap ?? undefined,
       error: null,
+      ...budgetData,
     },
   });
   if (count !== 1) return null;
@@ -405,6 +420,59 @@ export async function jobDone(input: JobDoneInput) {
       completedAt: new Date(),
     },
   });
+}
+
+/**
+ * What a conditional transition re-checks: the job is still in this state (e.g. `running` on the same
+ * task id, at the version the caller claimed it). Overlapping ticks can then never both finish a job.
+ */
+export interface JobGuard {
+  status: string;
+  nodeId?: string | null;
+  updatedAt?: Date;
+}
+
+const guardWhere = (jobId: string, g: JobGuard) => ({
+  id: jobId,
+  status: g.status,
+  ...(g.nodeId !== undefined ? { nodeId: g.nodeId } : {}),
+  ...(g.updatedAt ? { updatedAt: g.updatedAt } : {}),
+});
+
+/** jobDone only while the job still matches `guard`; `settings` replaces the job's settings. False = another tick got there first. */
+export async function jobDoneIf(input: JobDoneInput & { settings?: Record<string, unknown> }, guard: JobGuard): Promise<boolean> {
+  const { count } = await prisma.libtvJob.updateMany({
+    where: guardWhere(input.jobId, guard),
+    data: {
+      status: input.skipped ? "skipped" : "completed",
+      nodeId: input.nodeId ?? undefined,
+      resultUrl: input.resultUrl ?? undefined,
+      remoteUrl: input.remoteUrl ?? undefined,
+      localPath: input.localPath ?? undefined,
+      creditsSpent: input.creditsSpent ?? undefined,
+      ...(input.settings ? { settings: input.settings as never } : {}),
+      error: null,
+      completedAt: new Date(),
+    },
+  });
+  return count === 1;
+}
+
+/** jobFailed only while the job still matches `guard`. False = another tick got there first. */
+export async function jobFailedIf(jobId: string, error: string, guard: JobGuard, settings?: Record<string, unknown>): Promise<boolean> {
+  const job = await prisma.libtvJob.findUnique({ where: { id: jobId }, select: { attempts: true } });
+  if (!job) return false;
+  const terminal = job.attempts >= MAX_JOB_ATTEMPTS;
+  const { count } = await prisma.libtvJob.updateMany({
+    where: guardWhere(jobId, guard),
+    data: {
+      status: terminal ? "failed" : "queued",
+      error: error.slice(0, 2000),
+      completedAt: terminal ? new Date() : null,
+      ...(settings ? { settings: settings as never } : {}),
+    },
+  });
+  return count === 1;
 }
 
 export async function jobFailed(jobId: string, error: string) {

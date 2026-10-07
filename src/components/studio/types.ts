@@ -55,13 +55,16 @@ export interface LibtvRunView {
     checks: { key: string; label: string; value: number | null; target: string; pass: boolean }[];
     /** A/B hook variants rendered from the same clips. */
     variants?: { hookStyle: string; hookText: string | null; masterUrl: string; previewUrl: string | null; passed: number; total: number; adName?: string }[];
-    /** AI director sign-off: score, per-shot issues, shots worth re-rendering. */
-    director?: {
-      score: number;
-      summary: string;
-      shots: { frameNumber: number; ok: boolean; issues: string[]; rerender: boolean }[];
-      shotIndexes: number[];
-    };
+    /** AI director sign-off: score, per-shot issues, shots worth re-rendering — or skipped (refused / failed). */
+    director?:
+      | {
+          skipped?: undefined;
+          score: number;
+          summary: string;
+          shots: { frameNumber: number; ok: boolean; issues: string[]; rerender: boolean }[];
+          shotIndexes: number[];
+        }
+      | { skipped: true; reason: string; at?: string };
     /** The master's hook style (q / c / p). */
     hookStyle?: string;
     /** Hook styles rendering right now (style → ISO start time). */

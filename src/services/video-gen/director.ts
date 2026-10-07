@@ -111,8 +111,7 @@ export async function reviewRun(runId: string): Promise<DirectorReview> {
 /** Review a run and keep the verdict on its QC report. */
 export async function reviewAndStore(runId: string): Promise<DirectorReview> {
   const review = await reviewRun(runId);
-  const fresh = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true } });
-  const qc = (fresh?.qcReport && typeof fresh.qcReport === "object" ? fresh.qcReport : {}) as Record<string, unknown>;
-  await prisma.libtvRun.update({ where: { id: runId }, data: { qcReport: { ...qc, director: review } as never } });
+  const { patchQcReport } = await import("./qc-report");
+  await patchQcReport(runId, (qc) => ({ ...qc, director: review }));
   return review;
 }
