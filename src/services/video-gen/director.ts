@@ -97,7 +97,10 @@ export async function reviewRun(runId: string): Promise<DirectorReview> {
       parts.push({ type: "image_url", url: `data:image/jpeg;base64,${(await readFile(jpg)).toString("base64")}` });
     }
     const { analyzeWithClaude } = await import("@/services/ai/claude-client");
-    const review = await analyzeWithClaude({ systemPrompt: DIRECTOR_SYSTEM, userPrompt: parts, responseSchema: reviewSchema, maxTokens: 1500 });
+    const { guardLlm } = await import("@/services/ops/spend");
+    const review = await guardLlm({ projectId: runRow.projectId, runId, kind: "vision_qc" }, { inTokens: 600 + picks.length * 330, outTokens: 1500 }, () =>
+      analyzeWithClaude({ systemPrompt: DIRECTOR_SYSTEM, userPrompt: parts, responseSchema: reviewSchema, maxTokens: 1500 })
+    );
     const flagged = review.shots.filter((s) => s.rerender).map((s) => s.frameNumber);
     return { ...review, reviewedAt: new Date().toISOString(), shotIndexes: shotIndexesFor(flagged, runRow.jobs) };
   } finally {
