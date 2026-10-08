@@ -1,21 +1,27 @@
 /**
  * GET  ?category= — the structure library (same category first).
  * POST { projectId, teardownId } — save a teardown's structure to the library.
+ * Both are per account (src/services/structures.ts → structureWhereForTenant).
  */
 import { NextResponse } from "next/server";
 import { listStructures, saveStructureFromTeardown } from "@/services/structures";
+import { viewerCanUseProject, viewerTenant } from "@/services/workspace";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   const category = new URL(req.url).searchParams.get("category");
-  return NextResponse.json({ structures: await listStructures(category) });
+  return NextResponse.json({ structures: await listStructures(category, await viewerTenant()) });
 }
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { projectId?: unknown; teardownId?: unknown };
   if (typeof body.projectId !== "string" || typeof body.teardownId !== "string") {
     return NextResponse.json({ error: "projectId and teardownId are required" }, { status: 400 });
+  }
+  // projectId comes from the body, so the proxy never checked it.
+  if (!(await viewerCanUseProject(body.projectId))) {
+    return NextResponse.json({ error: "Teardown not found" }, { status: 400 });
   }
   try {
     return NextResponse.json({ structure: await saveStructureFromTeardown(body.projectId, body.teardownId) }, { status: 201 });

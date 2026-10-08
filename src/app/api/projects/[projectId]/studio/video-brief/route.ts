@@ -49,7 +49,7 @@ export async function POST(
     // Gather ALL context from the project
     const [project, script, storyboard, audience, deepAnalysis] = await Promise.all([
       prisma.project.findUnique({ where: { id: projectId }, include: { brand: true } }),
-      prisma.script.findUnique({ where: { id: scriptId } }),
+      prisma.script.findFirst({ where: { id: scriptId, projectId } }),
       findActiveStoryboard(projectId, scriptId),
       prisma.audienceProfile.findUnique({ where: { projectId } }),
       prisma.deepAnalysis.findUnique({ where: { projectId } }),

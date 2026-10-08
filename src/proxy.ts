@@ -2,7 +2,9 @@ import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { selectAuthMode } from "@/lib/auth/mode";
+import { decideAccess, deniedResponse } from "@/lib/auth/gate";
 import { canonicalRedirect, classifyPath, isApiPath, rewriteSluggedPath } from "@/lib/auth/paths";
+import { getPrincipal, getProjectTenant } from "@/services/access";
 
 /**
  * The gate in front of every route (Next 16 renamed `middleware` to `proxy`).
@@ -10,7 +12,12 @@ import { canonicalRedirect, classifyPath, isApiPath, rewriteSluggedPath } from "
  *
  * - clerk     — Clerk sessions. Every page and /api route needs a signed-in user except the
  *               machine routes, /sign-in, /sign-up and /api/health. Pages redirect to /sign-in,
- *               API calls get a 401. The Cloudflare Access check is skipped entirely.
+ *               API calls get a 401. Sign-up is open, so data is isolated per account
+ *               (src/lib/auth/gate.ts): an owner (master admin) reaches everything; a member only
+ *               reaches projects in workspaces they own and never the admin areas, and a blocked
+ *               account is sent to /blocked. The proxy runs on the Node.js runtime (Next 16
+ *               default), so the lookups read the DB via Prisma with short caches. The Cloudflare
+ *               Access check is skipped entirely.
  * - cf-access — creative.xark.io behind Cloudflare Access. The same deployment is also reachable
  *               on its *.vercel.app aliases, which skip Access, so every request must carry a valid
  *               Access JWT whatever host it arrived on.
@@ -45,12 +52,14 @@ const clerkGate =
         async (auth, request) => {
           if (classifyPath(request.nextUrl.pathname) === "protected") {
             const { userId, redirectToSignIn } = await auth();
-            if (!userId) {
-              if (isApiPath(request.nextUrl.pathname)) {
-                return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-              }
-              return redirectToSignIn({ returnBackUrl: request.url });
-            }
+            const decision = await decideAccess({
+              pathname: request.nextUrl.pathname,
+              userId,
+              principalOf: getPrincipal,
+              projectTenant: getProjectTenant,
+            });
+            if (decision === "sign-in") return redirectToSignIn({ returnBackUrl: request.url });
+            if (decision !== "allow") return deniedResponse(decision, request);
           }
           return continueRequest(request);
         },

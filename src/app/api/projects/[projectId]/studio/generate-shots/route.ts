@@ -99,7 +99,7 @@ async function handlePost(
 
   const [project, script, campaignSel, sellingPoints] = await Promise.all([
     prisma.project.findUnique({ where: { id: projectId }, include: { brand: true } }),
-    prisma.script.findUnique({ where: { id: scriptId } }),
+    prisma.script.findFirst({ where: { id: scriptId, projectId } }),
     prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null),
     prisma.sellingPoint.findMany({
       where: { projectId },

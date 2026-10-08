@@ -7,6 +7,13 @@ const db = vi.hoisted(() => ({
   adStructure: { findMany: vi.fn() },
 }));
 vi.mock("@/lib/db", () => ({ prisma: db }));
+// Account scoping (src/services/tenancy.ts): every project here is in the admin's tenant.
+const TENANT_WHERE = { tenant: "admin" };
+vi.mock("@/services/tenancy", () => ({
+  tenantOfProject: vi.fn(async () => null),
+  tenantProjectWhere: vi.fn(() => TENANT_WHERE),
+}));
+vi.mock("@/services/structures", () => ({ structureWhereForTenant: vi.fn(async () => ({ structure: "admin" })) }));
 
 import { operatorActionSchema } from "@/services/operator";
 import { metaAds, NOW, structure, teardownAssets, teardowns, tiktokAds, vagueAds } from "./__fixtures__/trend-ads";
@@ -170,6 +177,9 @@ describe("trendBias", () => {
     expect(b.H08).toBeGreaterThan(0);
     expect(b.H16).toBeLessThan(0);
     expect(db.contentAsset.findMany.mock.calls[0][0].where.projectId.in).toEqual(["proj_tv"]);
+    // Only this account's projects and structures feed the trends.
+    expect(db.project.findMany.mock.calls[0][0].where.AND).toContainEqual(TENANT_WHERE);
+    expect(db.adStructure.findMany.mock.calls[0][0].where).toEqual({ structure: "admin" });
   });
 
   it("returns {} when the database fails", async () => {

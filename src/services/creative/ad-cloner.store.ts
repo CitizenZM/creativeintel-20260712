@@ -4,6 +4,7 @@
  * merge it into Project.campaignPlan under "Cloned from <ref>". Used by the operator action `clone-ad`.
  */
 import { prisma } from "@/lib/db";
+import { findStructureForProject } from "@/services/structures";
 import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
 import type { CampaignPlan } from "./campaign-plan.types";
 import { CampaignPlanError, strictByDefault } from "./campaign-plan.store";
@@ -38,7 +39,7 @@ export async function cloneAdIntoProject(projectId: string, req: CloneRequest): 
     });
     if (!reference) throw new CampaignPlanError("Teardown not found in this project", 404);
   } else {
-    reference = await prisma.adStructure.findUnique({ where: { id: req.structureId! } });
+    reference = await findStructureForProject(projectId, req.structureId!);
     if (!reference) throw new CampaignPlanError("Structure not found", 404);
   }
   const existing = (project.campaignPlan as CampaignPlan | null) ?? null;

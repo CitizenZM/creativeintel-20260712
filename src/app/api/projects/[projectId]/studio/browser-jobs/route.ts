@@ -151,7 +151,7 @@ async function handleFromScript(projectId: string, body: FromScriptBody) {
 
   const [project, script, campaignSel, sellingPoints, storyboard] = await Promise.all([
     prisma.project.findUnique({ where: { id: projectId }, include: { brand: true } }),
-    prisma.script.findUnique({ where: { id: scriptId } }),
+    prisma.script.findFirst({ where: { id: scriptId, projectId } }),
     prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null),
     prisma.sellingPoint.findMany({
       where: { projectId },
@@ -299,12 +299,16 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    await params; // ensure route shape validated even though unused directly
+    const { projectId } = await params;
     const { searchParams } = new URL(request.url);
     const scriptId = searchParams.get("scriptId");
 
     if (!scriptId) {
       return NextResponse.json({ error: "scriptId query param required" }, { status: 400 });
+    }
+    // Only this project's scripts — the id comes from the query string, which the proxy doesn't check.
+    if (!(await prisma.script.findFirst({ where: { id: scriptId, projectId }, select: { id: true } }))) {
+      return NextResponse.json({ error: "Script not found" }, { status: 404 });
     }
 
     const { jobs, statusCounts } = await getJobsWithStatusCounts(scriptId);

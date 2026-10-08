@@ -55,25 +55,36 @@ model Workspace {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
+  // The account that owns this workspace's data. Null = the master admin's (legacy / default
+  // workspace) — members never see an ownerless workspace.
+  ownerId   String?
+  owner     AppUser? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   brands      BrandProfile[]
   competitors CompetitorProfile[]
   projects    Project[]
+
+  @@index([ownerId])
 }
 
 /// A person who signs in through Clerk (src/services/app-user.ts). Upserted on their first
-/// authenticated page load; role "owner" comes from OWNER_EMAILS, everyone else is a "member".
+/// authenticated page load; role "owner" (master admin) comes from OWNER_EMAILS, everyone else is a
+/// "member". Sign-up is open: a member gets their own empty Workspace on first sign-in and can only
+/// ever reach workspaces they own (src/proxy.ts → src/lib/auth/gate.ts, src/services/workspace.ts).
 model AppUser {
-  id          String    @id @default(cuid())
-  clerkUserId String    @unique
+  id          String      @id @default(cuid())
+  clerkUserId String      @unique
   email       String
   name        String?
-  role        String    @default("member") // owner | member
-  createdAt   DateTime  @default(now())
-  lastSeenAt  DateTime  @default(now())
+  role        String      @default("member") // owner | member
+  // active | blocked — an owner can block an account from /settings/users (pages → /blocked, API → 403).
+  status      String      @default("active")
+  createdAt   DateTime    @default(now())
+  lastSeenAt  DateTime    @default(now())
   projects    Project[]
+  workspaces  Workspace[]
 
   @@index([email])
 }

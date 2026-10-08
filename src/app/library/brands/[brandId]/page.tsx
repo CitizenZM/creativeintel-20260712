@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { findAccessibleWorkspace } from "@/services/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,8 @@ export default async function BrandProfilePage({
       workspace: true,
     },
   });
-  if (!brand) notFound();
+  // Brand profiles belong to a workspace; a member may only open their own.
+  if (!brand || !(await findAccessibleWorkspace(brand.workspaceId))) notFound();
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 p-6">

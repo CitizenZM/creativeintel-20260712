@@ -41,6 +41,29 @@ export function classifyPath(pathname: string): PathKind {
  */
 const SLUGGED_PROJECT_PATH = /^(\/api)?\/projects\/([a-z0-9][a-z0-9-]*-)?(c[a-z0-9]{20,32})(\/.*)?$/i;
 
+const PROJECT_PATH = /^(?:\/api)?\/projects\/([^/]+)/;
+const CUID_TAIL = /(c[a-z0-9]{20,32})$/i;
+/** Non-id segments directly under /projects (pages such as /projects/new). */
+const PROJECT_PAGES = new Set(["new"]);
+
+/**
+ * The project a /projects/<id>/… or /api/projects/<id>/… request is about (slug stripped), or null
+ * for paths that aren't about one project (/projects, /api/projects, /projects/new). A segment that
+ * isn't a recognisable id is returned as-is, so the tenancy check fails closed on it.
+ */
+export function projectIdFromPath(pathname: string): string | null {
+  const match = pathname.match(PROJECT_PATH);
+  if (!match) return null;
+  let segment: string;
+  try {
+    segment = decodeURIComponent(match[1]);
+  } catch {
+    segment = match[1];
+  }
+  if (!pathname.startsWith("/api/") && PROJECT_PAGES.has(segment)) return null;
+  return segment.match(CUID_TAIL)?.[1] ?? segment;
+}
+
 /** The bare-id pathname for a slugged project path, or null when no rewrite is needed. */
 export function rewriteSluggedPath(pathname: string): string | null {
   const match = pathname.match(SLUGGED_PROJECT_PATH);
