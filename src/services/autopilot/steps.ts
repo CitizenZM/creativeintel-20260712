@@ -152,14 +152,14 @@ const plan = async (ctx: StepContext): Promise<StepOutcome> => {
   const { input } = ctx;
   const current = await prisma.project.findUnique({ where: { id: projectId }, select: { campaignPlan: true } });
   const existing = current?.campaignPlan as { platforms?: { platform: string }[] } | null;
-  const asked = !!(input.platforms?.length || input.goal || input.promo);
+  const asked = !!(input.platforms?.length || input.goal || input.promo || input.durationSec);
   // A project's curated plan is kept unless this call asks for a different one.
   if (existing?.platforms?.length && !asked) {
     return { kind: "done", state: { plannedPlatforms: existing.platforms.map((p) => p.platform) }, note: "reused the stored campaign plan" };
   }
   const { createCampaignPlan, CampaignPlanError } = await import("@/services/creative/campaign-plan.store");
   try {
-    const made = await guardedStepCall(projectId, { inTokens: 6000, outTokens: 6000 }, () => createCampaignPlan(projectId, { platforms: input.platforms, goal: input.goal, promo: input.promo }));
+    const made = await guardedStepCall(projectId, { inTokens: 6000, outTokens: 6000 }, () => createCampaignPlan(projectId, { platforms: input.platforms, goal: input.goal, promo: input.promo, durationSec: input.durationSec }));
     return { kind: "done", state: { plannedPlatforms: made.platforms.map((p) => p.platform) } };
   } catch (err) {
     if (err instanceof CampaignPlanError && err.status < 500) throw new AutopilotFatalError(err.message);

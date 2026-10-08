@@ -336,3 +336,12 @@ describe("product coverage + music bed on the storyboard", async () => {
     expect(planMusicMood({ plan, productName: "X" })).toBe("holiday");
   });
 });
+
+describe("CTA copy follows the button", () => {
+  it("the CTA frame's on-screen line is the CTA button copy when one is given", () => {
+    const f = scaffoldLockedFrames({ plan, productName: "NXTPAPER 14", ctaButton: "Claim Coupon" });
+    const cta = f.find((x) => x.segment === "CTA")!;
+    expect(cta.textOverlay).toBe("CLAIM COUPON");
+    expect(scaffoldLockedFrames({ plan, productName: "NXTPAPER 14" }).find((x) => x.segment === "CTA")!.textOverlay).toBe("Claim Coupon");
+  });
+});

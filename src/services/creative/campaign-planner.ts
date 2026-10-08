@@ -84,8 +84,13 @@ export function fitSpoken(text: string, maxWords: number): string {
       break;
     }
   }
-  return `${w.slice(0, cut).join(" ").replace(/[,;:—–-]+$/, "")}.`;
+  // A hard cut must not end on a dangling function word ("…that saves your." on a live autopilot hook).
+  let kept = w.slice(0, cut);
+  while (kept.length > 2 && DANGLING.test(kept[kept.length - 1].replace(/[,;:—–-]+$/, ""))) kept = kept.slice(0, -1);
+  return `${kept.join(" ").replace(/[,;:—–-]+$/, "")}.`;
 }
+
+const DANGLING = /^(a|an|the|your|my|our|their|his|her|its|this|that|these|those|to|of|for|with|and|or|but|in|on|at|by|from|as|is|are|was|be|so|than|who|which|while|into|onto|about)$/i;
 
 const PLATFORM_IDS = new Set<string>(PLATFORM_PROFILES.map((p) => p.id));
 export const PLATFORM_LABELS: Record<PlatformId, string> = {

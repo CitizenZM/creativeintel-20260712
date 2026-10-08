@@ -273,3 +273,11 @@ describe("planCampaign performance bias", () => {
     expect(plain.notes.join(" ")).not.toMatch(/performance bias/);
   });
 });
+
+describe("fitSpoken — no dangling function word on a hard cut", () => {
+  it("drops a trailing 'your' / 'the' when the budget cuts mid-phrase", async () => {
+    const { fitSpoken } = await import("./campaign-planner");
+    expect(fitSpoken("Want a tablet that saves your eyes every single night", 6)).toBe("Want a tablet that saves.");
+    expect(fitSpoken("Read the whole book in the sun", 5)).toBe("Read the whole book.");
+  });
+});
