@@ -82,3 +82,22 @@ describe("separateCaptions", () => {
     expect(out[1]).toBe(0.603);
   });
 });
+
+describe("caption clearance under a headline", () => {
+  it("keeps ~3% of the frame clear between a headline and the caption below it", async () => {
+    const { separateCaptions } = await import("./safe-layout");
+    const canvas = { w: 1080, h: 1920 };
+    const box = { left: 64, right: 940, top: 288, bottom: 1220 } as never;
+    const [, cap] = separateCaptions(
+      [
+        { role: "claim", y: 0.5, h: 160, startSec: 0, endSec: 2 },
+        { role: "caption", y: 0.55, h: 120, startSec: 0, endSec: 2 },
+      ],
+      canvas,
+      box
+    );
+    const headlineBottom = 0.5 * 1920 + 80;
+    const captionTop = cap * 1920 - 60;
+    expect(captionTop - headlineBottom).toBeGreaterThanOrEqual(Math.round(1920 * 0.03) - 1);
+  });
+});
