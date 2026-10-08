@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
-import { ACTIVE_WORKSPACE_COOKIE } from "@/services/workspace";
+import { ACTIVE_WORKSPACE_COOKIE, findAccessibleWorkspace } from "@/services/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +12,8 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
-  const ws = await prisma.workspace.findUnique({
-    where: { id: parsed.data.id },
-    select: { id: true },
-  });
+  // A member may only switch to a workspace they own; anything else reads as missing.
+  const ws = await findAccessibleWorkspace(parsed.data.id);
   if (!ws) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const res = NextResponse.json({ ok: true, activeId: ws.id });

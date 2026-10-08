@@ -18,6 +18,8 @@
  */
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { structureWhereForTenant } from "@/services/structures";
+import { tenantOfProject, tenantProjectWhere } from "@/services/tenancy";
 import { classifyHookRules, HOOK_TYPE_MAP, SURE } from "@/services/creative/ad-cloner";
 import { HOOKS, hookById } from "@/services/creative/library";
 import { classifyProduct, SP_CATEGORIES, TO_CREATIVE_CATEGORY, type SpCategory } from "@/services/creative/product-brief";
@@ -531,16 +533,20 @@ const CA_SELECT = {
 /**
  * The category's competitor / category ads: every project in the category (Project.category text or
  * the sp-1 brief's category) plus `projectId` itself — research ad candidates (ContentAsset, not
- * brand-owned, not excluded), their teardowns, and saved structures of the category.
+ * brand-owned, not excluded), their teardowns, and saved structures of the category. Per account: only
+ * projects and structures in `projectId`'s tenant (src/services/tenancy.ts) — without a project, the
+ * master admin's — so one account's research never feeds another account's plans or reports.
  */
 export async function loadTrendAds(opts: { projectId?: string | null; category?: CategoryId | null }): Promise<TrendAdRecord[]> {
   const category = opts.category ?? null;
   const ids = new Set<string>(opts.projectId ? [opts.projectId] : []);
+  const tenant = opts.projectId ? ((await tenantOfProject(opts.projectId)) ?? null) : null;
+  const inTenant = tenantProjectWhere(tenant);
   if (category) {
     const sp = spCategoriesOf(category);
     const [all, briefed] = await Promise.all([
-      prisma.project.findMany({ where: { archivedAt: null }, select: { id: true, category: true }, take: 1000 }),
-      sp.length ? prisma.project.findMany({ where: { archivedAt: null, OR: sp.map((c) => ({ productBrief: { path: ["category"], equals: c } })) }, select: { id: true }, take: 1000 }) : Promise.resolve([]),
+      prisma.project.findMany({ where: { AND: [{ archivedAt: null }, inTenant] }, select: { id: true, category: true }, take: 1000 }),
+      sp.length ? prisma.project.findMany({ where: { AND: [{ archivedAt: null }, inTenant, { OR: sp.map((c) => ({ productBrief: { path: ["category"], equals: c } })) }] }, select: { id: true }, take: 1000 }) : Promise.resolve([]),
     ]);
     for (const p of all ?? []) if (categoryKey(p.category) === category) ids.add(p.id);
     for (const p of briefed ?? []) ids.add(p.id);
@@ -559,7 +565,7 @@ export async function loadTrendAds(opts: { projectId?: string | null; category?:
       include: { competitor: { select: { name: true } }, contentAsset: { select: CA_SELECT } },
       take: 1000,
     }),
-    category ? prisma.adStructure.findMany({ orderBy: { createdAt: "desc" }, take: 300 }) : Promise.resolve([]),
+    category ? structureWhereForTenant(tenant).then((where) => prisma.adStructure.findMany({ where, orderBy: { createdAt: "desc" }, take: 300 })) : Promise.resolve([]),
   ]);
   return toTrendRecords(
     {

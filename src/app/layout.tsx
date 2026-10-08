@@ -44,7 +44,12 @@ export default async function RootLayout({
 
   const shell = (
     <TooltipProvider>
-      <AppChrome account={clerk ? <UserMenu isOwner={appUser?.role === "owner"} /> : null}>{children}</AppChrome>
+      <AppChrome
+        account={clerk ? <UserMenu isOwner={appUser?.role === "owner"} /> : null}
+        isAdmin={!clerk || appUser?.role === "owner"}
+      >
+        {children}
+      </AppChrome>
     </TooltipProvider>
   );
 

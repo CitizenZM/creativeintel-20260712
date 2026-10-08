@@ -38,6 +38,8 @@ export function VisionModelPicker({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The vision model is a platform-wide setting: members get a 403 and simply don't see the picker.
+  const [forbidden, setForbidden] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/settings/ai/vision-model", { cache: "no-store" });
@@ -49,6 +51,10 @@ export function VisionModelPicker({
     let alive = true;
     fetch("/api/settings/ai/vision-model", { cache: "no-store" })
       .then(async (res) => {
+        if (res.status === 403) {
+          if (alive) setForbidden(true);
+          return;
+        }
         if (!res.ok) throw new Error(`Could not load the vision models (${res.status})`);
         const data = (await res.json()) as PickerData;
         if (alive) setData(data);
@@ -87,6 +93,7 @@ export function VisionModelPicker({
     }
   }
 
+  if (forbidden) return null;
   if (!data) {
     return error ? <p className={cn("text-[11px] text-muted-foreground", className)}>{error}</p> : null;
   }

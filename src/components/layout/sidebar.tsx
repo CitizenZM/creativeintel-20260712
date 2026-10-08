@@ -14,11 +14,12 @@ const navItems = [
   { href: "/all", label: "Projects", icon: FolderKanban },
   { href: "/projects/new", label: "New project", icon: Plus },
   { href: "/library/brands", label: "Brand library", icon: Library },
-  { href: "/settings/ai", label: "AI engines", icon: Cpu },
-  { href: "/status", label: "System status", icon: Activity },
+  // Platform-wide (admin only — src/lib/auth/gate.ts keeps members out of them too).
+  { href: "/settings/ai", label: "AI engines", icon: Cpu, adminOnly: true },
+  { href: "/status", label: "System status", icon: Activity, adminOnly: true },
 ];
 
-export function Sidebar({ account }: { account?: ReactNode }) {
+export function Sidebar({ account, isAdmin = true }: { account?: ReactNode; isAdmin?: boolean }) {
   const pathname = usePathname();
   const projectMatch = pathname.match(/^\/projects\/([^/]+)/);
   const projectId = projectMatch?.[1] && projectMatch[1] !== "new" ? projectMatch[1] : null;
@@ -41,7 +42,7 @@ export function Sidebar({ account }: { account?: ReactNode }) {
           <p className="px-2 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             Navigation
           </p>
-          {navItems.map((item) => {
+          {navItems.filter((item) => isAdmin || !item.adminOnly).map((item) => {
             const Icon = item.icon;
             const isActive =
               item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(item.href + "/");

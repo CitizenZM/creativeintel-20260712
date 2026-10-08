@@ -8,6 +8,7 @@ import {
   type JobStep,
 } from "@/services/research/job-progress";
 import { getTaskStatusCounts } from "@/services/worker-tasks";
+import { sameTenantProjectIds } from "@/services/tenancy";
 
 const DEFAULT_RESEARCH_SECONDS = 180;
 
@@ -25,7 +26,7 @@ async function estimateResearchEta(
     return Math.max(5, Math.round((elapsed * (100 - job.progress)) / job.progress));
   }
   const recent = await prisma.researchJob.findMany({
-    where: { status: "complete", completedAt: { not: null } },
+    where: { status: "complete", completedAt: { not: null }, projectId: { in: await sameTenantProjectIds(projectId) } },
     orderBy: { completedAt: "desc" },
     take: 10,
     select: { projectId: true, startedAt: true, createdAt: true, completedAt: true },
@@ -48,7 +49,7 @@ export async function GET(
   const jobId = url.searchParams.get("jobId");
 
   const job =
-    (jobId ? await getJob(jobId) : null) ??
+    (jobId ? await getJob(jobId).then((j) => (j?.projectId === projectId ? j : null)) : null) ??
     (await getActiveJobForProject(projectId)) ??
     (await prisma.researchJob.findFirst({
       where: { projectId },

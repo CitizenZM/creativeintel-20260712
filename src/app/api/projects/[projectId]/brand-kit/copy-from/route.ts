@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ensureBrandKit, refreshCompleteness } from "@/services/brand-kit";
+import { viewerCanUseProject } from "@/services/workspace";
 
 export const maxDuration = 30;
 
@@ -24,6 +25,10 @@ export async function POST(
     return NextResponse.json({ error: "sourceProjectId required" }, { status: 400 });
   }
 
+  // The source comes from the body, so the proxy never saw it: it must be one of the caller's projects.
+  if (!(await viewerCanUseProject(sourceProjectId))) {
+    return NextResponse.json({ error: "That project has no Brand Kit" }, { status: 404 });
+  }
   const source = await prisma.brandKit.findUnique({
     where: { projectId: sourceProjectId },
     include: { assets: true },

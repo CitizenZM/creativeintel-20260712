@@ -4,6 +4,7 @@
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { findStructureForProject } from "@/services/structures";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ projectI
   const { projectId } = await params;
   const body = (await req.json().catch(() => ({}))) as { structureId?: unknown };
   const structureId = typeof body.structureId === "string" && body.structureId ? body.structureId : null;
-  if (structureId && !(await prisma.adStructure.findUnique({ where: { id: structureId }, select: { id: true } }))) {
+  if (structureId && !(await findStructureForProject(projectId, structureId))) {
     return NextResponse.json({ error: "Structure not found" }, { status: 404 });
   }
   await prisma.campaignSelection.upsert({

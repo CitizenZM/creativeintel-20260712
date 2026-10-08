@@ -8,9 +8,9 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; jobId: string }> }
 ) {
-  const { jobId } = await params;
+  const { projectId, jobId } = await params;
 
-  const job = await prisma.falVideoJob.findUnique({ where: { id: jobId } });
+  const job = await prisma.falVideoJob.findFirst({ where: { id: jobId, projectId } });
   if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
 
   try {
@@ -32,7 +32,7 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; jobId: string }> }
 ) {
-  const { jobId } = await params;
-  await prisma.falVideoJob.delete({ where: { id: jobId } }).catch(() => {});
+  const { projectId, jobId } = await params;
+  await prisma.falVideoJob.deleteMany({ where: { id: jobId, projectId } }).catch(() => {});
   return NextResponse.json({ ok: true });
 }

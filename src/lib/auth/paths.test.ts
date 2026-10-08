@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalRedirect, classifyPath, isApiPath, rewriteSluggedPath } from "./paths";
+import { canonicalRedirect, classifyPath, isApiPath, projectIdFromPath, rewriteSluggedPath } from "./paths";
 
 describe("classifyPath", () => {
   it.each([
@@ -90,4 +90,23 @@ describe("canonicalRedirect", () => {
     expect(canonicalRedirect("foo.vercel.app", "/", "", "")).toBeNull();
     expect(canonicalRedirect("foo.vercel.app", "/api/projects", "", "creative.xark.io")).toBeNull();
   });
+});
+
+describe("projectIdFromPath", () => {
+  const P = "cabcdefghijklmnopqrstuvw";
+  it.each([
+    [`/projects/${P}`, P],
+    [`/projects/${P}/studio/video`, P],
+    [`/projects/acme-shoes-${P}/insights`, P],
+    [`/api/projects/${P}`, P],
+    [`/api/projects/acme-${P}/artifacts/x/download`, P],
+    ["/api/projects/not-a-cuid/report", "not-a-cuid"],
+    ["/api/projects/new", "new"],
+    ["/projects/new", null],
+    ["/projects", null],
+    ["/projects/", null],
+    ["/api/projects", null],
+    ["/all", null],
+    ["/library/brands/x", null],
+  ])("%s → %s", (p, expected) => expect(projectIdFromPath(p)).toBe(expected));
 });
