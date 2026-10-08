@@ -9,6 +9,7 @@
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { archiveAround, archiveScript } from "@/services/artifacts/archive";
 import { auditScriptText } from "@/lib/script-schema";
 import { auditContext, formatComplianceViolations, loadScriptContext } from "../../_script-context";
 import { LIVE, isSelectionStatus } from "@/services/creative-library";
@@ -117,7 +118,7 @@ export async function PATCH(
     }
   }
 
-  const script = await prisma.script.update({ where: { id: scriptId }, data });
+  const script = await archiveAround("script edit", (o) => archiveScript(scriptId, o), () => prisma.script.update({ where: { id: scriptId }, data }));
   return NextResponse.json({ script, complianceWarnings });
 }
 

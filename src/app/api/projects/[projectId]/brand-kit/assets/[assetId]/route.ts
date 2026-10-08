@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { archiveBeforeReplace, archiveBrandAssets } from "@/services/artifacts/archive";
 import { refreshCompleteness } from "@/services/brand-kit";
 
 export async function DELETE(
@@ -17,6 +18,8 @@ export async function DELETE(
     return NextResponse.json({ error: "Asset not found" }, { status: 404 });
   }
 
+  // Content history keeps the asset after it leaves the kit.
+  await archiveBeforeReplace("brand asset delete", (o) => archiveBrandAssets(projectId, o));
   await prisma.brandAsset.delete({ where: { id: assetId } });
   const completeness = await refreshCompleteness(projectId);
 

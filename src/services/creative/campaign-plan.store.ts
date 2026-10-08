@@ -4,6 +4,7 @@
  * `plan-campaign` and the Studio route /api/projects/[projectId]/campaign-plan.
  */
 import { prisma } from "@/lib/db";
+import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
 import type { CampaignPlan } from "./campaign-plan.types";
 import { DEFAULT_PLAN_PLATFORMS, normalizeOverrides, planCampaign, type LlmFn, type PromoInput } from "./campaign-planner";
 import type { ProductBrief } from "./product-brief";
@@ -62,7 +63,7 @@ export async function createCampaignPlan(projectId: string, req: PlanRequest = {
     llm: req.llm,
     bias: req.bias === undefined ? await loadPlanBias(projectId, brief.category, platforms) : (req.bias ?? undefined),
   });
-  await prisma.project.update({ where: { id: projectId }, data: { campaignPlan: plan as object, campaignPlanAt: new Date() } });
+  await archiveAround("campaign plan", (o) => archiveProjectFields(projectId, ["campaignPlan"], o), () => prisma.project.update({ where: { id: projectId }, data: { campaignPlan: plan as object, campaignPlanAt: new Date() } }));
   return plan;
 }
 

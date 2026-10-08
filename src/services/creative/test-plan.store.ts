@@ -3,6 +3,7 @@
  * testPlanAt. Used by the operator action `test-plan`.
  */
 import { prisma } from "@/lib/db";
+import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
 import type { CampaignPlan } from "./campaign-plan.types";
 import { buildTestPlan, writeTestPlanNarrative, type Baseline, type NarrativeLlm, type TestPlan } from "./test-plan";
 
@@ -36,6 +37,6 @@ export async function createTestPlan(projectId: string, req: TestPlanRequest): P
   const tp = buildTestPlan({ plan, ...req });
   const n = req.narrative === false ? { narrative: undefined, source: undefined } : await writeTestPlanNarrative(tp, req.llm);
   const out: TestPlan = { ...tp, narrative: n.narrative, narrativeSource: n.source };
-  await prisma.project.update({ where: { id: projectId }, data: { testPlan: out as object, testPlanAt: new Date() } });
+  await archiveAround("test plan", (o) => archiveProjectFields(projectId, ["testPlan"], o), () => prisma.project.update({ where: { id: projectId }, data: { testPlan: out as object, testPlanAt: new Date() } }));
   return out;
 }

@@ -15,6 +15,7 @@
  * It NEVER renders or spends — the proposal says so and waits for an explicit approval.
  */
 import { prisma } from "@/lib/db";
+import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
 import { BATCH_DURATIONS, batchAdName, DEFAULT_BATCH_VOICE, planPlatform, type BatchDims } from "@/services/creative/batch-matrix";
 import type { CampaignPlan, HookVariant, PlatformPlan } from "@/services/creative/campaign-plan.types";
 import { normalizePlatform, scaffoldPlatformPlan } from "@/services/creative/campaign-planner";
@@ -418,6 +419,6 @@ export async function planNextRound(projectId: string, opts: PlanNextRoundOption
     trendSlice(category, platform, { projectId, now: opts.now }).catch(() => null),
   ]);
   const proposal = proposeNextRound({ projectId, learning, plan, trends, platform, category, brief, now: opts.now, maxExplore: opts.maxExplore });
-  if (opts.store !== false) await prisma.project.update({ where: { id: projectId }, data: { nextRound: proposal as object, nextRoundAt: new Date() } });
+  if (opts.store !== false) await archiveAround("next round", (o) => archiveProjectFields(projectId, ["nextRound"], o), () => prisma.project.update({ where: { id: projectId }, data: { nextRound: proposal as object, nextRoundAt: new Date() } }));
   return proposal;
 }

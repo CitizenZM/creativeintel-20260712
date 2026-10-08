@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { archiveAround, archiveStoryboard } from "@/services/artifacts/archive";
 import { LIVE, appendFrameHistory, type FrameHistoryEntry } from "@/services/creative-library";
 
 // Grid-owned fields keep their current values on undo — only content reverts.
@@ -48,10 +49,12 @@ export async function POST(
   const nextFrames = frames.map((f) => (f.frameNumber === frameNumber ? snapshot : f));
   const nextHistory = history.filter((_, i) => i !== lastIdx);
 
-  await prisma.storyboard.update({
-    where: { id: storyboardId },
-    data: { frames: nextFrames as never, frameHistory: nextHistory as never },
-  });
+  await archiveAround("storyboard frames", (o) => archiveStoryboard(storyboardId, o), () =>
+    prisma.storyboard.update({
+      where: { id: storyboardId },
+      data: { frames: nextFrames as never, frameHistory: nextHistory as never },
+    })
+  );
   return NextResponse.json({
     ok: true,
     frame: snapshot,
@@ -138,15 +141,17 @@ export async function PATCH(
     ([key, value]) => key !== "imageUrl" && JSON.stringify(previous[key]) !== JSON.stringify(value)
   );
 
-  const updated = await prisma.storyboard.update({
-    where: { id: storyboardId },
-    data: {
-      frames: frames as never,
-      ...(changed
-        ? { frameHistory: appendFrameHistory(storyboard.frameHistory, frameNumber, previous) as never }
-        : {}),
-    },
-  });
+  const updated = await archiveAround("storyboard frames", (o) => archiveStoryboard(storyboardId, o), () =>
+    prisma.storyboard.update({
+      where: { id: storyboardId },
+      data: {
+        frames: frames as never,
+        ...(changed
+          ? { frameHistory: appendFrameHistory(storyboard.frameHistory, frameNumber, previous) as never }
+          : {}),
+      },
+    })
+  );
 
   return NextResponse.json({ ok: true, frames: updated.frames });
 }

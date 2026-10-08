@@ -8,6 +8,7 @@
  *                         uploaded, recorded in results.images[sku]; call again to continue
  */
 import { prisma } from "@/lib/db";
+import { archiveAround, archiveCatalogRun } from "@/services/artifacts/archive";
 import { pMap } from "@/lib/parallel";
 import type { FormatId, TemplateId } from "@/services/image-ads/types";
 import { briefLite } from "./brief-lite";
@@ -113,7 +114,7 @@ export async function planCatalogRun(input: {
     prices,
   });
   const results: StoredResults = { ...run.results, plan, images: input.mode === "image" ? run.results.images : undefined };
-  await prisma.catalogRun.update({ where: { id: run.id }, data: { mode: input.mode, status: "planned", results: results as object } });
+  await archiveAround("catalog plan", (o) => archiveCatalogRun(run.id, o), () => prisma.catalogRun.update({ where: { id: run.id }, data: { mode: input.mode, status: "planned", results: results as object } }));
   return { catalogRunId: run.id, summary: summarizeCatalogPlan(plan) };
 }
 
@@ -169,6 +170,6 @@ export async function renderCatalogImages(input: { projectId: string; catalogRun
 
   const remaining = plan.skus.filter((s) => !images[s.sku]?.items?.length && !images[s.sku]?.error).length;
   const status = remaining ? "rendering" : "rendered";
-  await prisma.catalogRun.update({ where: { id: run.id }, data: { status, results: { ...run.results, images } as object } });
+  await archiveAround("catalog images", (o) => archiveCatalogRun(run.id, o), () => prisma.catalogRun.update({ where: { id: run.id }, data: { status, results: { ...run.results, images } as object } }));
   return { catalogRunId: run.id, rendered, failed, remaining, status, costUsd: 0 };
 }

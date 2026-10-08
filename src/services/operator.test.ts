@@ -127,3 +127,13 @@ describe("catalog actions", () => {
     expect(operatorActionSchema.safeParse({ action: "catalog-render-images", projectId: "p", catalogRunId: "c", limit: 50 }).success).toBe(false);
   });
 });
+
+describe("artifacts-backfill", () => {
+  it("is a dry run unless told otherwise, for one project or all", () => {
+    const one = operatorActionSchema.parse({ action: "artifacts-backfill", projectId: "p" });
+    expect(one).toMatchObject({ action: "artifacts-backfill", projectId: "p", dryRun: true });
+    expect(operatorActionSchema.parse({ action: "artifacts-backfill", all: true, dryRun: false, after: "c1", maxProjects: 20, headSample: 50 })).toMatchObject({ all: true, dryRun: false });
+    expect(operatorActionSchema.safeParse({ action: "artifacts-backfill" }).success).toBe(false);
+    expect(operatorActionSchema.safeParse({ action: "artifacts-backfill", all: true, headSample: 1000 }).success).toBe(false);
+  });
+});

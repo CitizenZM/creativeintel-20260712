@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { archiveInBackground, archiveScript } from "@/services/artifacts/archive";
 import { buildManualScript } from "@/lib/manual-script";
 
 const bodySchema = z.object({
@@ -39,5 +40,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
       ctaVariants: [s.cta.text ?? ""],
     },
   });
+  archiveInBackground("script", () => archiveScript(script.id));
   return NextResponse.json(script, { status: 201 });
 }

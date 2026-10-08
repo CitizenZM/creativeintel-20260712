@@ -8,6 +8,7 @@
  * from this autopilot's storyboard), so re-running a step never duplicates a project, storyboard or run.
  */
 import { prisma } from "@/lib/db";
+import { archiveInBackground, archiveStoryboard } from "@/services/artifacts/archive";
 import { brandFromUrl, newRowId, parsePrice } from "./helpers";
 import { AutopilotFatalError, type AutopilotForecast, type AutopilotSteps, type StepContext, type StepOutcome } from "./types";
 
@@ -196,6 +197,7 @@ const storyboard = async (ctx: StepContext): Promise<StepOutcome> => {
     data: { id: sbId, projectId, title: out.title, frames: out.frames as unknown as object[], style: "locked-script", frameSeconds: 1 },
     select: { id: true },
   });
+  archiveInBackground("storyboard", () => archiveStoryboard(sbId));
   const hookId = input.hookId && platformPlan.scripts.some((s) => s.hookId === input.hookId) ? input.hookId : platformPlan.scripts[0]?.hookId;
   return { kind: "done", state: { storyboardId: sbId, platform: platformPlan.platform, hookId }, note: `${out.frames.length} frames (${out.source})` };
 };

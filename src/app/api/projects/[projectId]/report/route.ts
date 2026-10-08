@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { buildCampaignReportModel, llmNarrator, loadReportInputs } from "@/services/reports/campaign-report";
 import { renderReportHtml } from "@/services/reports/report-html";
 import { DOCX_CONTENT_TYPE, renderReportDocx } from "@/services/reports/report-docx";
+import { archiveInBackground, archiveReport } from "@/services/artifacts/archive";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -20,13 +21,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
   if (!data) return NextResponse.json({ error: "Project not found" }, { status: 404 });
   const model = await buildCampaignReportModel(data, { narrator: url.searchParams.get("narrative") === "llm" ? llmNarrator(projectId) : null });
   const name = `${(model.project.title || "campaign").replace(/[^\w]+/g, "-").replace(/^-|-$/g, "").slice(0, 60)}-report`;
+  // Content history: each distinct report (its data, not its generated-at stamp) is kept as a version.
+  const archived = { title: `${model.project.title || "Campaign"} report`, dedupeValue: { ...model, generatedAt: null } };
   if (format === "docx") {
     const buf = await renderReportDocx(model);
+    archiveInBackground("report docx", () => archiveReport(projectId, { ...archived, format: "docx", docx: new Uint8Array(buf) }));
     return new Response(new Uint8Array(buf), {
       headers: { "Content-Type": DOCX_CONTENT_TYPE, "Content-Disposition": `attachment; filename="${name}.docx"`, "Cache-Control": "no-store" },
     });
   }
-  return new Response(renderReportHtml(model), {
+  const html = renderReportHtml(model);
+  archiveInBackground("report html", () => archiveReport(projectId, { ...archived, format: "html", html }));
+  return new Response(html, {
     headers: { "Content-Type": "text/html; charset=utf-8", "Content-Disposition": `inline; filename="${name}.html"`, "Cache-Control": "no-store" },
   });
 }

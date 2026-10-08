@@ -3,6 +3,7 @@ import { loadLearning } from "@/services/performance/store";
 import { renderLearningBlock } from "@/services/performance/learn";
 import { timingEvidence, type ReferenceAd, type TeardownTiming, type TimingEvidence } from "@/lib/attention-blueprint";
 import { prisma } from "@/lib/db";
+import { archiveInBackground, archiveScript } from "@/services/artifacts/archive";
 import { getBrandTruthForPrompts, type BrandCtaOption } from "@/services/brand-kit";
 import type {
   ScriptInput,
@@ -484,7 +485,7 @@ export async function persistScript(
   const script = validateAndRepairDurations(raw, opts.totalDurationSec);
   const videoType = resolveVideoType(script.videoType, opts.videoType);
 
-  return prisma.script.create({
+  const created = await prisma.script.create({
     data: {
       projectId,
       title: script.title,
@@ -509,4 +510,6 @@ export async function persistScript(
       complianceNotes: opts.complianceNotes?.length ? (opts.complianceNotes as never) : undefined,
     },
   });
+  archiveInBackground("script", () => archiveScript(created.id));
+  return created;
 }

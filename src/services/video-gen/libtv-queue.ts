@@ -11,6 +11,7 @@
  * queue's double increment at claim *and* fail is the bug this replaces.
  */
 import { prisma } from "@/lib/db";
+import { archiveBeforeReplace, archiveInBackground, archiveJob, archiveRun } from "@/services/artifacts/archive";
 import { canvasUrlFor } from "./libtv-compile";
 
 const STALE_AFTER_MS = 30 * 60 * 1000;
@@ -407,7 +408,7 @@ export interface JobDoneInput {
 }
 
 export async function jobDone(input: JobDoneInput) {
-  return prisma.libtvJob.update({
+  const job = await prisma.libtvJob.update({
     where: { id: input.jobId },
     data: {
       status: input.skipped ? "skipped" : "completed",
@@ -420,6 +421,9 @@ export async function jobDone(input: JobDoneInput) {
       completedAt: new Date(),
     },
   });
+  // Content history: the keyframe / clip as soon as it exists (services/artifacts).
+  archiveInBackground("job done", () => archiveJob(input.jobId));
+  return job;
 }
 
 /**
@@ -455,6 +459,7 @@ export async function jobDoneIf(input: JobDoneInput & { settings?: Record<string
       completedAt: new Date(),
     },
   });
+  if (count === 1) archiveInBackground("job done", () => archiveJob(input.jobId));
   return count === 1;
 }
 
@@ -511,7 +516,9 @@ export async function runDone(input: RunDoneInput) {
       .then((r) => r._sum.creditsSpent ?? 0)) ??
     0;
 
-  return prisma.libtvRun.update({
+  // Content history: a re-completed run replaces its master / outputs — keep the current ones first.
+  await archiveBeforeReplace("run done", (o) => archiveRun(input.runId, { ...o, jobs: false }));
+  const run = await prisma.libtvRun.update({
     where: { id: input.runId },
     data: {
       status: "completed",
@@ -528,6 +535,8 @@ export async function runDone(input: RunDoneInput) {
       claimedAt: null,
     },
   });
+  archiveInBackground("run done", () => archiveRun(input.runId));
+  return run;
 }
 
 export async function runAssembling(runId: string) {

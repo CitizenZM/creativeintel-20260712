@@ -1333,3 +1333,56 @@ model ReportDelivery {
 
   @@index([projectId, createdAt])
 }
+
+/// Content-history archive (services/artifacts): one row per VERSION of everything a project produced —
+/// briefs, plans, storyboards, scripts, keyframes, clips, masters, variants, exports, image ads, reports.
+/// Rows are append-only: a slot (`sourceKey`, e.g. "run:<id>:master") whose value changes gets a new
+/// version, so an overwritten field (an auto-fixed master, a regenerated plan) never loses the old value.
+/// Text / JSON artifacts keep their full value in `content`. Files stay in blob storage (`url`, with size,
+/// sha256 and content type here); files up to ARTIFACT_BLOB_MAX_BYTES (2 MB) also keep their bytes in
+/// ArtifactBlob so they survive the loss of blob storage. No FK to Project: history outlives a deletion.
+model ProjectArtifact {
+  id           String    @id @default(cuid())
+  projectId    String
+  // brief | plan | storyboard | script | keyframe | clip | master | variant | locale | cutdown | export |
+  // image-ad | cover | report | voiceover | subtitles | contact-sheet | preview | packshot | logo |
+  // test-plan | media-plan | other   (src/services/artifacts/kinds.ts)
+  kind         String
+  title        String
+  runId        String?
+  jobId        String?
+  storyboardId String?
+  // Where the value came from, e.g. "LibtvRun.masterMp4Url" or "LibtvRun.qcReport.variants[0].url".
+  sourceField  String
+  // The slot this value fills; versions count per (projectId, sourceKey).
+  sourceKey    String
+  version      Int
+  // sha256 identifying the slot's value: of the URL for a file row, else of the content / bytes. One row
+  // per distinct value of a slot — recording the same value again is a no-op.
+  fingerprint  String
+  url          String?   @db.Text
+  contentType  String?
+  bytes        Int?
+  // sha256 of the file's bytes, once they have been read (null for a file not downloaded yet).
+  sha256       String?
+  content      Json?
+  meta         Json?
+  // When the source says it was produced (row createdAt is when it was archived).
+  producedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  blob         ArtifactBlob?
+
+  @@unique([projectId, sourceKey, version])
+  @@unique([projectId, sourceKey, fingerprint])
+  @@index([projectId, kind])
+  @@index([projectId, createdAt])
+  @@index([runId])
+}
+
+/// The bytes of a small archived file (≤ ARTIFACT_BLOB_MAX_BYTES): images, SRT, small JSON, DOCX.
+model ArtifactBlob {
+  artifactId String          @id
+  artifact   ProjectArtifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+  data       Bytes
+  createdAt  DateTime        @default(now())
+}
