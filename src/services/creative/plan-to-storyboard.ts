@@ -129,6 +129,8 @@ export function talkBeats(script: PlanScript, plan: PlatformPlan): boolean[] {
 const CMP_WORDS = /\b(split[- ]screens?|side[- ]by[- ]side|before\s*(?:\/|and|&|vs\.?|-|to)\s*after|versus|vs\.?(?=\s|$)|comparisons?|compared (?:to|with)|two[- ]panel|diptych)/gi;
 const SLIDE_BETWEEN = /\b(?:slides?|swipes?|cuts?|pans?|switch(?:es)?|moves?|toggles?|alternates?|glances?)\s+between\s+([^,.;:]+?)\s+and\s+([^,.;:]+)/i;
 const PAIR = /([^,.;:]+?)\s+(?:vs\.?|versus|compared (?:to|with)|side[- ]by[- ]side with|next to|beside|alongside)\s+([^,.;:]+)/i;
+/** "X and Y side-by-side …" (live autopilot plan: "NXTPAPER 14 and a glossy iPad side-by-side under a harsh desk lamp"). */
+const AND_PAIR = /([^,.;:]+?)\s+and\s+([^,.;:]+?)\s+(?:side[- ]by[- ]side|next to each other|together)\b/i;
 const BEFORE_AFTER = /\bbefore\b[^:]*?:\s*([^.;]+?),?\s+(?:then|→|->|and after|after)\s+([^.;]+)/i;
 const BRAND = /\b(?:apple\s+)?i ?pads?(?:\s+(?:pro|air|mini))?\b|\b(?:samsung\s+)?galaxy\s+tab\w*\b|\bsamsung\b|\bkindle\b|\bsurface(?:\s+pro)?\b|\bremarkable\b|\bboox\b|\biphones?\b|\b(?:lg|sony|vizio|hisense)\b/gi;
 const RIVAL = /\b(glossy|regular|ordinary|old(?:er)?|other|generic|typical|standard|cheap(?:er)?|competitor'?s?|conventional|lcd|oled|backlit|reflective|mirror-like|shiny)\b/i;
@@ -206,7 +208,7 @@ export function detectComparison(visual: string, product: string): ComparisonMap
   let otherSide = "";
   let rest = v;
   let beforeAfter = false;
-  const pair = slide ?? v.match(BEFORE_AFTER) ?? v.match(PAIR);
+  const pair = slide ?? v.match(BEFORE_AFTER) ?? v.match(PAIR) ?? v.match(AND_PAIR);
   if (pair) {
     beforeAfter = pair !== slide && /\bbefore\b/i.test(pair[0]) && BEFORE_AFTER.test(pair[0]);
     let [a, b] = [pair[1].trim(), pair[2].trim()];

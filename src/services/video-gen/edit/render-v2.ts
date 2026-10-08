@@ -730,6 +730,19 @@ export async function renderEditV2(input: {
     // Native captions are placed by their top-left: recompute it from the final (possibly downscaled) size
     // and centre line, so the caption stays centred, inside the box and off the hook headline.
     for (const o of placed) if (o.at) o.at = nativeCaptionAt(canvas, sizes.get(o)!.w, sizes.get(o)!.h, { box, yCenter: o.y });
+  } else {
+    // No platform box: layers keep their size, but a caption still never lands on a hook / claim shown at
+    // the same time (live autopilot run: a claim chip over a comparison shot sat on the caption line).
+    const sharpLib = (await import("sharp")).default;
+    const sizes = new Map<Overlay, { w: number; h: number }>();
+    for (const o of overlays) {
+      if (o.role === "backdrop" || o.role === "decor") continue;
+      const m = await sharpLib(await readFile(o.file)).metadata();
+      sizes.set(o, { w: m.width ?? 0, h: m.height ?? 0 });
+    }
+    const placed = [...sizes.keys()];
+    separateCaptions(placed.map((o) => ({ role: o.role, y: o.y, h: sizes.get(o)!.h, startSec: o.startSec, endSec: o.endSec })), canvas, box).forEach((y, i) => (placed[i].y = y));
+    for (const o of placed) if (o.at) o.at = nativeCaptionAt(canvas, sizes.get(o)!.w, sizes.get(o)!.h, { box, yCenter: o.y });
   }
 
   const musicFile = path.join(dir, "v2music.wav");
