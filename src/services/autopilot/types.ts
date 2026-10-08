@@ -43,6 +43,8 @@ export interface AutopilotInput {
   cast?: string;
   setting?: string;
   ctaButton?: string;
+  /** Ad length in seconds (default: the platform profile's). */
+  durationSec?: number;
   /** Owner-approved USD for this run. The render waits for approval when the forecast's high total is above it. */
   approvedBudgetUsd?: number;
   imageModel?: string;

@@ -350,7 +350,8 @@ export function scaffoldLockedFrames(input: PlanStoryboardInput): PlanStoryboard
         ? `Slow push-in toward the product, then hold. The camera keeps the ${product} centered and fully in frame; it never pans or drifts away from it. Natural speed.`
         : "Natural, unhurried movement; gentle handheld drift. Natural speed.",
       locked,
-      ...(b.onScreenText ? { textOverlay: b.onScreenText } : {}),
+      // The CTA's on-screen line says what the button says ("Claim Coupon"), not the plan's generic "Shop the sale".
+      ...(b.purpose === "cta" && input.ctaButton?.trim() ? { textOverlay: input.ctaButton.trim().toUpperCase() } : b.onScreenText ? { textOverlay: b.onScreenText } : {}),
       ...(b.vo ? { voiceover: b.vo, voiceStyle: styleForBeat(b.purpose, input.plan.platform), ...(platformEnergy(input.plan.platform) ? { voiceEnergy: platformEnergy(input.plan.platform) } : {}) } : {}),
       ...(b.sellingPointId ? { sellingPoint: b.sellingPointId } : {}),
     };
