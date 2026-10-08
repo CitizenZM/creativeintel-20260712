@@ -7,6 +7,7 @@ import {
   upsertCompetitorProfile,
 } from "@/services/brand-library";
 import { getActiveWorkspace, projectWorkspaceFilter } from "@/services/workspace";
+import { currentAppUser } from "@/services/app-user";
 import {
   scrapeProductPageDetailed,
   type AdapterAttempt,
@@ -142,6 +143,7 @@ export async function POST(request: Request) {
         productPageImages: productPageImages as never ?? null,
         productPageText: productPageText || null,
         workspaceId: workspace.id,
+        createdById: (await currentAppUser())?.id ?? null,
         brandProfileId: brandProfile.id,
         brand: {
           create: {

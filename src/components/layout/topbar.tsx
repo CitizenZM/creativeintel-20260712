@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -19,7 +19,7 @@ const navItems = [
   { href: "/projects/new", label: "New project", icon: Plus },
 ];
 
-export function Topbar() {
+export function Topbar({ account }: { account?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
@@ -41,6 +41,7 @@ export function Topbar() {
             CreativeIntel
           </span>
         </Link>
+        {account && <div className="ml-auto flex items-center">{account}</div>}
       </header>
 
       {open && (

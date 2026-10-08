@@ -8,7 +8,7 @@ import { projectPath } from "@/lib/project-slug";
  * Rewrites the visible address bar to `/projects/<brand-slug>-<id>/...` via
  * `history.replaceState` — no Next navigation, no refetch, no remount. Every
  * page/layout under `[projectId]` still keys off the bare id; the slug is
- * purely cosmetic and stripped back off by `src/middleware.ts` if the page
+ * purely cosmetic and stripped back off by `src/proxy.ts` if the page
  * is reloaded or the URL is shared.
  */
 export function ProjectUrlSync({ projectId, brandName }: { projectId: string; brandName: string }) {

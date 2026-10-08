@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Activity, Cpu, LayoutGrid, FolderKanban, Plus, Sparkles, Library } from "lucide-react";
@@ -17,7 +18,7 @@ const navItems = [
   { href: "/status", label: "System status", icon: Activity },
 ];
 
-export function Sidebar() {
+export function Sidebar({ account }: { account?: ReactNode }) {
   const pathname = usePathname();
   const projectMatch = pathname.match(/^\/projects\/([^/]+)/);
   const projectId = projectMatch?.[1] && projectMatch[1] !== "new" ? projectMatch[1] : null;
@@ -64,7 +65,8 @@ export function Sidebar() {
         {projectId && <StageRail projectId={projectId} />}
       </nav>
 
-      <div className="border-t border-border p-3">
+      <div className="space-y-2 border-t border-border p-3">
+        {account && <div className="flex min-h-8 items-center px-1">{account}</div>}
         <ThemeToggle />
       </div>
     </aside>

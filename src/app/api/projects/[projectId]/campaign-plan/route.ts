@@ -1,6 +1,6 @@
 /**
  * Campaign plan for a project (Studio planning panel). Auth is the app-wide Cloudflare Access gate
- * in src/middleware.ts, as for every /api/projects route.
+ * in src/proxy.ts, as for every /api/projects route.
  *
  * GET  → { plan, planAt, summary } — the stored plan (plan null when none yet)
  * POST { platforms?: string[], goal?: string, promo?: {pct,price,comparePrice,priceCheckedAt,code,deadline},
