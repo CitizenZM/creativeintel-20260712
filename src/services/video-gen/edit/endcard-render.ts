@@ -93,7 +93,7 @@ export interface EndCardResult {
 export function endCardSlots(c: Canvas) {
   const vertical = c.h / c.w > 1.5;
   return vertical
-    ? { logo: 0.178, headline: 0.238, main: 0.4, fine: 0.555, button: 0.603, caption: 0.6 }
+    ? { logo: 0.178, headline: 0.252, main: 0.4, fine: 0.555, button: 0.603, caption: 0.6 }
     : { logo: 0.1, headline: 0.22, main: 0.45, fine: 0.9, button: 0.74, caption: 0.7 };
 }
 

@@ -345,3 +345,12 @@ describe("CTA copy follows the button", () => {
     expect(scaffoldLockedFrames({ plan, productName: "NXTPAPER 14" }).find((x) => x.segment === "CTA")!.textOverlay).toBe("Claim Coupon");
   });
 });
+
+describe("comparison label from the live autopilot plan", async () => {
+  const { detectComparison } = await import("./plan-to-storyboard");
+  it("'X and Y side-by-side' labels the rival by its device, not by a later sentence", () => {
+    const m = detectComparison("NXTPAPER 14 and a glossy iPad side-by-side under a harsh desk lamp. Glare blasts the iPad; the NXTPAPER is clear. Zoom into the matte texture.", "NXTPAPER 14")!;
+    expect(m.labelOther).toBe("Glossy tablet");
+    expect(m.other).not.toMatch(/ipad|nxtpaper/i);
+  });
+});
