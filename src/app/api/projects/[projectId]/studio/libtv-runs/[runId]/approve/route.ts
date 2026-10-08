@@ -11,6 +11,7 @@ import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { getBrandKitCompleteness } from "@/services/brand-kit";
 import { serverApprovalBudget } from "@/services/ops/approval-budget";
+import { accountLimitOfProject } from "@/services/ops/account-allowance";
 
 export const dynamic = "force-dynamic";
 // GLM and ComfyUI runs render on the server right after approval.
@@ -37,6 +38,16 @@ export async function POST(
     return NextResponse.json(
       { error: new PaidFeatureDisabledError(what).message + " Compile the run with the free GLM or ComfyUI models instead." },
       { status: 402 }
+    );
+  }
+
+  // LibTV renders spend the platform's own LibTV credits on the operator's machine — not something a
+  // self-registered member account can approve. Server-engine runs go through the spend ledger,
+  // which enforces the member's monthly allowance (account-allowance.ts).
+  if (!isServerEngine(existing.executor) && existing.creditsEstimated > 0 && (await accountLimitOfProject(projectId))) {
+    return NextResponse.json(
+      { error: "Rendering on LibTV is reserved for the workspace admin. Compile the run with a server engine instead." },
+      { status: 403 }
     );
   }
 

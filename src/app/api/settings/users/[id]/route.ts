@@ -1,6 +1,7 @@
 /**
  * POST — the master admin blocks, unblocks, promotes or demotes another account (/settings/users).
- * Body: { action: "block" | "unblock" | "make-owner" | "make-member" }.
+ * Body: { action: "block" | "unblock" | "make-owner" | "make-member" }
+ *    or { monthlyAllowanceUsd: number | null } — the member's monthly paid-AI allowance (null = default).
  *
  * The proxy already keeps members out of /api/settings; this route additionally requires the
  * caller's AppUser to be an owner (verified OWNER_EMAILS, or promoted by an owner).
@@ -14,7 +15,10 @@ import { invalidatePrincipal } from "@/services/access";
 
 export const dynamic = "force-dynamic";
 
-const bodySchema = z.object({ action: z.enum(USER_ACTIONS) });
+const bodySchema = z.union([
+  z.object({ action: z.enum(USER_ACTIONS) }),
+  z.object({ monthlyAllowanceUsd: z.number().min(0).max(10_000).nullable() }),
+]);
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const me = await currentAppUser();
@@ -28,6 +32,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const target = await prisma.appUser.findUnique({ where: { id } });
   if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  if ("monthlyAllowanceUsd" in parsed.data) {
+    const user = await prisma.appUser.update({
+      where: { id },
+      data: { monthlyAllowanceUsd: parsed.data.monthlyAllowanceUsd },
+    });
+    console.info(`[auth] ${me.email} → allowance ${target.email} = ${parsed.data.monthlyAllowanceUsd ?? "default"}`);
+    return NextResponse.json({ user });
+  }
 
   const plan = planUserAction({
     actor: me,

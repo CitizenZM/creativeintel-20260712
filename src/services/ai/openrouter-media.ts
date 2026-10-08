@@ -11,6 +11,8 @@
  * OpenRouter has no Zhipu video model, so free CogVideoX clips stay on the GLM engine.
  */
 import { logAiUsage } from "@/services/ai/usage";
+import { assertAccountAllowance } from "@/services/ops/account-allowance";
+import { DEFAULT_PRICES, imageCostUsd } from "@/services/ops/cost-model";
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
@@ -65,6 +67,8 @@ export async function generateOpenRouterImage(
   opts: { model: string; aspectRatio: string; referenceUrls?: string[]; projectId?: string | null }
 ): Promise<{ buffer: Buffer; contentType: string }> {
   const refs = (opts.referenceUrls ?? []).filter((u) => /^https?:\/\//.test(u));
+  // A member account's monthly allowance (no-op for the admin's projects and without a project).
+  await assertAccountAllowance(opts.projectId, imageCostUsd(DEFAULT_PRICES, opts.model).usd ?? 0, { kind: "image", model: opts.model });
   const out = await call<ImageResponse>("/images", {
     body: {
       model: opts.model,
