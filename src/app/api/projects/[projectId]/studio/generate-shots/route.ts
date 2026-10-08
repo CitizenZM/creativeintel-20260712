@@ -17,6 +17,7 @@
  * can poll it individually.
  */
 import { NextResponse } from "next/server";
+import { allowanceRefusalBody, assertAccountAllowance } from "@/services/ops/account-allowance";
 import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { prisma } from "@/lib/db";
@@ -118,6 +119,19 @@ async function handlePost(
 
   const requestedShots =
     Array.isArray(shots) && shots.length > 0 ? shots : scenes.map((_, i) => i);
+
+  // These clips go straight to fal (no spend ledger): a member account must have the whole batch
+  // left in its monthly allowance before anything is submitted (account-allowance.ts).
+  try {
+    const secOf = (sc: ScriptSceneLike | undefined) =>
+      typeof sc?.startSec === "number" && typeof sc?.endSec === "number" ? Math.max(1, sc.endSec - sc.startSec) : 5;
+    const batchSec = requestedShots.reduce((sum, i) => sum + secOf(scenes[i]), 0);
+    await assertAccountAllowance(projectId, modelDef.costPerSecond * batchSec, { kind: "video", model });
+  } catch (err) {
+    const refusal = allowanceRefusalBody(err);
+    if (refusal) return NextResponse.json(refusal, { status: 402 });
+    throw err;
+  }
 
   // Keyframes are persisted as PreviewAsset rows by storyboard-keyframes,
   // tagged style = "keyframe-{shotNumber}-script-{scriptId}" (shotNumber is

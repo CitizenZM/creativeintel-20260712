@@ -72,7 +72,8 @@ const money = (n: number) => `$${n < 1 ? n.toFixed(3).replace(/0$/, "") : n.toFi
 export const spentOf = (e: Pick<SpendEntryRecord, "estUsd" | "actualUsd">) => e.actualUsd ?? e.estUsd;
 
 export interface BudgetRefusal {
-  level: "run" | "project";
+  /** account = a member's monthly allowance across all their projects (account-allowance.ts). */
+  level: "run" | "project" | "account";
   limitUsd: number;
   spentUsd: number;
 }
@@ -86,17 +87,29 @@ export function budgetCheck(estUsd: number, project: BudgetState, run: BudgetSta
 
 export class BudgetExceededError extends Error {
   readonly code = "BUDGET_EXCEEDED";
+
+  static describe(scope: SpendScope, estimateUsd: number, refusal: BudgetRefusal): string {
+    if (refusal.level === "account") {
+      return (
+        `Monthly allowance reached — refused before calling the provider: this ${scope.kind} call (est. ${money(estimateUsd)}) would bring your account to ` +
+        `${money(refusal.spentUsd + estimateUsd)} of its ${money(refusal.limitUsd)} monthly AI allowance (${money(refusal.spentUsd)} used this month). ` +
+        `Ask the workspace admin to raise it.`
+      );
+    }
+    const who = refusal.level === "run" ? `run ${scope.runId}` : `project ${scope.projectId}`;
+    return (
+      `Budget exceeded — refused before calling the provider: this ${scope.kind} call (${scope.model}, est. ${money(estimateUsd)}) would bring ${who} to ` +
+      `${money(refusal.spentUsd + estimateUsd)} of its approved ${money(refusal.limitUsd)} (${money(refusal.spentUsd)} already spent or reserved). ` +
+      `Raise the budget with the operator action set-budget (after the owner approves), or stop here.`
+    );
+  }
+
   constructor(
     readonly scope: SpendScope,
     readonly estimateUsd: number,
     readonly refusal: BudgetRefusal
   ) {
-    const who = refusal.level === "run" ? `run ${scope.runId}` : `project ${scope.projectId}`;
-    super(
-      `Budget exceeded — refused before calling the provider: this ${scope.kind} call (${scope.model}, est. ${money(estimateUsd)}) would bring ${who} to ` +
-        `${money(refusal.spentUsd + estimateUsd)} of its approved ${money(refusal.limitUsd)} (${money(refusal.spentUsd)} already spent or reserved). ` +
-        `Raise the budget with the operator action set-budget (after the owner approves), or stop here.`
-    );
+    super(BudgetExceededError.describe(scope, estimateUsd, refusal));
     this.name = "BudgetExceededError";
   }
 }

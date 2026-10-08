@@ -4,6 +4,7 @@
  * so overlapping ticks (approve request, status poll, cron) can never reserve past the budget.
  */
 import { prisma } from "@/lib/db";
+import { accountLimitOfProject, accountSpentThisMonth } from "./account-allowance";
 import { budgetCheck, BudgetExceededError, type BudgetState, type SpendKind, type SpendLedger, type SpendReservation, type SpendScope } from "./budget-guard";
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -42,6 +43,16 @@ export class PrismaSpendLedger implements SpendLedger {
         const s = await state(tx, scope.projectId, scope.runId);
         const refusal = budgetCheck(estUsd, s.project, s.run);
         if (refusal) throw new BudgetExceededError(scope, estUsd, refusal);
+        // A member account's monthly allowance across all its projects (account-allowance.ts),
+        // serialized per account so two projects can't both reserve the last dollar.
+        const account = await accountLimitOfProject(scope.projectId, tx);
+        if (account) {
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`spend-account:${account.tenant}`}))::text AS locked`;
+          const spentUsd = await accountSpentThisMonth(account.tenant, tx);
+          if (spentUsd + estUsd > account.allowanceUsd + 1e-9) {
+            throw new BudgetExceededError(scope, estUsd, { level: "account", limitUsd: account.allowanceUsd, spentUsd });
+          }
+        }
         const row = await tx.spendEntry.create({
           data: { projectId: scope.projectId, runId: scope.runId ?? null, jobId: scope.jobId ?? null, kind: scope.kind, model: scope.model.slice(0, 120), estUsd },
           select: { id: true },

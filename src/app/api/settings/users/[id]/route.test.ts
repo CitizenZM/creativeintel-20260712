@@ -82,4 +82,12 @@ describe("POST /api/settings/users/[id]", () => {
     expect((await call({ action: "block" }, "owner1")).status).toBe(400);
     expect(m.update).not.toHaveBeenCalled();
   });
+  it("sets and clears a member's monthly allowance", async () => {
+    m.currentAppUser.mockResolvedValue(OWNER);
+    expect((await call({ monthlyAllowanceUsd: 5 })).status).toBe(200);
+    expect(m.update).toHaveBeenLastCalledWith({ where: { id: "m1" }, data: { monthlyAllowanceUsd: 5 } });
+    expect((await call({ monthlyAllowanceUsd: null })).status).toBe(200);
+    expect(m.update).toHaveBeenLastCalledWith({ where: { id: "m1" }, data: { monthlyAllowanceUsd: null } });
+    expect((await call({ monthlyAllowanceUsd: -1 })).status).toBe(400);
+  });
 });

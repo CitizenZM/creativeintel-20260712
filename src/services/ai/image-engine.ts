@@ -15,6 +15,7 @@ import { CUSTOM_PREFIX, routeOrder } from "@/services/settings/ai-settings-core"
 import { generateImagePersisted, isZhipuConfigured } from "./zhipu";
 import { logAiUsage } from "./usage";
 import { uploadBuffer } from "@/services/storage";
+import { assertAccountAllowance } from "@/services/ops/account-allowance";
 
 export type ImageEngineId = "glm" | "openai" | "fal" | "pollinations" | `custom:${string}`;
 
@@ -193,6 +194,8 @@ export async function persistDataUrl(url: string, folder: string): Promise<strin
 }
 
 export async function generateImageByEngine(req: ImageRequest): Promise<string> {
+  // A member account past its monthly allowance gets no more paid images (no-op for the admin).
+  await assertAccountAllowance(req.projectId, 0, { kind: "image", model: "image-engine" });
   const order = await imageEngineOrder(req.defaults);
   let lastErr: unknown = null;
   for (const engine of order) {

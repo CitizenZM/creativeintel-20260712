@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { allowanceRefusalBody, assertAccountAllowance } from "@/services/ops/account-allowance";
 import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { prisma } from "@/lib/db";
@@ -38,6 +39,15 @@ export async function POST(
 
   const falKey = process.env.FAL_KEY;
   const modelDef = getVideoModel(model);
+
+  // fal / Veo are called directly here (no spend ledger): check the member account's allowance first.
+  try {
+    await assertAccountAllowance(projectId, (modelDef?.costPerSecond ?? 0.5) * (Number(duration) || 5), { kind: "video", model });
+  } catch (err) {
+    const refusal = allowanceRefusalBody(err);
+    if (refusal) return NextResponse.json(refusal, { status: 402 });
+    throw err;
+  }
   const falModel = modelDef?.provider === "fal" ? modelDef : undefined;
 
   // Use fal.ai if key present and model known
