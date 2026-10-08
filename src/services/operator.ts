@@ -229,6 +229,13 @@ export const operatorActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("report-preview"), projectId: z.string().min(1), since: z.string().min(4).optional(), channel: z.enum(["feishu-dm", "email", "webhook"]).optional() }),
   /** Read or set Project.reportDelivery {enabled, channel, target, schedule}. Sending also needs REPORT_DELIVERY_SEND=on; Feishu goes to an open_id only. */
   z.object({ action: z.literal("report-delivery-config"), projectId: z.string().min(1), config: z.object({ enabled: z.boolean().optional(), channel: z.enum(["feishu-dm", "email", "webhook"]).optional(), target: z.string().min(3).max(500).optional(), schedule: z.enum(["weekly", "manual"]).optional() }).optional() }),
+  /**
+   * Content-history backfill (services/artifacts/backfill.ts): register everything a project (or every project) already
+   * produced as ProjectArtifact versions. dryRun (default) writes and downloads nothing; resumable through `after`.
+   */
+  z
+    .object({ action: z.literal("artifacts-backfill"), projectId: z.string().min(1).optional(), all: z.boolean().optional(), dryRun: z.boolean().default(true), after: z.string().min(1).nullable().optional(), maxProjects: z.number().int().min(1).max(500).optional(), headSample: z.number().int().min(0).max(200).optional() })
+    .refine((v) => !!(v.projectId || v.all), { message: "projectId or all: true required" }),
 ]);
 
 export type OperatorAction = z.infer<typeof operatorActionSchema>;

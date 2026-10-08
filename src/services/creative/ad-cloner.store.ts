@@ -4,6 +4,7 @@
  * merge it into Project.campaignPlan under "Cloned from <ref>". Used by the operator action `clone-ad`.
  */
 import { prisma } from "@/lib/db";
+import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
 import type { CampaignPlan } from "./campaign-plan.types";
 import { CampaignPlanError, strictByDefault } from "./campaign-plan.store";
 import type { LlmFn, PromoInput } from "./campaign-planner";
@@ -49,7 +50,7 @@ export async function cloneAdIntoProject(projectId: string, req: CloneRequest): 
     throw new CampaignPlanError(err instanceof Error ? err.message : String(err), 422);
   }
   const plan = mergeClonedPlan(existing, clone.plan, { brief, goal: clone.goal, promo });
-  await prisma.project.update({ where: { id: projectId }, data: { campaignPlan: plan as object, campaignPlanAt: new Date() } });
+  await archiveAround("ad clone plan", (o) => archiveProjectFields(projectId, ["campaignPlan"], o), () => prisma.project.update({ where: { id: projectId }, data: { campaignPlan: plan as object, campaignPlanAt: new Date() } }));
   if (req.structureId) await prisma.adStructure.update({ where: { id: req.structureId }, data: { timesUsed: { increment: 1 } } }).catch(() => {});
   return { plan, clone };
 }

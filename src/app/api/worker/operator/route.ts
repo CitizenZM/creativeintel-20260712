@@ -40,6 +40,7 @@
  * POST { action: "catalog-import" | "catalog-plan" | "catalog-render-images", projectId, … } — catalog ads from a product feed (CatalogRun)
  * POST { action: "media-plan", projectId, goal, totalBudget, flightStart, flightEnd, targetCpa?, targetRoas?, aov?, markets?, channels?, baseline? } — cross-platform media plan → Project.mediaPlan
  * POST { action: "report-preview", projectId, since? } — weekly digest payload (built, not sent)
+ * POST { action: "artifacts-backfill", projectId? | all: true, dryRun? (default true), after?, maxProjects?, headSample? } — register existing content as ProjectArtifact history
  * POST { action: "report-delivery-config", projectId, config? } — read / set Project.reportDelivery (disabled by default; sending also needs REPORT_DELIVERY_SEND=on)
  * GET  ?runId=…  — the run's status, job counts and outputs
  */
@@ -47,6 +48,7 @@ import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db";
 import { hasWorkerToken } from "@/lib/worker-token";
 import { LIVE } from "@/services/creative-library";
+import { archiveAround, archiveBeforeReplace, archiveBrandAssets, archiveInBackground, archiveJob, archiveProjectFields, archiveStoryboard } from "@/services/artifacts/archive";
 import { approveAllFrames, freeRunRefusal, operatorActionSchema } from "@/services/operator";
 import { compileRunFromStoryboard, LibtvCompileError } from "@/services/video-gen/libtv-compile";
 import { isServerEngine } from "@/services/video-gen/libtv-pricing";
@@ -172,15 +174,19 @@ export async function POST(request: Request) {
         ...(input.packshots ?? []).map((p) => ({ brandKitId: kit.id, kind: "PACKSHOT", variant: p.variant ?? "front", url: p.url, provider: "url", verified: true })),
         ...(input.logoUrl ? [{ brandKitId: kit.id, kind: "LOGO", variant: "light", url: input.logoUrl, provider: "url", verified: true }] : []),
       ];
+      // Content history: the packshots / logo about to be cleared are archived first.
+      await archiveBeforeReplace("import-script brand assets", (o) => archiveBrandAssets(projectId, o));
       // Newest packshot first is PROD-1: clear older packshots so the script's reference wins.
       if (input.packshots?.length) await prisma.brandAsset.deleteMany({ where: { brandKitId: kit.id, kind: "PACKSHOT" } });
       if (input.logoUrl) await prisma.brandAsset.deleteMany({ where: { brandKitId: kit.id, kind: "LOGO" } });
       for (const a of assets) await prisma.brandAsset.create({ data: a });
+      archiveInBackground("import-script brand assets", () => archiveBrandAssets(projectId));
     }
     const sb = await prisma.storyboard.create({
       data: { projectId, title: input.storyboard.title, frames: input.storyboard.frames as object[], style: "locked-script", frameSeconds: 1 },
       select: { id: true },
     });
+    archiveInBackground("storyboard", () => archiveStoryboard(sb.id));
     return NextResponse.json({ ok: true, projectId, storyboardId: sb.id }, { status: 201 });
   }
 
@@ -287,7 +293,7 @@ export async function POST(request: Request) {
         platforms: input.platforms,
         durationSec: input.durationSec,
       }, { strictCompliance: input.strictCompliance ?? process.env.CREATIVE_STRICT_COMPLIANCE === "true" });
-      await prisma.project.update({ where: { id: project.id }, data: { productBrief: brief as object, productBriefAt: new Date() } });
+      await archiveAround("product brief", (o) => archiveProjectFields(project.id, ["productBrief"], o), () => prisma.project.update({ where: { id: project.id }, data: { productBrief: brief as object, productBriefAt: new Date() } }));
       return NextResponse.json({ ok: true, brief });
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
@@ -335,6 +341,7 @@ export async function POST(request: Request) {
       data: { projectId: input.projectId, title: out.title, frames: out.frames as unknown as object[], style: "locked-script", frameSeconds: 1 },
       select: { id: true },
     });
+    archiveInBackground("storyboard", () => archiveStoryboard(sb.id));
     const talkFrames = out.frames.filter((f) => f.locked.talk).map((f) => f.frameNumber);
     return NextResponse.json({ ok: true, storyboardId: sb.id, frames: out.frames.length, promptSource: out.source, error: out.error, coverage: out.coverage, musicMood: out.frames[0]?.locked.musicMood ?? null, ...(out.presenter ? { presenter: out.presenter, talkFrames } : {}) }, { status: 201 });
   }
@@ -493,6 +500,14 @@ export async function POST(request: Request) {
     }
   }
 
+  if (input.action === "artifacts-backfill") {
+    // Content-history backfill: dry run unless dryRun: false; stops at ~4 min with nextCursor (pass it back as `after`).
+    const { runBackfill } = await import("@/services/artifacts/backfill");
+    const { prismaBackfillDeps } = await import("@/services/artifacts/prisma-store");
+    const result = await runBackfill(await prismaBackfillDeps(prisma), { projectId: input.projectId, all: input.all, dryRun: input.dryRun, after: input.after ?? null, maxProjects: input.maxProjects, headSample: input.headSample, deadlineMs: 240_000 });
+    return NextResponse.json({ ok: true, ...result });
+  }
+
   if (input.action === "clone-ad") {
     const { cloneAdIntoProject } = await import("@/services/creative/ad-cloner.store");
     const { CampaignPlanError } = await import("@/services/creative/campaign-plan.store");
@@ -592,7 +607,7 @@ export async function POST(request: Request) {
     const { uploadBuffer } = await import("@/services/storage");
     const up = await uploadBuffer({ buffer: out.image, filename: `${job.nodeName}-repaired.jpg`, contentType: "image/jpeg", folder: `keyframe-repairs/${input.runId}` });
     const repair = { ...out.record, fromUrl: frameUrl, url: up.url };
-    if (input.apply) await prisma.libtvJob.update({ where: { id: job.id }, data: { resultUrl: up.url, settings: { ...(job.settings as Record<string, unknown>), repair } as never } });
+    if (input.apply) await archiveAround("repair-keyframe", (o) => archiveJob(job.id, o), () => prisma.libtvJob.update({ where: { id: job.id }, data: { resultUrl: up.url, settings: { ...(job.settings as Record<string, unknown>), repair } as never } }));
     return NextResponse.json({ ok: true, applied: !!input.apply, repair });
   }
 

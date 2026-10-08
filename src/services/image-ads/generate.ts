@@ -4,6 +4,7 @@
  * helper and kept on Project.imageAdSets (latest first, last 5 sets).
  */
 import { pMap } from "@/lib/parallel";
+import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
 import { deriveCopy, missingFacts, promoFrom, type BriefLike, type PlanLike } from "./copy";
 import { productCutout } from "./cutout";
 import { AD_FORMATS, formatById } from "./formats";
@@ -126,6 +127,6 @@ export async function generateImageAdSet(projectId: string, opts: ImageAdSetOpti
     copy: { headline: copy.headline, sub: copy.sub, cta: copy.cta, offerHeadline: copy.offerHeadline },
   };
   const previous = Array.isArray(project.imageAdSets) ? (project.imageAdSets as unknown as ImageAdSet[]) : [];
-  await prisma.project.update({ where: { id: projectId }, data: { imageAdSets: [set, ...previous].slice(0, 5) as object[] } });
+  await archiveAround("image ads", (o) => archiveProjectFields(projectId, ["imageAdSets"], o), () => prisma.project.update({ where: { id: projectId }, data: { imageAdSets: [set, ...previous].slice(0, 5) as object[] } }));
   return set;
 }

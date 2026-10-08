@@ -15,6 +15,7 @@
  */
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { archiveInBackground, archiveReportDelivery } from "@/services/artifacts/archive";
 import { spentOf, type SpendEntryRecord } from "@/services/ops/budget-guard";
 import type { HookTrendReport } from "@/services/research/hook-trends";
 import type { NextRoundProposal } from "@/services/performance/iterate";
@@ -547,6 +548,7 @@ export async function runProjectDigest(projectId: string, opts: RunDigestOptions
     },
     select: { id: true },
   });
+  archiveInBackground("report delivery", () => archiveReportDelivery(row.id));
   return { projectId, status: result.status, reason: result.reason, deliveryId: row.id, verified: result.verified };
 }
 

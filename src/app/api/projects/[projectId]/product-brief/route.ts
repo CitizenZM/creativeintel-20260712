@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
 
 export const maxDuration = 300;
 
@@ -69,7 +70,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
       durationSec: input.durationSec,
     });
     const at = new Date();
-    await prisma.project.update({ where: { id: project.id }, data: { productBrief: brief as object, productBriefAt: at } });
+    await archiveAround("product brief", (o) => archiveProjectFields(project.id, ["productBrief"], o), () => prisma.project.update({ where: { id: project.id }, data: { productBrief: brief as object, productBriefAt: at } }));
     return NextResponse.json({ brief, at: at.toISOString() });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

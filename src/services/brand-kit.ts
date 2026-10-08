@@ -5,6 +5,7 @@
  */
 import { SERVICE_CATEGORIES } from "@/lib/validations";
 import { prisma } from "@/lib/db";
+import { archiveBrandAssets, archiveInBackground } from "@/services/artifacts/archive";
 
 export interface BrandColor {
   name?: string;
@@ -143,6 +144,8 @@ export async function refreshCompleteness(projectId: string): Promise<BrandKitCo
   await prisma.brandKit
     .update({ where: { projectId }, data: { completenessScore: completeness.score } })
     .catch(() => null);
+  // Every brand-asset change ends here: archive the kit's packshots / logos (content history).
+  archiveInBackground("brand assets", () => archiveBrandAssets(projectId));
   return completeness;
 }
 

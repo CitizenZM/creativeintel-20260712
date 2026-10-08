@@ -6,6 +6,7 @@
  */
 import { prisma } from "@/lib/db";
 import { appendFrameHistory, LIVE } from "@/services/creative-library";
+import { archiveAround, archiveProjectFields, archiveStoryboard, type ArchiveOptions } from "@/services/artifacts/archive";
 import type { CampaignPlan, PlatformPlan } from "./campaign-plan.types";
 import type { LlmFn } from "./campaign-planner";
 import { agentOutputSchema, HISTORY_LIMIT, popHistory, pushHistory, runCreativeAgent, type ApplyDeps, type StoryboardFrameLike } from "./creative-agent";
@@ -76,7 +77,7 @@ export async function creativeAgentTurn(projectId: string, message: string, stor
       for (const [k, f] of (frames ?? []).entries()) if (changed.has(Number(f.frameNumber ?? k + 1))) fh = appendFrameHistory(fh, Number(f.frameNumber ?? k + 1), f);
       writes.push(prisma.storyboard.update({ where: { id: board.id }, data: { frames: out.frames as object[], frameHistory: fh as object } }) as never);
     }
-    await prisma.$transaction(writes);
+    await archiveAround("creative agent edit", archiveEdit(projectId, board?.id), () => prisma.$transaction(writes));
   }
   const depth = Array.isArray(history) ? history.length : 0;
   return {
@@ -114,8 +115,16 @@ export async function undoCreativeEdit(projectId: string): Promise<Result> {
       restoredFrames = true;
     }
   }
-  await prisma.$transaction(writes);
+  await archiveAround("creative agent undo", archiveEdit(projectId, entry.storyboard?.id), () => prisma.$transaction(writes));
   return { status: 200, body: { ok: true, undone: { at: entry.at, message: entry.message, summary: entry.summary }, restored: { plan: !!entry.plan, storyboard: restoredFrames }, undo: { available: rest.length, limit: HISTORY_LIMIT } } };
+}
+
+/** Content history of a chat edit / undo: the plan (with its edit snapshots) and the edited storyboard. */
+function archiveEdit(projectId: string, storyboardId: string | null | undefined) {
+  return async (o: ArchiveOptions) => {
+    await archiveProjectFields(projectId, ["creativeEditHistory", "campaignPlan"], o);
+    if (storyboardId) await archiveStoryboard(storyboardId, o);
+  };
 }
 
 export async function creativeEditHistory(projectId: string): Promise<Result> {

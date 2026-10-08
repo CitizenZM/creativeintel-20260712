@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Film, Lightbulb, Wand2, Palette, PackageCheck, Library, Check, Compass } from "lucide-react";
+import { LayoutDashboard, Film, Lightbulb, Wand2, Palette, PackageCheck, Library, Check, Compass, History } from "lucide-react";
 import { useProjectStages } from "./use-project-stages";
 import type { ProjectStage } from "@/services/project-stages";
 
@@ -20,6 +20,8 @@ const tabs: { segment: string; label: string; icon: typeof Film; alsoMatches: st
   { segment: "creative", label: "Creative", icon: Wand2, alsoMatches: [], stage: "creative" },
   { segment: "studio", label: "Studio", icon: Palette, alsoMatches: [], stage: "studio" },
   { segment: "deliver", label: "Deliver", icon: PackageCheck, alsoMatches: [], stage: "deliver" },
+  // Not a stage: every version of everything produced, downloadable (services/artifacts).
+  { segment: "history", label: "History", icon: History, alsoMatches: [] },
 ];
 
 export function TabNav({ projectId }: TabNavProps) {

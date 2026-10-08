@@ -7,6 +7,7 @@
  */
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
+import { archiveInBackground, archiveStoryboard as archiveStoryboardHistory } from "@/services/artifacts/archive";
 
 /** Where-clause fragment for rows the user has not archived. */
 export const LIVE = { deletedAt: null } as const;
@@ -39,7 +40,7 @@ export function findActiveStoryboard(projectId: string, scriptId: string) {
  * board and make it the active one. Earlier versions are kept.
  */
 export async function createStoryboardVersion(data: Prisma.StoryboardUncheckedCreateInput) {
-  return prisma.$transaction(async (tx) => {
+  const board = await prisma.$transaction(async (tx) => {
     let version = 1;
     if (data.scriptId) {
       const last = await tx.storyboard.findFirst({
@@ -55,6 +56,8 @@ export async function createStoryboardVersion(data: Prisma.StoryboardUncheckedCr
     }
     return tx.storyboard.create({ data: { ...data, version, isActive: true } });
   });
+  archiveInBackground("storyboard", () => archiveStoryboardHistory(board.id));
+  return board;
 }
 
 /** Make one storyboard the active version for its script. */

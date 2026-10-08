@@ -6,6 +6,7 @@
  * re-applying the mutation to the fresh report on a conflict.
  */
 import { prisma } from "@/lib/db";
+import { archiveBeforeReplace, archiveInBackground, archiveRun } from "@/services/artifacts/archive";
 
 export type QcReportDoc = Record<string, unknown>;
 
@@ -24,6 +25,8 @@ export function qcReportOf(value: unknown): QcReportDoc {
  */
 export async function patchQcReport<T extends QcReportDoc = QcReportDoc>(runId: string, mutate: (qc: T) => T | null, opts: { retries?: number } = {}): Promise<T | null> {
   const tries = 1 + (opts.retries ?? QC_PATCH_RETRIES);
+  // Content history: whatever files the report lists now (a re-rendered variant / export replaces its entry).
+  await archiveBeforeReplace("qcReport patch", (o) => archiveRun(runId, { ...o, jobs: false }));
   for (let i = 0; i < tries; i++) {
     const run = await prisma.libtvRun.findUnique({ where: { id: runId }, select: { qcReport: true, updatedAt: true } });
     if (!run) return null;
@@ -31,7 +34,10 @@ export async function patchQcReport<T extends QcReportDoc = QcReportDoc>(runId: 
     const next = mutate(qc);
     if (next === null) return qc;
     const { count } = await prisma.libtvRun.updateMany({ where: { id: runId, updatedAt: run.updatedAt }, data: { qcReport: next as never } });
-    if (count === 1) return next;
+    if (count === 1) {
+      archiveInBackground("qcReport patch", () => archiveRun(runId, { jobs: false }));
+      return next;
+    }
   }
   throw new Error(`qcReport of run ${runId} kept changing — gave up after ${tries} attempts`);
 }

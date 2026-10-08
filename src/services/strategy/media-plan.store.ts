@@ -4,6 +4,7 @@
  * text-model call (narrative: false skips it).
  */
 import { prisma } from "@/lib/db";
+import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
 import type { Baseline } from "@/services/creative/test-plan";
 import { buildMediaPlan, flightDays, writeMediaPlanNarrative, type BriefLike, type MediaPlan, type MediaPlanInput, type MediaPlanLlm } from "./media-plan";
 
@@ -73,6 +74,6 @@ export async function createMediaPlan(projectId: string, req: MediaPlanRequest):
   const plan = buildMediaPlan(input);
   const n = req.narrative === false ? null : await writeMediaPlanNarrative(plan, req.llm);
   const out: MediaPlan = n ? { ...plan, narrative: n.narrative, narrativeSource: n.source } : plan;
-  await prisma.project.update({ where: { id: projectId }, data: { mediaPlan: out as object, mediaPlanAt: new Date() } });
+  await archiveAround("media plan", (o) => archiveProjectFields(projectId, ["mediaPlan"], o), () => prisma.project.update({ where: { id: projectId }, data: { mediaPlan: out as object, mediaPlanAt: new Date() } }));
   return out;
 }
