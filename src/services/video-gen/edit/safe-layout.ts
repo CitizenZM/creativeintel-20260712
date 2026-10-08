@@ -58,8 +58,9 @@ export async function fitLayerPng(png: Buffer, y: number, box: LayoutBox, canvas
 }
 
 /** Which layers move off which (and which way first) when they share the screen. */
-const SEPARATE: { role: string; off: string[]; prefer: "below" | "above" }[] = [
-  { role: "caption", off: ["hook", "claim"], prefer: "below" },
+const SEPARATE: { role: string; off: string[]; prefer: "below" | "above"; gapH?: number }[] = [
+  // A caption butting a headline (23 px on the live talking-head test) reads as one crammed block: keep ~3% clear.
+  { role: "caption", off: ["hook", "claim"], prefer: "below", gapH: 0.03 },
   // Wrapped to the safe width, legal fine print can grow into the CTA button under it.
   { role: "fine", off: ["cta"], prefer: "above" },
 ];
@@ -79,13 +80,14 @@ export function separateCaptions(
     const rule = SEPARATE.find((r) => r.role === it.role);
     if (!rule) return it.y;
     let c = it.y * canvas.h;
+    const g = rule.gapH ? Math.max(gap, Math.round(canvas.h * rule.gapH)) : gap;
     for (const card of items.filter((i) => rule.off.includes(i.role ?? ""))) {
       if (card.startSec >= it.endSec || card.endSec <= it.startSec) continue;
       const top = card.y * canvas.h - card.h / 2;
       const bottom = card.y * canvas.h + card.h / 2;
-      if (c + it.h / 2 + gap <= top || c - it.h / 2 - gap >= bottom) continue;
-      const below = bottom + gap + it.h / 2;
-      const above = top - gap - it.h / 2;
+      if (c + it.h / 2 + g <= top || c - it.h / 2 - g >= bottom) continue;
+      const below = bottom + g + it.h / 2;
+      const above = top - g - it.h / 2;
       const fitsBelow = below + it.h / 2 <= box.bottom;
       const fitsAbove = above - it.h / 2 >= box.top;
       c = rule.prefer === "below" ? (fitsBelow || !fitsAbove ? below : above) : fitsAbove || !fitsBelow ? above : below;
