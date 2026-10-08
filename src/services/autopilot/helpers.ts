@@ -1,7 +1,7 @@
 /** Pure helpers for the autopilot steps (no DB). */
 import { randomBytes } from "node:crypto";
 
-/** cuid-shaped id ("c" + 24 base36) — matches the project-slug middleware's id pattern. */
+/** cuid-shaped id ("c" + 24 base36) — matches the project-slug rewrite id pattern (src/lib/auth/paths.ts). */
 export function newRowId(): string {
   const bytes = randomBytes(24);
   let s = "c";

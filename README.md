@@ -42,6 +42,46 @@ Both workers speak HTTPS to the deployed app only (no DB credentials on the lapt
 
 See `docs/studio-libtv.md` for the LibTV runbook and `.claude/skills/design-video-ad-libtv/` for the production playbook the worker follows.
 
+## Authentication (Clerk)
+
+The proxy (`src/proxy.ts`) picks one gate per deployment (`src/lib/auth/mode.ts`):
+
+| Mode | When | What it does |
+| --- | --- | --- |
+| `clerk` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` **and** `CLERK_SECRET_KEY` set | Every page and `/api` route needs a signed-in user. Pages redirect to `/sign-in?redirect_url=…`, API calls get `401 {"error":"Unauthorized"}`. Cloudflare Access is not checked. |
+| `cf-access` | Clerk keys absent, `CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD` set | The previous Cloudflare Access JWT check. |
+| `none` | nothing configured (local dev) | No gate. |
+
+`AUTH_PROVIDER=clerk|cf-access|none` overrides the default. Forcing a provider that isn't configured (or an unknown value) locks every non-machine route with a 503 rather than serving the app ungated.
+
+Always open in every mode: `/api/worker`, `/api/cron`, `/api/local-files` (each checks its own token). Open in Clerk mode: `/sign-in/*`, `/sign-up/*`, `/api/health`, the root-level files in `public/`.
+
+### Vercel environment variables
+
+| Variable | Value |
+| --- | --- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `pk_live_…` (Production) / `pk_test_…` (Preview) |
+| `CLERK_SECRET_KEY` | `sk_live_…` / `sk_test_…` |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | `/sign-in` |
+| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-up` |
+| `OWNER_EMAILS` | `barronzuo@gmail.com` (comma-separated; these accounts get role `owner`) |
+| `AUTH_CANONICAL_HOST` | `creative.xark.io` — Production only. Page requests on any other host (the `*.vercel.app` aliases) are redirected here, and only sessions issued for it are accepted. Leave unset on Preview. |
+| `AUTH_PROVIDER` | optional override, see above |
+
+Turn off the Cloudflare Access application for creative.xark.io once Clerk is live, or new users can't reach `/sign-up`. `CF_ACCESS_*` can stay set — Clerk mode ignores them.
+
+### Clerk dashboard settings
+
+1. **Configure → User & authentication → Email**: *Sign-up with email* on, *Require email address* on, *Verify at sign-up* on, verification method **Email verification code** (not link). *Sign-in with email* on.
+2. **Configure → User & authentication → Password**: *Sign-up with password* on (keep the breached-password check on). Leave phone, username, passkeys and social connections off unless wanted.
+3. **Configure → Restrictions** (optional): *Allowlist* — only listed emails / domains (e.g. `xark.io`) can sign up; or **Sign-up mode → Restricted** — sign-up by invitation only (invite from **Users → Invite**). *Blocklist* for specific addresses.
+4. **Configure → Paths** (or rely on the env vars): sign-in `/sign-in`, sign-up `/sign-up`, after sign-out `/sign-in`.
+5. **Production instance → Domains**: set the domain to `creative.xark.io` and add the DNS records Clerk lists (CNAMEs for the Frontend API `clerk.creative.xark.io`, `accounts.creative.xark.io`, and the email sending records `clkmail`, `clk._domainkey`, `clk2._domainkey`) in the xark.io DNS zone (or the same names under `xark.io` if the Clerk domain is set to the root). On Cloudflare they must be **DNS only** (grey cloud), not proxied. Wait for Clerk to show them verified and the certificates issued before switching the production keys in.
+
+### Users
+
+`AppUser` (Prisma) is upserted on a person's first signed-in page load (`currentAppUser()` in `src/services/app-user.ts`, called from the root layout; no webhook). New projects record `createdById`. Owners see **Manage users** in the account menu → `/settings/users`.
+
 ## Environment
 
 See `.env.example`. Analysis needs `OPENAI_API_KEY`; research quality improves with `YOUTUBE_API_KEY` and `META_ACCESS_TOKEN`; brand assets and rendered masters need object storage (`CLOUDINARY_URL` or `BLOB_READ_WRITE_TOKEN`); workers need `WORKER_TOKEN`.

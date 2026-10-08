@@ -1,6 +1,6 @@
 /**
  * Creative Agent chat for a project (Studio). Auth is the app-wide Cloudflare Access gate in
- * src/middleware.ts, as for every /api/projects route.
+ * src/proxy.ts, as for every /api/projects route.
  *
  * GET  → { history: [{ at, message, summary }] } — newest first (the undo stack, last 10)
  * POST { message, storyboardId? } → one model call turns the instruction into edit ops (swap hook,

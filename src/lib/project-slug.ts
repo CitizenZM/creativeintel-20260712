@@ -1,4 +1,4 @@
-/** Cosmetic `<slug>-<id>` builder for project URLs. See `src/middleware.ts`. */
+/** Cosmetic `<slug>-<id>` builder for project URLs. See `src/lib/auth/paths.ts` (rewriteSluggedPath). */
 export function slugify(input: string): string {
   return input
     .toLowerCase()

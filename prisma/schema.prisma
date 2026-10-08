@@ -63,6 +63,21 @@ model Workspace {
   projects    Project[]
 }
 
+/// A person who signs in through Clerk (src/services/app-user.ts). Upserted on their first
+/// authenticated page load; role "owner" comes from OWNER_EMAILS, everyone else is a "member".
+model AppUser {
+  id          String    @id @default(cuid())
+  clerkUserId String    @unique
+  email       String
+  name        String?
+  role        String    @default("member") // owner | member
+  createdAt   DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  projects    Project[]
+
+  @@index([email])
+}
+
 model BrandProfile {
   id          String    @id @default(cuid())
   workspaceId String
@@ -157,6 +172,9 @@ model Project {
 
   workspaceId    String?
   workspace      Workspace?    @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  // The signed-in user who created it (Clerk mode only; null for older projects and other auth modes).
+  createdById    String?
+  createdBy      AppUser?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
   brandProfileId String?
   brandProfile   BrandProfile? @relation(fields: [brandProfileId], references: [id], onDelete: SetNull)
 
