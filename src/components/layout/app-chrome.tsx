@@ -6,12 +6,12 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { BottomNav } from "@/components/layout/bottom-nav";
 
-const AUTH_PAGE = /^\/(sign-in|sign-up|blocked)(\/|$)/;
+const AUTH_PAGE = /^\/(sign-in|sign-up|blocked|terms|privacy)(\/|$)/;
 
 /**
  * The app shell (sidebar, mobile topbar, bottom nav). The sign-in / sign-up pages get a bare
  * canvas instead — the shell's widgets call protected APIs a signed-out visitor can't reach. So does
- * /blocked. `isAdmin` (the master admin, or any non-Clerk mode) shows the platform-wide links.
+ * /blocked and the public legal pages (/terms, /privacy). `isAdmin` (the master admin, or any non-Clerk mode) shows the platform-wide links.
  */
 export function AppChrome({
   account,

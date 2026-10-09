@@ -69,6 +69,14 @@ export function Sidebar({ account, isAdmin = true }: { account?: ReactNode; isAd
       <div className="space-y-2 border-t border-border p-3">
         {account && <div className="flex min-h-8 items-center px-1">{account}</div>}
         <ThemeToggle />
+        <div className="flex gap-3 px-1 text-[11px] text-muted-foreground">
+          <Link href="/terms" className="hover:text-foreground">
+            Terms
+          </Link>
+          <Link href="/privacy" className="hover:text-foreground">
+            Privacy
+          </Link>
+        </div>
       </div>
     </aside>
   );

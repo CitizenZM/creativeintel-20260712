@@ -16,8 +16,10 @@ vi.mock("@/lib/auth/mode", () => ({ isClerkActive: () => true }));
 vi.mock("@/services/personal-workspace", () => ({ ensurePersonalWorkspace: m.ensurePersonalWorkspace }));
 
 import { currentAppUser } from "./app-user";
+import { LEGAL_VERSION } from "@/lib/legal";
 
-const clerkUser = (email: string, verified = true) => ({
+const clerkUser = (email: string, verified = true, legalAcceptedAt: number | null = null) => ({
+  legalAcceptedAt,
   primaryEmailAddressId: "e1",
   emailAddresses: [{ id: "e1", emailAddress: email, verification: { status: verified ? "verified" : "unverified" } }],
   firstName: "Ann",
@@ -70,5 +72,17 @@ describe("currentAppUser — first-visit upsert", () => {
     m.update.mockImplementation(async ({ data }: { data: object }) => data);
     await currentAppUser();
     expect(m.update.mock.calls[0][0].data).toMatchObject({ role: "owner", status: "active" });
+  });
+  it("records when (and which version of) the Terms were accepted at sign-up", async () => {
+    const at = Date.UTC(2026, 9, 9, 12);
+    m.currentUser.mockResolvedValue(clerkUser("new@example.com", true, at));
+    await currentAppUser();
+    expect(m.upsert.mock.calls[0][0].create).toMatchObject({ legalAcceptedAt: new Date(at), legalVersion: LEGAL_VERSION });
+  });
+
+  it("records no consent when Clerk has none", async () => {
+    m.currentUser.mockResolvedValue(clerkUser("new@example.com"));
+    await currentAppUser();
+    expect(m.upsert.mock.calls[0][0].create.legalAcceptedAt).toBeUndefined();
   });
 });

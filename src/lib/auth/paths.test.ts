@@ -19,6 +19,8 @@ describe("classifyPath", () => {
     "/sign-in/sso-callback",
     "/sign-up",
     "/sign-up/verify-email-address",
+    "/terms",
+    "/privacy",
     "/api/health",
     "/api/health/",
     "/theme-init.js",

@@ -3,14 +3,14 @@
  *
  * - machine   — worker / cron / local-files: called by local workers, Vercel Cron and Blob upload
  *               callbacks with their own tokens. Never behind a user gate.
- * - public    — Clerk's sign-in / sign-up pages, /api/health (monitoring + smoke tests), the
+ * - public    — Clerk's sign-in / sign-up pages, the legal pages (/terms, /privacy), /api/health (monitoring + smoke tests), the
  *               root-level files in /public (theme-init.js, svgs) and Next internals.
  * - protected — everything else, pages and /api alike.
  */
 export type PathKind = "machine" | "public" | "protected";
 
 const MACHINE = /^\/api\/(worker|cron|local-files)(\/|$)/;
-const AUTH_PAGES = /^\/(sign-in|sign-up)(\/|$)/;
+const AUTH_PAGES = /^\/(sign-in|sign-up|terms|privacy)(\/|$)/;
 const HEALTH = /^\/api\/health\/?$/;
 // Root-level only: a dynamic segment deeper down could end in ".png" and still render a page.
 const PUBLIC_FILE = /^\/[^/]+\.(?:js|css|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|txt|webmanifest)$/i;
