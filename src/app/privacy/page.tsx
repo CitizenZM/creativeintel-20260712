@@ -27,7 +27,7 @@ const sections: LegalSection[] = [
     title: "Who we are and what this covers",
     body: (
       <p>
-        {product} at {site} is operated by {company} (&ldquo;we&rdquo;, &ldquo;us&rdquo;). This policy explains what
+        {product} at {site} is operated by {company}{" "}(&ldquo;we&rdquo;, &ldquo;us&rdquo;). This policy explains what
         personal data we collect when you use the Service, how we use and share it, and the choices and rights you have.
         It forms part of our <Link href={TERMS_PATH} className="underline underline-offset-4">Terms of Service</Link>. For
         content you upload about your own customers or other people, you are the controller and we process it on your

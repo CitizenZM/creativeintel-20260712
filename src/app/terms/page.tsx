@@ -14,7 +14,7 @@ const sections: LegalSection[] = [
     body: (
       <>
         <p>
-          These Terms of Service (&ldquo;Terms&rdquo;) are a binding agreement between you and {company} (&ldquo;we&rdquo;,
+          These Terms of Service (&ldquo;Terms&rdquo;) are a binding agreement between you and {company}{" "}(&ldquo;we&rdquo;,
           &ldquo;us&rdquo;) governing your access to and use of {product} at {site}, including its websites, APIs, AI
           agents, generated outputs and related services (the &ldquo;Service&rdquo;).
         </p>
@@ -214,7 +214,7 @@ const sections: LegalSection[] = [
     title: "Indemnification",
     body: (
       <p>
-        You will defend, indemnify and hold harmless {company} and its affiliates, officers, employees and agents from any
+        You will defend, indemnify and hold harmless {company}{" "}and its affiliates, officers, employees and agents from any
         claims, damages, losses, liabilities, costs and expenses (including reasonable attorneys&rsquo; fees) arising from
         Your Content, your use of the Service or outputs (including any advertisement you publish), your breach of these
         Terms, or your violation of any law or third-party right.
