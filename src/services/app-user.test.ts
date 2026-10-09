@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   upsert: vi.fn(),
   update: vi.fn(),
   ensurePersonalWorkspace: vi.fn(),
+  linkSharesToUser: vi.fn(),
 }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: m.auth, currentUser: m.currentUser }));
 vi.mock("@/lib/db", () => ({
@@ -14,6 +15,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/auth/mode", () => ({ isClerkActive: () => true }));
 vi.mock("@/services/personal-workspace", () => ({ ensurePersonalWorkspace: m.ensurePersonalWorkspace }));
+vi.mock("@/services/project-shares", () => ({ linkSharesToUser: m.linkSharesToUser }));
 
 import { currentAppUser } from "./app-user";
 import { LEGAL_VERSION } from "@/lib/legal";
@@ -84,5 +86,15 @@ describe("currentAppUser — first-visit upsert", () => {
     m.currentUser.mockResolvedValue(clerkUser("new@example.com"));
     await currentAppUser();
     expect(m.upsert.mock.calls[0][0].create.legalAcceptedAt).toBeUndefined();
+  });
+  it("attaches projects already shared with the verified email, and not for an unverified one", async () => {
+    m.currentUser.mockResolvedValue(clerkUser("new@example.com"));
+    await currentAppUser();
+    expect(m.linkSharesToUser).toHaveBeenCalledWith("a1", "new@example.com");
+    vi.clearAllMocks();
+    m.upsert.mockImplementation(async ({ create }: { create: object }) => ({ id: "a2", ...create }));
+    m.currentUser.mockResolvedValue(clerkUser("other@example.com", false));
+    await currentAppUser();
+    expect(m.linkSharesToUser).not.toHaveBeenCalled();
   });
 });

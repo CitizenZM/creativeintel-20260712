@@ -3,12 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   appUser: { findUnique: vi.fn() },
   project: { findMany: vi.fn() },
-  spendEntry: { aggregate: vi.fn() },
+  spendEntry: { aggregate: vi.fn(), create: vi.fn() },
   aiUsage: { aggregate: vi.fn() },
   falVideoJob: { aggregate: vi.fn() },
 }));
 const tenancy = vi.hoisted(() => ({ tenantOfProject: vi.fn() }));
 vi.mock("@/lib/db", () => ({ prisma: db }));
+const actor = vi.hoisted(() => ({ id: null as string | null }));
+vi.mock("./actor", () => ({ currentActorId: async () => actor.id }));
 vi.mock("@/services/tenancy", () => ({
   tenantOfProject: tenancy.tenantOfProject,
   tenantProjectWhere: (t: string | null) => ({ tenant: t }),
@@ -66,10 +68,21 @@ describe("accountSpentThisMonth", () => {
     expect(where.createdAt.gte.toISOString()).toBe("2026-10-01T00:00:00.000Z");
   });
 
-  it("no projects → 0 without querying spend", async () => {
+  it("no projects of their own → only what they triggered elsewhere (ledger by actor)", async () => {
     db.project.findMany.mockResolvedValue([]);
-    expect(await accountSpentThisMonth("ann")).toBe(0);
-    expect(db.spendEntry.aggregate).not.toHaveBeenCalled();
+    spend({ settled: 0.3, usage: 9 });
+    expect(await accountSpentThisMonth("ann")).toBe(0.3);
+    expect(db.aiUsage.aggregate).not.toHaveBeenCalled();
+    expect(db.spendEntry.aggregate.mock.calls[0][0].where.OR).toEqual([{ actorId: "ann" }]);
+  });
+
+  it("counts their own projects' unattributed work plus anything they triggered", async () => {
+    spend({});
+    await accountSpentThisMonth("ann");
+    expect(db.spendEntry.aggregate.mock.calls[0][0].where.OR).toEqual([
+      { actorId: "ann" },
+      { projectId: { in: ["p1", "p2"] }, OR: [{ actorId: null }, { actorId: "ann" }] },
+    ]);
   });
 });
 
@@ -81,8 +94,30 @@ describe("assertAccountAllowance", () => {
   afterEach(() => {
     vi.resetAllMocks();
     vi.unstubAllEnvs();
+    actor.id = null;
   });
   const what = { kind: "video" as const, model: "veo" };
+
+  it("a coworker acting on the admin's project pays from their own allowance, and it's recorded to them", async () => {
+    actor.id = "amy";
+    tenancy.tenantOfProject.mockResolvedValue(null); // the admin's project
+    db.appUser.findUnique.mockResolvedValue({ role: "member", monthlyAllowanceUsd: null });
+    db.spendEntry.create.mockResolvedValue({});
+    spend({ settled: 0.7 });
+    await expect(assertAccountAllowance("p1", 0.2, what)).resolves.toBeUndefined();
+    expect(db.spendEntry.create).toHaveBeenCalledWith({
+      data: { projectId: "p1", kind: "video", model: "veo", estUsd: 0.2, actorId: "amy" },
+    });
+    await expect(assertAccountAllowance("p1", 0.5, what)).rejects.toThrow(/monthly AI allowance/);
+  });
+
+  it("the admin acting anywhere is never capped", async () => {
+    actor.id = "boss";
+    tenancy.tenantOfProject.mockResolvedValue("ann");
+    db.appUser.findUnique.mockResolvedValue({ role: "owner", monthlyAllowanceUsd: null });
+    spend({ settled: 999 });
+    await expect(assertAccountAllowance("p1", 50, what)).resolves.toBeUndefined();
+  });
 
   it("never caps the admin's projects, nor calls without a project", async () => {
     tenancy.tenantOfProject.mockResolvedValue(null);

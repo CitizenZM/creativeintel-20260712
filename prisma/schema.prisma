@@ -93,6 +93,7 @@ model AppUser {
   lastSeenAt  DateTime    @default(now())
   projects    Project[]
   workspaces  Workspace[]
+  sharedProjects ProjectShare[] @relation("ShareRecipient")
 
   @@index([email])
 }
@@ -282,6 +283,7 @@ model Project {
   // Scheduled report delivery (services/reports/delivery.ts): {enabled, channel, target, schedule}.
   // Disabled by default; sending also needs REPORT_DELIVERY_SEND=on.
   reportDelivery    Json?
+  shares       ProjectShare[]
 }
 
 model Brand {
@@ -1266,11 +1268,15 @@ model SpendEntry {
   model     String
   estUsd    Float
   actualUsd Float? // null until reconciled (counts at estUsd)
+  // Who triggered it when that isn't the project's owner (a coworker with an edit share):
+  // their monthly allowance pays for it (src/services/ops/account-allowance.ts).
+  actorId   String?
   createdAt DateTime @default(now())
 
   @@index([projectId, createdAt])
   @@index([runId])
   @@index([jobId])
+  @@index([actorId, createdAt])
 }
 
 /// URL-to-Video Autopilot (services/autopilot): one resumable state machine per call —
@@ -1404,4 +1410,28 @@ model ArtifactBlob {
   artifact   ProjectArtifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
   data       Bytes
   createdAt  DateTime        @default(now())
+}
+
+/// A project shared with a coworker (src/services/project-shares.ts). Created by the master admin
+/// from /settings/users (with or without a Clerk invitation); keyed by email so it can be set up
+/// before the person has an account, and linked to their AppUser on first sign-in.
+/// access: view (read pages, play media) | download (+ exports, archives, report files)
+///       | edit (+ changes and generation; paid AI counts against the coworker's own allowance).
+/// The proxy enforces it (src/lib/auth/gate.ts); only the project's owner can delete it, set its
+/// budget, approve LibTV runs or manage its sharing.
+model ProjectShare {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  email       String
+  userId      String?
+  user        AppUser? @relation("ShareRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  access      String   @default("view")
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([projectId, email])
+  @@index([userId])
+  @@index([email])
 }

@@ -5,6 +5,7 @@ import { selectAuthMode } from "@/lib/auth/mode";
 import { decideAccess, deniedResponse } from "@/lib/auth/gate";
 import { canonicalRedirect, classifyPath, isApiPath, rewriteSluggedPath } from "@/lib/auth/paths";
 import { getPrincipal, getProjectTenant } from "@/services/access";
+import { ACTOR_HEADER } from "@/lib/auth/actor";
 
 /**
  * The gate in front of every route (Next 16 renamed `middleware` to `proxy`).
@@ -30,13 +31,21 @@ import { getPrincipal, getProjectTenant } from "@/services/access";
 const AUTH = selectAuthMode(process.env);
 if (AUTH.mode === "locked") console.error(`[auth] every non-machine route is locked: ${AUTH.reason}`);
 
-/** Strip a brand slug from /projects/<slug>-<cuid> (see src/lib/auth/paths.ts). */
-function continueRequest(request: NextRequest): NextResponse {
+/**
+ * Strip a brand slug from /projects/<slug>-<cuid> (see src/lib/auth/paths.ts), and pass on who is
+ * acting (ACTOR_HEADER = their AppUser.id) so a coworker's spend on a shared project is billed to
+ * their own allowance (src/services/ops/actor.ts). A client-sent copy of that header is always
+ * dropped first — only the proxy may set it.
+ */
+function continueRequest(request: NextRequest, actorId: string | null = null): NextResponse {
+  const headers = new Headers(request.headers);
+  headers.delete(ACTOR_HEADER);
+  if (actorId) headers.set(ACTOR_HEADER, actorId);
   const target = rewriteSluggedPath(request.nextUrl.pathname);
-  if (!target) return NextResponse.next();
+  if (!target) return NextResponse.next({ request: { headers } });
   const url = request.nextUrl.clone();
   url.pathname = target;
-  return NextResponse.rewrite(url);
+  return NextResponse.rewrite(url, { request: { headers } });
 }
 
 // ── Clerk ────────────────────────────────────────────────────────────────────
@@ -54,12 +63,17 @@ const clerkGate =
             const { userId, redirectToSignIn } = await auth();
             const decision = await decideAccess({
               pathname: request.nextUrl.pathname,
+              method: request.method,
+              search: request.nextUrl.search,
               userId,
               principalOf: getPrincipal,
               projectTenant: getProjectTenant,
             });
             if (decision === "sign-in") return redirectToSignIn({ returnBackUrl: request.url });
             if (decision !== "allow") return deniedResponse(decision, request);
+            // Allowed and signed in: the principal is cached from decideAccess, so this is free.
+            const actor = userId ? await getPrincipal(userId).catch(() => null) : null;
+            return continueRequest(request, actor?.appUserId ?? null);
           }
           return continueRequest(request);
         },
