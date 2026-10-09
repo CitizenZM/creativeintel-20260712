@@ -116,11 +116,27 @@ export function ProjectsTable({ projects }: { projects: ProjectRow[] }) {
         )}
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        {visible.length} of {projects.length} shown
-      </p>
+      {projects.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {visible.length} of {projects.length} shown
+        </p>
+      )}
 
-      {visible.length === 0 ? (
+      {projects.length === 0 ? (
+        // A brand-new account (sign-up is open; each one starts with an empty workspace).
+        <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">No projects yet</p>
+          <p className="mt-1">
+            Start with a brand and its competitors — research, insights and creative all live inside a project.
+          </p>
+          <Link
+            href="/projects/new"
+            className="mt-3 inline-flex rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:bg-foreground/90"
+          >
+            New project
+          </Link>
+        </div>
+      ) : visible.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
           Nothing matches that filter.
         </div>

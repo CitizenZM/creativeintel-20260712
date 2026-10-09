@@ -52,17 +52,26 @@ export function WorkspaceSwitcher() {
     };
   }, []);
 
-  // Close on outside click.
+  // Close on outside click or Escape.
   useEffect(() => {
     if (!open) return;
+    function close() {
+      setOpen(false);
+      setCreating(false);
+    }
     function onClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-        setCreating(false);
-      }
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
+    }
+    function onKey(e: KeyboardEvent) {
+      // The new-workspace input handles its own Escape (cancels the name, keeps the menu open).
+      if (e.key === "Escape" && !(e.target instanceof HTMLInputElement)) close();
     }
     document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
 
   async function switchTo(id: string) {
