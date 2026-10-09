@@ -7,6 +7,8 @@ import { prisma } from "@/lib/db";
 import { currentAppUser } from "@/services/app-user";
 import { UserActions } from "@/components/settings/user-actions";
 import { AllowanceEditor } from "@/components/settings/allowance-editor";
+import { InvitePanel, type InviteRow } from "@/components/settings/invite-panel";
+import { clerkErrorMessage, listPendingInvitations } from "@/services/invitations";
 import { accountUsage, defaultMemberAllowance } from "@/services/ops/account-allowance";
 
 export const metadata: Metadata = { title: "Users · CreativeIntel OS" };
@@ -30,6 +32,14 @@ export default async function UsersPage() {
     }),
     prisma.project.groupBy({ by: ["workspaceId"], _count: { _all: true } }),
   ]);
+  let pending: InviteRow[] = [];
+  let inviteError: string | null = null;
+  try {
+    pending = await listPendingInvitations();
+  } catch (err) {
+    inviteError = clerkErrorMessage(err);
+  }
+
   // Paid AI used this month against each member's allowance (admins are uncapped).
   const usage = new Map(
     await Promise.all(
@@ -51,7 +61,8 @@ export default async function UsersPage() {
         title="Users"
         description={`Everyone who has created an account. Sign-up is open and each account only sees its own workspace; admins (OWNER_EMAILS, or made here) see everything. Members can spend at most their monthly AI allowance (default $${defaultMemberAllowance().toFixed(2)}) on your provider keys.`}
       />
-      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        <InvitePanel pending={pending} error={inviteError} />
         <div className="rounded-lg border border-border">
           <Table>
             <TableHeader>
