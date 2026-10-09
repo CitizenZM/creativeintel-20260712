@@ -18,19 +18,26 @@ describe("clerkProfile", () => {
       email: "barronzuo@gmail.com",
       name: "Barron Zuo",
       ownerEligibleEmail: "barronzuo@gmail.com",
+      legalAcceptedAt: null,
     });
+  });
+
+  it("carries Clerk's legal-consent timestamp as a Date", () => {
+    const at = Date.UTC(2026, 9, 9, 12);
+    expect(clerkProfile({ ...base, legalAcceptedAt: at }).legalAcceptedAt).toEqual(new Date(at));
+    expect(clerkProfile({ ...base, legalAcceptedAt: null }).legalAcceptedAt).toBeNull();
   });
 
   it("falls back to the first email and the username", () => {
     expect(
       clerkProfile({ ...base, primaryEmailAddressId: null, firstName: null, lastName: null, username: "bz" }),
-    ).toEqual({ email: "old@example.com", name: "bz", ownerEligibleEmail: null });
+    ).toEqual({ email: "old@example.com", name: "bz", ownerEligibleEmail: null, legalAcceptedAt: null });
   });
 
   it("has no email or name when Clerk has none", () => {
     expect(
       clerkProfile({ primaryEmailAddressId: null, emailAddresses: [], firstName: " ", lastName: null, username: null }),
-    ).toEqual({ email: null, name: null, ownerEligibleEmail: null });
+    ).toEqual({ email: null, name: null, ownerEligibleEmail: null, legalAcceptedAt: null });
   });
 
   it("an unverified email is never owner-eligible", () => {

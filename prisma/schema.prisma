@@ -85,6 +85,10 @@ model AppUser {
   // (src/services/ops/account-allowance.ts). Null = MEMBER_MONTHLY_ALLOWANCE_USD (default $1).
   // Admins (role owner) are never capped by it.
   monthlyAllowanceUsd Float?
+  // When the account accepted the Terms of Service and Privacy Policy at sign-up (Clerk's
+  // legal-consent checkbox → user.legalAcceptedAt) and which version (src/lib/legal.ts).
+  legalAcceptedAt     DateTime?
+  legalVersion        String?
   createdAt   DateTime    @default(now())
   lastSeenAt  DateTime    @default(now())
   projects    Project[]

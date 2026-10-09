@@ -14,7 +14,7 @@ export default function SignUpPage() {
     );
   }
   return (
-    <AuthCard title="Create your account" subtitle="Sign up with your email — we'll send a verification code.">
+    <AuthCard consent title="Create your account" subtitle="Sign up with your email — we'll send a verification code.">
       <SignUp />
     </AuthCard>
   );

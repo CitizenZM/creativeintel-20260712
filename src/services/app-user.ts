@@ -7,6 +7,7 @@ import { isClerkActive } from "@/lib/auth/mode";
 import { clerkProfile, needsTouch } from "@/lib/auth/profile";
 import { resolveRole } from "@/lib/auth/roles";
 import { ensurePersonalWorkspace } from "@/services/personal-workspace";
+import { LEGAL_VERSION } from "@/lib/legal";
 
 /**
  * The signed-in person's AppUser row, created on their first authenticated request (lazy upsert —
@@ -46,11 +47,19 @@ export const currentAppUser = cache(async (): Promise<AppUser | null> => {
     // First visit: fetch the profile from Clerk's Backend API (once per user).
     const user = await currentUser();
     if (!user) return null;
-    const { email, name, ownerEligibleEmail } = clerkProfile(user);
+    const { email, name, ownerEligibleEmail, legalAcceptedAt } = clerkProfile(user);
     const role = resolveRole(ownerEligibleEmail, owners);
     const created = await prisma.appUser.upsert({
       where: { clerkUserId: userId },
-      create: { clerkUserId: userId, email: email ?? "", name, role, lastSeenAt: now },
+      create: {
+        clerkUserId: userId,
+        email: email ?? "",
+        name,
+        role,
+        lastSeenAt: now,
+        // Evidence of consent: Clerk records the sign-up checkbox; we keep it with the version shown.
+        ...(legalAcceptedAt ? { legalAcceptedAt, legalVersion: LEGAL_VERSION } : {}),
+      },
       update: { lastSeenAt: now },
     });
     if (role !== "owner") {

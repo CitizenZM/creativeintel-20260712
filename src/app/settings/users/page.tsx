@@ -62,6 +62,7 @@ export default async function UsersPage() {
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Projects</TableHead>
                 <TableHead>AI this month</TableHead>
+                <TableHead>Terms accepted</TableHead>
                 <TableHead>Joined (UTC)</TableHead>
                 <TableHead>Last seen (UTC)</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -94,6 +95,9 @@ export default async function UsersPage() {
                         custom={u.monthlyAllowanceUsd != null}
                       />
                     )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {u.legalAcceptedAt ? `${fmt.format(u.legalAcceptedAt)} · v${u.legalVersion ?? "?"}` : "—"}
                   </TableCell>
                   <TableCell className="text-muted-foreground">{fmt.format(u.createdAt)}</TableCell>
                   <TableCell className="text-muted-foreground">{fmt.format(u.lastSeenAt)}</TableCell>

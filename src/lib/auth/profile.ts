@@ -5,6 +5,8 @@ export interface ClerkUserLike {
   firstName: string | null;
   lastName: string | null;
   username: string | null;
+  /** Epoch ms when the user ticked Clerk's legal-consent box at sign-up; null/absent if never. */
+  legalAcceptedAt?: number | null;
 }
 
 /**
@@ -15,6 +17,7 @@ export function clerkProfile(user: ClerkUserLike): {
   email: string | null;
   name: string | null;
   ownerEligibleEmail: string | null;
+  legalAcceptedAt: Date | null;
 } {
   const primary =
     user.emailAddresses.find((e) => e.id === user.primaryEmailAddressId) ?? user.emailAddresses[0] ?? null;
@@ -27,6 +30,7 @@ export function clerkProfile(user: ClerkUserLike): {
     email,
     name: fullName || user.username?.trim() || null,
     ownerEligibleEmail: primary?.verification?.status === "verified" ? email : null,
+    legalAcceptedAt: typeof user.legalAcceptedAt === "number" ? new Date(user.legalAcceptedAt) : null,
   };
 }
 
