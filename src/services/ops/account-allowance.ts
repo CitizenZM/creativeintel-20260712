@@ -11,11 +11,17 @@
  *    engines, OpenRouter media, Veo / fal submits in the studio routes).
  * "Spent" is the larger of the ledger total and the provider-reported AI usage of the account's
  * projects this month — each alone can miss calls, neither double-counts.
+ *
+ * Shared projects: when a coworker with an edit share triggers paid work on someone else's project,
+ * the proxy-stamped actor (src/services/ops/actor.ts) is charged instead — SpendEntry.actorId — so a
+ * coworker can never spend the project owner's credit past their own allowance. The master admin as
+ * actor is never capped. Work with no actor (cron, worker) falls back to the project's account.
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { tenantOfProject, tenantProjectWhere } from "@/services/tenancy";
 import { BudgetExceededError, type SpendKind } from "./budget-guard";
+import { currentActorId } from "./actor";
 
 export const DEFAULT_MEMBER_ALLOWANCE_USD = 1;
 
@@ -38,13 +44,32 @@ export interface AccountLimit {
   allowanceUsd: number;
 }
 
+/** A member account's allowance; null for an admin (uncapped) or an unknown id. */
+export async function accountLimitOfUser(userId: string, db: Db = prisma): Promise<AccountLimit | null> {
+  const user = await db.appUser.findUnique({ where: { id: userId }, select: { role: true, monthlyAllowanceUsd: true } });
+  if (!user || user.role === "owner") return null;
+  return { tenant: userId, allowanceUsd: user.monthlyAllowanceUsd ?? defaultMemberAllowance() };
+}
+
 /** The member account a project belongs to and its allowance; null for the admin's (uncapped) projects. */
 export async function accountLimitOfProject(projectId: string, db: Db = prisma): Promise<AccountLimit | null> {
   const tenant = await tenantOfProject(projectId);
   if (!tenant) return null;
-  const user = await db.appUser.findUnique({ where: { id: tenant }, select: { role: true, monthlyAllowanceUsd: true } });
-  if (!user || user.role === "owner") return null;
-  return { tenant, allowanceUsd: user.monthlyAllowanceUsd ?? defaultMemberAllowance() };
+  return accountLimitOfUser(tenant, db);
+}
+
+/**
+ * Which account pays for paid work on this project right now: the acting person when the proxy
+ * stamped one (a member → their allowance; the admin → null, uncapped), else the project's account.
+ * `actorId` is what to record on the SpendEntry.
+ */
+export async function payingAccount(
+  projectId: string,
+  db: Db = prisma,
+): Promise<{ limit: AccountLimit | null; actorId: string | null }> {
+  const actorId = await currentActorId();
+  if (actorId) return { limit: await accountLimitOfUser(actorId, db), actorId };
+  return { limit: await accountLimitOfProject(projectId, db), actorId: null };
 }
 
 async function tenantProjectIds(tenant: string, db: Db): Promise<string[]> {
@@ -55,8 +80,11 @@ async function tenantProjectIds(tenant: string, db: Db): Promise<string[]> {
 /** The account's spend this month in the ledger (open reservations at their estimate). */
 export async function ledgerSpentThisMonth(tenant: string, db: Db = prisma, now = new Date()): Promise<number> {
   const ids = await tenantProjectIds(tenant, db);
-  if (!ids.length) return 0;
-  const where = { projectId: { in: ids }, createdAt: { gte: monthStartUtc(now) } };
+  // Their own projects' work that nobody else triggered, plus everything they triggered anywhere.
+  const where: Prisma.SpendEntryWhereInput = {
+    createdAt: { gte: monthStartUtc(now) },
+    OR: [{ actorId: tenant }, ...(ids.length ? [{ projectId: { in: ids }, OR: [{ actorId: null }, { actorId: tenant }] }] : [])],
+  };
   const [open, settled] = await Promise.all([
     db.spendEntry.aggregate({ where: { ...where, actualUsd: null }, _sum: { estUsd: true } }),
     db.spendEntry.aggregate({ where: { ...where, actualUsd: { not: null } }, _sum: { actualUsd: true } }),
@@ -71,8 +99,8 @@ export async function ledgerSpentThisMonth(tenant: string, db: Db = prisma, now 
  */
 export async function accountSpentThisMonth(tenant: string, db: Db = prisma, now = new Date()): Promise<number> {
   const ids = await tenantProjectIds(tenant, db);
-  if (!ids.length) return 0;
   const since = monthStartUtc(now);
+  if (!ids.length) return ledgerSpentThisMonth(tenant, db, now);
   const [ledger, usage, inflight] = await Promise.all([
     ledgerSpentThisMonth(tenant, db, now),
     db.aiUsage.aggregate({ where: { projectId: { in: ids }, createdAt: { gte: since } }, _sum: { costUsd: true } }),
@@ -94,7 +122,7 @@ export async function assertAccountAllowance(
   what: { kind: SpendKind; model: string },
 ): Promise<void> {
   if (!projectId || process.env.SPEND_GUARD === "off") return;
-  const limit = await accountLimitOfProject(projectId);
+  const { limit, actorId } = await payingAccount(projectId);
   if (!limit) return;
   const spent = await accountSpentThisMonth(limit.tenant);
   if (spent + estUsd > limit.allowanceUsd + 1e-9) {
@@ -103,6 +131,13 @@ export async function assertAccountAllowance(
       limitUsd: limit.allowanceUsd,
       spentUsd: spent,
     });
+  }
+  // A coworker's direct (non-ledger) call on a project that isn't theirs: record it against them,
+  // since the provider usage row only knows the project.
+  if (actorId && estUsd > 0 && (await tenantOfProject(projectId)) !== actorId) {
+    await prisma.spendEntry
+      .create({ data: { projectId, kind: what.kind, model: what.model.slice(0, 120), estUsd, actorId } })
+      .catch((err) => console.warn("[allowance] could not record a coworker's direct spend:", err));
   }
 }
 

@@ -8,6 +8,8 @@ import { currentAppUser } from "@/services/app-user";
 import { UserActions } from "@/components/settings/user-actions";
 import { AllowanceEditor } from "@/components/settings/allowance-editor";
 import { InvitePanel, type InviteRow } from "@/components/settings/invite-panel";
+import { SharesTable } from "@/components/settings/shares-table";
+import { listShares } from "@/services/project-shares";
 import { clerkErrorMessage, listPendingInvitations } from "@/services/invitations";
 import { accountUsage, defaultMemberAllowance } from "@/services/ops/account-allowance";
 
@@ -31,6 +33,14 @@ export default async function UsersPage() {
       include: { _count: { select: { workspaces: true } } },
     }),
     prisma.project.groupBy({ by: ["workspaceId"], _count: { _all: true } }),
+  ]);
+  const [shareRows, shareable] = await Promise.all([
+    listShares(),
+    prisma.project.findMany({
+      where: { archivedAt: null },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true, brandName: true, name: true, category: true },
+    }),
   ]);
   let pending: InviteRow[] = [];
   let inviteError: string | null = null;
@@ -62,7 +72,12 @@ export default async function UsersPage() {
         description={`Everyone who has created an account. Sign-up is open and each account only sees its own workspace; admins (OWNER_EMAILS, or made here) see everything. Members can spend at most their monthly AI allowance (default $${defaultMemberAllowance().toFixed(2)}) on your provider keys.`}
       />
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-        <InvitePanel pending={pending} error={inviteError} />
+        <InvitePanel
+          pending={pending}
+          error={inviteError}
+          projects={shareable.map((p) => ({ id: p.id, name: p.brandName || p.name, category: p.category }))}
+        />
+        <SharesTable shares={shareRows} />
         <div className="rounded-lg border border-border">
           <Table>
             <TableHeader>

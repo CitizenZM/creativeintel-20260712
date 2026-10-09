@@ -98,10 +98,15 @@ export async function getActiveWorkspace() {
  *
  * The default workspace also surfaces legacy projects that have no workspace
  * assigned (workspaceId = null), so nothing is ever hidden after this feature
- * ships. Every other workspace — and every member — sees only its own projects.
+ * ships. Every other workspace sees only its own projects; a member also sees projects shared with them.
  */
 export async function projectWorkspaceFilter(): Promise<Prisma.ProjectWhereInput> {
+  const viewer = await currentViewer();
   const active = await getActiveWorkspace();
+  if (viewer.kind === "member") {
+    // Their workspace's projects, plus any project shared with them (src/services/project-shares.ts).
+    return { OR: [{ workspaceId: active.id }, { shares: { some: { userId: viewer.user.id } } }] };
+  }
   const fallback = await ensureDefaultWorkspace();
   if (active.id === fallback.id) {
     return { OR: [{ workspaceId: active.id }, { workspaceId: null }] };

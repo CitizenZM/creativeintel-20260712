@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Principal, ProjectTenant } from "./access";
-import { canAccessProject } from "./access";
+import { ACCESS_RANK, projectAccessFor } from "./access";
 import { classifyPath, isApiPath, projectIdFromPath } from "./paths";
 
 /** Where a blocked account lands. Signed-in users may always reach it. */
@@ -21,6 +21,40 @@ export function isAdminOnlyPath(pathname: string): boolean {
   return ADMIN_ONLY.test(pathname);
 }
 
+/**
+ * What a request does to a project, for shared access levels:
+ * - read     — pages and GET APIs (incl. playing media)
+ * - download — exports and archives: the history zip, artifact downloads, the campaign export, the
+ *              report as .docx, a run's export pack
+ * - write    — any other change, including generation
+ * - owner    — only the project's owner: delete it, set its budget, approve LibTV runs, manage sharing
+ */
+export type ProjectAction = "read" | "download" | "write" | "owner";
+
+const PROJECT_API = /^\/api\/projects\/[^/]+(\/.*)?$/;
+const DOWNLOAD_GET = /^\/(artifacts\/[^/]+\/download|artifacts\/archive|export)\/?$/;
+const DOWNLOAD_POST = /^\/studio\/libtv-runs\/[^/]+\/export-pack\/?$/;
+const OWNER_ONLY = /^\/(shares(\/.*)?|studio\/libtv-runs\/[^/]+\/approve\/?)$/;
+
+export function projectAction(pathname: string, method = "GET", search = ""): ProjectAction {
+  const m = pathname.match(PROJECT_API);
+  if (!m) return "read"; // project pages
+  const rest = (m[1] ?? "").replace(/\/+$/, "");
+  const verb = method.toUpperCase();
+  if (OWNER_ONLY.test(rest)) return "owner";
+  if (rest === "" && verb === "DELETE") return "owner";
+  if (rest === "/spend" && verb !== "GET" && verb !== "HEAD") return "owner";
+  if (verb === "GET" || verb === "HEAD") {
+    if (DOWNLOAD_GET.test(rest)) return "download";
+    if (rest === "/report" && new URLSearchParams(search).get("format") === "docx") return "download";
+    return "read";
+  }
+  if (DOWNLOAD_POST.test(rest)) return "download";
+  return "write";
+}
+
+const REQUIRED_RANK: Record<ProjectAction, number> = { read: 1, download: 2, write: 3, owner: 4 };
+
 export type AccessDecision =
   | "allow"
   | "sign-in" // signed-out page request → Clerk sign-in
@@ -30,24 +64,30 @@ export type AccessDecision =
   | "forbidden-page" // member on an admin page, or on someone else's project → /projects
   | "forbidden-api" // member on an admin API → 403
   | "not-found-api" // member on someone else's project API → 404 (doesn't reveal it exists)
+  | "insufficient-api" // coworker whose share level doesn't allow this action → 403
   | "unavailable"; // a lookup failed → 503 (fail closed)
 
 /**
  * The Clerk-mode gate as a pure decision, so it can be tested as a table. Machine and public routes
  * (src/lib/auth/paths.ts) pass untouched; everything else needs a signed-in, unblocked user. Members
- * are further kept out of admin areas and out of every project their own workspace doesn't hold.
+ * are further kept out of admin areas and out of every project their own workspace doesn't hold,
+ * unless it was shared with them — then only as far as their share level allows (projectAction).
  * Lookups are only called when the answer depends on them.
  */
 export async function decideAccess({
   pathname,
+  method = "GET",
+  search = "",
   userId,
   principalOf,
   projectTenant,
 }: {
   pathname: string;
+  method?: string;
+  search?: string;
   userId: string | null | undefined;
   principalOf: (clerkUserId: string) => Promise<Principal>;
-  projectTenant: (projectId: string) => Promise<ProjectTenant | null>;
+  projectTenant: (projectId: string, appUserId: string | null) => Promise<ProjectTenant | null>;
 }): Promise<AccessDecision> {
   if (classifyPath(pathname) !== "protected") return "allow";
   const api = isApiPath(pathname);
@@ -61,8 +101,12 @@ export async function decideAccess({
 
     if (isAdminOnlyPath(pathname)) return api ? "forbidden-api" : "forbidden-page";
     const projectId = projectIdFromPath(pathname);
-    if (projectId && !canAccessProject(principal, await projectTenant(projectId))) {
-      return api ? "not-found-api" : "forbidden-page";
+    if (projectId) {
+      const access = projectAccessFor(principal, await projectTenant(projectId, principal.appUserId));
+      if (!access) return api ? "not-found-api" : "forbidden-page";
+      if (ACCESS_RANK[access] < REQUIRED_RANK[projectAction(pathname, method, search)]) {
+        return api ? "insufficient-api" : "forbidden-page";
+      }
     }
     return "allow";
   } catch (err) {
@@ -95,6 +139,11 @@ export function deniedResponse(
       return NextResponse.json({ error: "Admin only" }, { status: 403 });
     case "not-found-api":
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    case "insufficient-api":
+      return NextResponse.json(
+        { error: "Your access to this shared project doesn't allow that — ask its owner for a higher level." },
+        { status: 403 },
+      );
     case "unavailable":
       return isApiPath(request.nextUrl.pathname)
         ? NextResponse.json({ error: "Access check unavailable" }, { status: 503 })

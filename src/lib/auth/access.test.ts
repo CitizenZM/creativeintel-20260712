@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { canAccessProject, createPrincipalLookup, normalizeStatus, type Principal, type PrincipalRow } from "./access";
+import { canAccessProject, createPrincipalLookup, normalizeShareAccess, normalizeStatus, projectAccessFor, type Principal, type PrincipalRow } from "./access";
 import { createTtlCache } from "./ttl-cache";
 
 function lookup({
@@ -93,5 +93,21 @@ describe("canAccessProject", () => {
     expect(canAccessProject(ann, { ownerId: null })).toBe(false);
     expect(canAccessProject(ann, null)).toBe(false);
     expect(canAccessProject({ ...ann, appUserId: null }, { ownerId: null })).toBe(false);
+  });
+});
+
+describe("projectAccessFor", () => {
+  const amy: Principal = { appUserId: "amy", role: "member", status: "active" };
+  it("full for the master admin and the owning member; the share level otherwise; null without one", () => {
+    expect(projectAccessFor({ appUserId: "o", role: "owner", status: "active" }, { ownerId: "x" })).toBe("full");
+    expect(projectAccessFor(amy, { ownerId: "amy" })).toBe("full");
+    expect(projectAccessFor(amy, { ownerId: null, share: "download" })).toBe("download");
+    expect(projectAccessFor(amy, { ownerId: "bob", share: null })).toBeNull();
+    expect(projectAccessFor(amy, null)).toBeNull();
+  });
+  it("normalizeShareAccess only accepts the three levels", () => {
+    expect(normalizeShareAccess("edit")).toBe("edit");
+    expect(normalizeShareAccess("admin")).toBeNull();
+    expect(normalizeShareAccess(null)).toBeNull();
   });
 });

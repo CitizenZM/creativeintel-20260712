@@ -70,14 +70,36 @@ export function createPrincipalLookup(deps: PrincipalDeps) {
   };
 }
 
-/** Whose data a project is: its workspace's owner (null = the master admin's). */
-export interface ProjectTenant {
-  ownerId: string | null;
+/** A coworker's level on a project shared with them (ProjectShare.access). */
+export type ShareAccess = "view" | "download" | "edit";
+export const SHARE_ACCESS: readonly ShareAccess[] = ["view", "download", "edit"];
+
+export function normalizeShareAccess(raw: string | null | undefined): ShareAccess | null {
+  return raw === "view" || raw === "download" || raw === "edit" ? raw : null;
 }
 
-/** May this principal open this project? Owners: always. Members: only projects in their own workspace. */
+/**
+ * Whose data a project is: its workspace's owner (null = the master admin's), plus — when looked up
+ * for a particular user — that user's share of it, if any.
+ */
+export interface ProjectTenant {
+  ownerId: string | null;
+  share?: ShareAccess | null;
+}
+
+/** full = it's yours (or you're the master admin); otherwise the level it was shared with you at. */
+export type ProjectAccess = "full" | ShareAccess;
+
+export const ACCESS_RANK: Record<ProjectAccess, number> = { view: 1, download: 2, edit: 3, full: 4 };
+
+export function projectAccessFor(principal: Principal, tenant: ProjectTenant | null): ProjectAccess | null {
+  if (principal.role === "owner") return "full";
+  if (!tenant || !principal.appUserId) return null;
+  if (tenant.ownerId === principal.appUserId) return "full";
+  return tenant.share ?? null;
+}
+
+/** May this principal open this project at all? Owners: always. Members: their own, or shared with them. */
 export function canAccessProject(principal: Principal, tenant: ProjectTenant | null): boolean {
-  if (principal.role === "owner") return true;
-  if (!tenant || !principal.appUserId) return false;
-  return tenant.ownerId === principal.appUserId;
+  return projectAccessFor(principal, tenant) !== null;
 }

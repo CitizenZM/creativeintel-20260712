@@ -4,7 +4,7 @@
  * so overlapping ticks (approve request, status poll, cron) can never reserve past the budget.
  */
 import { prisma } from "@/lib/db";
-import { accountLimitOfProject, accountSpentThisMonth } from "./account-allowance";
+import { accountSpentThisMonth, payingAccount } from "./account-allowance";
 import { budgetCheck, BudgetExceededError, type BudgetState, type SpendKind, type SpendLedger, type SpendReservation, type SpendScope } from "./budget-guard";
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -43,9 +43,10 @@ export class PrismaSpendLedger implements SpendLedger {
         const s = await state(tx, scope.projectId, scope.runId);
         const refusal = budgetCheck(estUsd, s.project, s.run);
         if (refusal) throw new BudgetExceededError(scope, estUsd, refusal);
-        // A member account's monthly allowance across all its projects (account-allowance.ts),
-        // serialized per account so two projects can't both reserve the last dollar.
-        const account = await accountLimitOfProject(scope.projectId, tx);
+        // The paying account's monthly allowance across all its projects (account-allowance.ts) —
+        // the acting coworker on a shared project, else the project's own account — serialized per
+        // account so two projects can't both reserve the last dollar.
+        const { limit: account, actorId } = await payingAccount(scope.projectId, tx);
         if (account) {
           await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`spend-account:${account.tenant}`}))::text AS locked`;
           const spentUsd = await accountSpentThisMonth(account.tenant, tx);
@@ -54,7 +55,7 @@ export class PrismaSpendLedger implements SpendLedger {
           }
         }
         const row = await tx.spendEntry.create({
-          data: { projectId: scope.projectId, runId: scope.runId ?? null, jobId: scope.jobId ?? null, kind: scope.kind, model: scope.model.slice(0, 120), estUsd },
+          data: { projectId: scope.projectId, runId: scope.runId ?? null, jobId: scope.jobId ?? null, kind: scope.kind, model: scope.model.slice(0, 120), estUsd, actorId },
           select: { id: true },
         });
         await tx.project.updateMany({ where: { id: scope.projectId }, data: { spentUsd: round(s.project.spentUsd + estUsd) } });

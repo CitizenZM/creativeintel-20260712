@@ -103,7 +103,7 @@ describe("decideAccess (proxy decision table)", () => {
     expect(list.projectTenant).not.toHaveBeenCalled();
     const one = run(`/projects/slug-${P}/studio`, ANN);
     await one.decision;
-    expect(one.projectTenant).toHaveBeenCalledWith(P);
+    expect(one.projectTenant).toHaveBeenCalledWith(P, "ann");
   });
 
   it("fails closed when a lookup throws", async () => {
@@ -173,5 +173,76 @@ describe("deniedResponse", () => {
     const page = deniedResponse("unavailable", req("/"));
     expect(page.status).toBe(503);
     expect(await page.text()).toMatch(/unavailable/i);
+  });
+});
+
+describe("shared projects — access levels", () => {
+  const P = "cshareprojectidxxxxxxxxx";
+  const AMY: Principal = { appUserId: "amy", role: "member", status: "active" };
+  const decide = (pathname: string, share: "view" | "download" | "edit" | null, method = "GET", search = "") =>
+    decideAccess({
+      pathname,
+      method,
+      search,
+      userId: "clerk_amy",
+      principalOf: async () => AMY,
+      projectTenant: async (_id, uid) => ({ ownerId: null, share: uid === "amy" ? share : null }),
+    });
+
+  it.each([
+    // path, method, search, view, download, edit
+    [`/projects/${P}/insights`, "GET", "", "allow", "allow", "allow"],
+    [`/api/projects/${P}`, "GET", "", "allow", "allow", "allow"],
+    [`/api/projects/${P}/video/jobs/x/file`, "GET", "", "allow", "allow", "allow"],
+    [`/api/projects/${P}/report`, "GET", "?format=html", "allow", "allow", "allow"],
+    [`/api/projects/${P}/report`, "GET", "?format=docx", "insufficient-api", "allow", "allow"],
+    [`/api/projects/${P}/artifacts/archive`, "GET", "", "insufficient-api", "allow", "allow"],
+    [`/api/projects/${P}/artifacts/a1/download`, "GET", "", "insufficient-api", "allow", "allow"],
+    [`/api/projects/${P}/export`, "GET", "", "insufficient-api", "allow", "allow"],
+    [`/api/projects/${P}/studio/libtv-runs/r1/export-pack`, "POST", "", "insufficient-api", "allow", "allow"],
+    [`/api/projects/${P}/product`, "PUT", "", "insufficient-api", "insufficient-api", "allow"],
+    [`/api/projects/${P}/studio/generate-video`, "POST", "", "insufficient-api", "insufficient-api", "allow"],
+    [`/api/projects/${P}`, "PATCH", "", "insufficient-api", "insufficient-api", "allow"],
+    // owner-only, even with edit
+    [`/api/projects/${P}`, "DELETE", "", "insufficient-api", "insufficient-api", "insufficient-api"],
+    [`/api/projects/${P}/spend`, "POST", "", "insufficient-api", "insufficient-api", "insufficient-api"],
+    [`/api/projects/${P}/spend`, "GET", "", "allow", "allow", "allow"],
+    [`/api/projects/${P}/studio/libtv-runs/r1/approve`, "POST", "", "insufficient-api", "insufficient-api", "insufficient-api"],
+    [`/api/projects/${P}/shares`, "GET", "", "insufficient-api", "insufficient-api", "insufficient-api"],
+  ] as const)("%s %s%s → view %s · download %s · edit %s", async (path, method, search, view, download, edit) => {
+    expect(await decide(path, "view", method, search)).toBe(view);
+    expect(await decide(path, "download", method, search)).toBe(download);
+    expect(await decide(path, "edit", method, search)).toBe(edit);
+  });
+
+  it("no share → 404 for the API and a redirect for pages, whatever the method", async () => {
+    expect(await decide(`/api/projects/${P}`, null)).toBe("not-found-api");
+    expect(await decide(`/api/projects/${P}/product`, null, "PUT")).toBe("not-found-api");
+    expect(await decide(`/projects/${P}/studio`, null)).toBe("forbidden-page");
+  });
+
+  it("the owning member and the master admin are never limited by share levels", async () => {
+    const own = await decideAccess({
+      pathname: `/api/projects/${P}`,
+      method: "DELETE",
+      userId: "u",
+      principalOf: async () => AMY,
+      projectTenant: async () => ({ ownerId: "amy", share: null }),
+    });
+    expect(own).toBe("allow");
+    const admin = await decideAccess({
+      pathname: `/api/projects/${P}/shares`,
+      method: "POST",
+      userId: "u",
+      principalOf: async () => ({ appUserId: "boss", role: "owner", status: "active" }),
+      projectTenant: async () => ({ ownerId: "amy" }),
+    });
+    expect(admin).toBe("allow");
+  });
+
+  it("insufficient-api answers 403 with a clear message", async () => {
+    const res = deniedResponse("insufficient-api", new NextRequest("https://creative.xark.io/api/projects/x"));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/shared project/);
   });
 });

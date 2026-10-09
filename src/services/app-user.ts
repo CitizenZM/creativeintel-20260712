@@ -8,6 +8,7 @@ import { clerkProfile, needsTouch } from "@/lib/auth/profile";
 import { resolveRole } from "@/lib/auth/roles";
 import { ensurePersonalWorkspace } from "@/services/personal-workspace";
 import { LEGAL_VERSION } from "@/lib/legal";
+import { linkSharesToUser } from "@/services/project-shares";
 
 /**
  * The signed-in person's AppUser row, created on their first authenticated request (lazy upsert —
@@ -62,6 +63,8 @@ export const currentAppUser = cache(async (): Promise<AppUser | null> => {
       },
       update: { lastSeenAt: now },
     });
+    // Projects shared with this address before the account existed (src/services/project-shares.ts).
+    if (ownerEligibleEmail) await linkSharesToUser(created.id, ownerEligibleEmail);
     if (role !== "owner") {
       await ensurePersonalWorkspace(created);
       // Log only — no email / chat notification. The owner sees everyone in /settings/users.

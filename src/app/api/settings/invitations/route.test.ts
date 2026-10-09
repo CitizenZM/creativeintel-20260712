@@ -6,7 +6,11 @@ const m = vi.hoisted(() => ({
   createInvitation: vi.fn(),
   getInvitationList: vi.fn(),
   revokeInvitation: vi.fn(),
+  shareProjects: vi.fn(),
+  invalidateShares: vi.fn(),
 }));
+vi.mock("@/services/project-shares", () => ({ shareProjects: m.shareProjects }));
+vi.mock("@/services/access", () => ({ invalidateShares: m.invalidateShares }));
 vi.mock("@/services/app-user", () => ({ currentAppUser: m.currentAppUser }));
 vi.mock("@/lib/db", () => ({ prisma: { appUser: { findFirst: m.findFirst } } }));
 vi.mock("@clerk/nextjs/server", () => ({
@@ -32,6 +36,7 @@ describe("/api/settings/invitations", () => {
   beforeEach(() => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     m.findFirst.mockResolvedValue(null);
+    m.shareProjects.mockImplementation(async ({ projectIds }: { projectIds: string[] }) => ({ shared: projectIds.length, userId: null }));
     m.createInvitation.mockImplementation(async (p: { emailAddress: string }) => ({
       id: "inv_1",
       emailAddress: p.emailAddress,
@@ -77,6 +82,37 @@ describe("/api/settings/invitations", () => {
     const dup = await post({ email: "a@b.co" });
     expect(dup.status).toBe(409);
     expect((await dup.json()).error).toMatch(/pending invitation/);
+  });
+
+  it("shares only the ticked projects, at the chosen level, before inviting", async () => {
+    m.currentAppUser.mockResolvedValue(OWNER);
+    const res = await post({ email: "affiliate@celldigital.co", projectIds: ["p1", "p2"], access: "download" });
+    expect(res.status).toBe(201);
+    expect(m.shareProjects).toHaveBeenCalledWith({
+      projectIds: ["p1", "p2"],
+      email: "affiliate@celldigital.co",
+      access: "download",
+      createdById: "o1",
+    });
+    expect(m.invalidateShares).toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ shared: 2, access: "download", existingAccount: false });
+  });
+
+  it("no projects ticked → nothing shared (a brand-new, empty account); default level is view", async () => {
+    m.currentAppUser.mockResolvedValue(OWNER);
+    await post({ email: "new@x.co" });
+    expect(m.shareProjects).toHaveBeenCalledWith(expect.objectContaining({ projectIds: [], access: "view" }));
+    expect((await post({ email: "new@x.co", access: "admin" })).status).toBe(400);
+  });
+
+  it("an existing account: shares without a new invitation; without projects it's a 409", async () => {
+    m.currentAppUser.mockResolvedValue(OWNER);
+    m.findFirst.mockResolvedValue({ id: "u9" });
+    expect((await post({ email: "x@y.com" })).status).toBe(409);
+    const res = await post({ email: "x@y.com", projectIds: ["p1"], access: "edit" });
+    expect(res.status).toBe(201);
+    expect(m.createInvitation).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ existingAccount: true, shared: 1, access: "edit" });
   });
 
   it("lists pending invitations and revokes by id", async () => {
