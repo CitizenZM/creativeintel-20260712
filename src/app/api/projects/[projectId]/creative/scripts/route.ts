@@ -19,10 +19,11 @@ import {
   type ScriptAngle,
 } from "../_script-context";
 import { LIVE, isSelectionStatus } from "@/services/creative-library";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -35,7 +36,7 @@ export async function GET(
 }
 
 /** Bulk pick / unpick — backs "Select all" and "Clear" on the Creative page. */
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -53,7 +54,7 @@ export async function PATCH(
   return NextResponse.json({ ok: true, count });
 }
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -150,3 +151,7 @@ export async function POST(
     );
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const PATCH = withAccess(unguardedPATCH);
+export const POST = withAccess(unguardedPOST);

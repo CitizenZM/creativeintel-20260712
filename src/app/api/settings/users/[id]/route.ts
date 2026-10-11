@@ -12,6 +12,7 @@ import { prisma } from "@/lib/db";
 import { planUserAction, USER_ACTIONS } from "@/lib/auth/user-actions";
 import { currentAppUser } from "@/services/app-user";
 import { invalidatePrincipal } from "@/services/access";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ const bodySchema = z.union([
   z.object({ monthlyAllowanceUsd: z.number().min(0).max(10_000).nullable() }),
 ]);
 
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const me = await currentAppUser();
   if (!me || me.role !== "owner") return NextResponse.json({ error: "Owner only" }, { status: 403 });
 
@@ -55,3 +56,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   console.info(`[auth] ${me.email} → ${parsed.data.action} ${target.email} (now ${user.status}/${user.role})`);
   return NextResponse.json({ user });
 }
+
+export const POST = withAccess(unguardedPOST);

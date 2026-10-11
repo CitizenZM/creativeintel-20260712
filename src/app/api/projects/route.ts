@@ -13,10 +13,11 @@ import {
   type AdapterAttempt,
 } from "@/services/research/product-page-scraper";
 import { refreshCompleteness } from "@/services/brand-kit";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 30;
 
-export async function GET() {
+async function unguardedGET() {
   const projects = await prisma.project.findMany({
     where: await projectWorkspaceFilter(),
     orderBy: { updatedAt: "desc" },
@@ -28,7 +29,7 @@ export async function GET() {
   return NextResponse.json(projects);
 }
 
-export async function POST(request: Request) {
+async function unguardedPOST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const data = createProjectSchema.parse(body);
@@ -198,3 +199,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

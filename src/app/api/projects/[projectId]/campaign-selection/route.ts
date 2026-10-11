@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { sanitizeStyleCategories } from "@/lib/style-categories";
 import { readStatusMap } from "@/lib/field-status";
 import { campaignFieldKey } from "@/lib/setup-suggest";
+import { withAccess } from "@/lib/auth/route-guard";
 
 // Only these fields may be written from the request body. A raw `...body` spread
 // would let an unknown field or a wrong-typed value (e.g. totalDurationSec as a
@@ -65,7 +66,7 @@ async function markCampaignFieldsConfirmed(
   await prisma.project.update({ where: { id: projectId }, data: { fieldStatus: next as never } });
 }
 
-export async function GET(
+async function unguardedGET(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -77,7 +78,7 @@ export async function GET(
   return NextResponse.json({ ...(sel || {}), fieldStatus: project?.fieldStatus ?? null });
 }
 
-export async function POST(
+async function unguardedPOST(
   req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -94,7 +95,7 @@ export async function POST(
   return NextResponse.json(sel);
 }
 
-export async function PATCH(
+async function unguardedPATCH(
   req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -121,3 +122,7 @@ export async function PATCH(
   await markCampaignFieldsConfirmed(projectId, Object.keys(data), body.suggested === true ? "suggested" : "confirmed");
   return NextResponse.json(sel);
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);
+export const PATCH = withAccess(unguardedPATCH);

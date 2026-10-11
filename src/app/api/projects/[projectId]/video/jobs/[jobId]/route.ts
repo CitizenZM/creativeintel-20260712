@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function DELETE(
+async function unguardedDELETE(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; jobId: string }> }
 ) {
@@ -20,3 +21,5 @@ export async function DELETE(
   await prisma.renderJob.delete({ where: { id: jobId } });
   return NextResponse.json({ ok: true });
 }
+
+export const DELETE = withAccess(unguardedDELETE);

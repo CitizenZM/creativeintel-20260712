@@ -6,10 +6,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { LIST_SELECT, latestOnly, listWhere, parseListFilters, toListItem } from "@/services/artifacts/serve";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const f = parseListFilters(new URL(request.url).searchParams);
   const [rows, counts] = await Promise.all([
@@ -24,3 +25,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
     archiveUrl: `/api/projects/${projectId}/artifacts/archive`,
   });
 }
+
+export const GET = withAccess(unguardedGET);

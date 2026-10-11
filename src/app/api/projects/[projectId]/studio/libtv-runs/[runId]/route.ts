@@ -3,13 +3,14 @@ import { driveServerRun } from "@/services/video-gen/server-engines";
 import { isServerEngine } from "@/services/video-gen/libtv-pricing";
 import { getRunWithJobs } from "@/services/video-gen/libtv-queue";
 import { STALE_ASSEMBLY_MS } from "@/services/video-gen/server-executor";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
 // A run whose clips are all done is assembled from here, which needs a full budget.
 export const maxDuration = 300;
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; runId: string }> }
 ) {
@@ -32,3 +33,5 @@ export async function GET(
   }
   return NextResponse.json({ run });
 }
+
+export const GET = withAccess(unguardedGET);

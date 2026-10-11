@@ -4,11 +4,12 @@
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
 const KINDS = ["insight", "sellingPoint", "pattern"] as const;
 type Kind = (typeof KINDS)[number];
 
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -55,3 +56,5 @@ export async function PATCH(
 
   return NextResponse.json({ ok: true, count });
 }
+
+export const PATCH = withAccess(unguardedPATCH);

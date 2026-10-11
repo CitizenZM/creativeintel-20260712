@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import type { RenderJob } from "@/generated/prisma/client";
+import { withAccess } from "@/lib/auth/route-guard";
 
 // RenderJob rows have no server-side recovery (no cron, no requeue) — if the
 // waitUntil() background function running the job is evicted mid-render
@@ -24,7 +25,7 @@ async function healStale(job: RenderJob): Promise<RenderJob> {
   return job;
 }
 
-export async function GET(
+async function unguardedGET(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -48,3 +49,5 @@ export async function GET(
   const healed = await Promise.all(jobs.map(healStale));
   return NextResponse.json({ jobs: healed });
 }
+
+export const GET = withAccess(unguardedGET);

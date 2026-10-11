@@ -20,10 +20,11 @@ import {
   SUGGESTED_AT_KEY,
   type SetupSuggestInput,
 } from "@/lib/setup-suggest";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 30;
 
-export async function POST(
+async function unguardedPOST(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -149,3 +150,5 @@ export async function POST(
 
   return NextResponse.json({ filled, project: updatedProject, campaignSelection: finalCampaignSelection });
 }
+
+export const POST = withAccess(unguardedPOST);

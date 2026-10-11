@@ -4,10 +4,11 @@ import { buildStoryboardCreateData } from "@/services/ai/storyboard-generator";
 import { getBrandTruthForPrompts } from "@/services/brand-kit";
 import { withIdempotency } from "@/lib/idempotency";
 import { LIVE, createStoryboardVersion, listStoryboards } from "@/services/creative-library";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -15,7 +16,7 @@ export async function GET(
   return NextResponse.json(await listStoryboards(projectId));
 }
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -64,3 +65,6 @@ export async function POST(
     );
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

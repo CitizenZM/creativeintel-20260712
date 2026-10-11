@@ -4,8 +4,9 @@
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function POST(
+async function unguardedPOST(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; jobId: string }> }
 ) {
@@ -17,3 +18,5 @@ export async function POST(
   if (!count) return NextResponse.json({ error: "No running job with that id" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withAccess(unguardedPOST);

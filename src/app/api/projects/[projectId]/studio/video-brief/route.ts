@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { findActiveStoryboard } from "@/services/creative-library";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -33,7 +34,7 @@ const briefSchema = z.object({
   brandGuidelines: z.array(z.string()),
 });
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -156,3 +157,5 @@ Generate a complete shot-by-shot brief. 6-8 shots. Each with detailed camera wor
     );
   }
 }
+
+export const POST = withAccess(unguardedPOST);

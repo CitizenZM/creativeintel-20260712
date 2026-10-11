@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -12,7 +13,7 @@ export async function GET(
   return NextResponse.json(profile);
 }
 
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -37,3 +38,6 @@ export async function PATCH(
 
   return NextResponse.json(profile);
 }
+
+export const GET = withAccess(unguardedGET);
+export const PATCH = withAccess(unguardedPATCH);

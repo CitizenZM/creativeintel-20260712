@@ -6,8 +6,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { findActiveJob, isJobKind, viewJob } from "@/services/jobs";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function GET(
+async function unguardedGET(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -25,3 +26,5 @@ export async function GET(
   const job = await prisma.job.findFirst({ where: { projectId, kind }, orderBy: { createdAt: "desc" } });
   return NextResponse.json({ job: job ? await viewJob(job) : null });
 }
+
+export const GET = withAccess(unguardedGET);

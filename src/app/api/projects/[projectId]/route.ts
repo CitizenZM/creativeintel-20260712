@@ -3,8 +3,9 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { isGoalType } from "@/lib/style-categories";
 import { readStatusMap } from "@/lib/field-status";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -36,7 +37,7 @@ export async function GET(
 /** Fields whose review state is tracked in Project.fieldStatus (see src/lib/field-status.ts). */
 const TRACKED_FIELDS = ["campaignGoal", "goalType"] as const;
 
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -110,7 +111,7 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
+async function unguardedDELETE(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -125,3 +126,7 @@ export async function DELETE(
     throw err;
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const PATCH = withAccess(unguardedPATCH);
+export const DELETE = withAccess(unguardedDELETE);

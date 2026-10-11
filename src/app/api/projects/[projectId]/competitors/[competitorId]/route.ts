@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
 const TOP_N = Number(process.env.TOP_N_DEEP) || 5;
 
 /** Rename, fix the URL, or remove (exclude) a competitor. Removal is reversible. */
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string; competitorId: string }> }
 ) {
@@ -21,7 +22,7 @@ export async function PATCH(
   return NextResponse.json({ ok: true, ...data });
 }
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; competitorId: string }> }
 ) {
@@ -65,3 +66,6 @@ export async function GET(
     assets,
   });
 }
+
+export const PATCH = withAccess(unguardedPATCH);
+export const GET = withAccess(unguardedGET);

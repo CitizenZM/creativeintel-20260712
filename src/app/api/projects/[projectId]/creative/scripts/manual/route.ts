@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { archiveInBackground, archiveScript } from "@/services/artifacts/archive";
 import { buildManualScript } from "@/lib/manual-script";
+import { withAccess } from "@/lib/auth/route-guard";
 
 const bodySchema = z.object({
   title: z.string().trim().min(1).max(120),
@@ -13,7 +14,7 @@ const bodySchema = z.object({
 });
 
 /** A hand-written script (Plan B) — no AI call, stored in the generated shape. */
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const parsed = bodySchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
@@ -43,3 +44,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   archiveInBackground("script", () => archiveScript(script.id));
   return NextResponse.json(script, { status: 201 });
 }
+
+export const POST = withAccess(unguardedPOST);

@@ -2,11 +2,14 @@
 import { NextResponse } from "next/server";
 import { currentAppUser } from "@/services/app-user";
 import { listShares } from "@/services/project-shares";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function unguardedGET() {
   const me = await currentAppUser();
   if (me?.role !== "owner") return NextResponse.json({ error: "Owner only" }, { status: 403 });
   return NextResponse.json({ shares: await listShares() });
 }
+
+export const GET = withAccess(unguardedGET);

@@ -9,6 +9,7 @@ import { SHARE_ACCESS, type ShareAccess } from "@/lib/auth/access";
 import { currentAppUser } from "@/services/app-user";
 import { invalidateShares } from "@/services/access";
 import { removeShare, updateShareAccess } from "@/services/project-shares";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,7 @@ async function owner() {
   return me?.role === "owner" ? me : null;
 }
 
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function unguardedPATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const me = await owner();
   if (!me) return NextResponse.json({ error: "Owner only" }, { status: 403 });
   const parsed = patchSchema.safeParse(await request.json().catch(() => null));
@@ -35,7 +36,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 }
 
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function unguardedDELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const me = await owner();
   if (!me) return NextResponse.json({ error: "Owner only" }, { status: 403 });
   const { id } = await params;
@@ -48,3 +49,6 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return NextResponse.json({ error: "Share not found" }, { status: 404 });
   }
 }
+
+export const PATCH = withAccess(unguardedPATCH);
+export const DELETE = withAccess(unguardedDELETE);

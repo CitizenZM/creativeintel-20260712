@@ -8,10 +8,11 @@ import {
   getActiveJobForProject,
 } from "@/services/research/job-progress";
 import { runResearch, STEP_NAMES } from "@/services/research/runner";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -62,3 +63,5 @@ export async function POST(
   await idem.commit?.(body, 202);
   return NextResponse.json(body, { status: 202 });
 }
+
+export const POST = withAccess(unguardedPOST);

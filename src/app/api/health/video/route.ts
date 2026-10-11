@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { checkBinaries } from "@/services/video/binaries";
 import { isCloudinaryConfigured } from "@/services/video/cloudinary-render";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function GET() {
+async function unguardedGET() {
   const bins = await checkBinaries();
   const cloud = isCloudinaryConfigured();
   const localReady = bins.ytdlp.available && bins.ffmpeg.available;
@@ -19,3 +20,5 @@ export async function GET() {
     },
   });
 }
+
+export const GET = withAccess(unguardedGET);

@@ -13,10 +13,11 @@ import { archiveAround, archiveScript } from "@/services/artifacts/archive";
 import { auditScriptText } from "@/lib/script-schema";
 import { auditContext, formatComplianceViolations, loadScriptContext } from "../../_script-context";
 import { LIVE, isSelectionStatus } from "@/services/creative-library";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 30;
 
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string; scriptId: string }> }
 ) {
@@ -126,7 +127,7 @@ export async function PATCH(
  * Archive a script. Its storyboards stay (a rendered run may point at them)
  * but drop out of the lists along with it.
  */
-export async function DELETE(
+async function unguardedDELETE(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; scriptId: string }> }
 ) {
@@ -145,3 +146,6 @@ export async function DELETE(
   if (!scripts.count) return NextResponse.json({ error: "Script not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }
+
+export const PATCH = withAccess(unguardedPATCH);
+export const DELETE = withAccess(unguardedDELETE);

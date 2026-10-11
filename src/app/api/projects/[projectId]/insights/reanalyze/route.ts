@@ -13,6 +13,7 @@ import {
   runDeepAnalysisStage,
   type StageResult,
 } from "@/services/ai/analysis-pipeline";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
@@ -36,7 +37,7 @@ const STEP_LABELS: { key: string; label: string }[] = [
   { key: "deep", label: "Deep analysis" },
 ];
 
-export async function POST(
+async function unguardedPOST(
   req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -269,3 +270,5 @@ async function reanalyzePass(projectId: string, deadline: number) {
 
   return { ok: stages.every((s) => s.ok), stages, deep, remaining, pendingTeardowns, done: remaining === 0 };
 }
+
+export const POST = withAccess(unguardedPOST);

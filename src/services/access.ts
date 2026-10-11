@@ -1,5 +1,5 @@
 import { clerkClient } from "@clerk/nextjs/server";
-import { createPrincipalLookup, normalizeShareAccess, type Principal, type ProjectTenant, type ShareAccess } from "@/lib/auth/access";
+import { STALE_ON_ERROR_MS, createPrincipalLookup, normalizeShareAccess, type Principal, type ProjectTenant, type ShareAccess } from "@/lib/auth/access";
 import { clerkProfile } from "@/lib/auth/profile";
 import { createTtlCache, type TtlCache } from "@/lib/auth/ttl-cache";
 
@@ -49,11 +49,18 @@ export const getPrincipal = createPrincipalLookup({
 export async function getProjectTenant(projectId: string, appUserId: string | null = null): Promise<ProjectTenant | null> {
   let tenant = tenants.get(projectId);
   if (tenant === undefined) {
-    const project = await (await db()).project.findUnique({
-      where: { id: projectId },
-      select: { workspace: { select: { ownerId: true } } },
-    });
-    tenant = project ? { ownerId: project.workspace?.ownerId ?? null } : null;
+    try {
+      const project = await (await db()).project.findUnique({
+        where: { id: projectId },
+        select: { workspace: { select: { ownerId: true } } },
+      });
+      tenant = project ? { ownerId: project.workspace?.ownerId ?? null } : null;
+    } catch (err) {
+      // DB briefly unreachable: a project's owner never changes, so a confirmed answer still holds.
+      const stale = tenants.getStale(projectId, STALE_ON_ERROR_MS);
+      if (stale === undefined) throw err;
+      tenant = stale;
+    }
     // Don't cache a miss: the project may be created a moment later.
     if (tenant) tenants.set(projectId, tenant);
   }
@@ -62,12 +69,18 @@ export async function getProjectTenant(projectId: string, appUserId: string | nu
   const key = `${projectId}:${appUserId}`;
   let share = shares.get(key);
   if (!share) {
-    const row = await (await db()).projectShare.findFirst({
-      where: { projectId, userId: appUserId },
-      select: { access: true },
-    });
-    share = { access: normalizeShareAccess(row?.access) };
-    shares.set(key, share);
+    try {
+      const row = await (await db()).projectShare.findFirst({
+        where: { projectId, userId: appUserId },
+        select: { access: true },
+      });
+      share = { access: normalizeShareAccess(row?.access) };
+      shares.set(key, share);
+    } catch (err) {
+      const stale = shares.getStale(key, STALE_ON_ERROR_MS);
+      if (!stale) throw err;
+      share = stale;
+    }
   }
   return { ...tenant, share: share.access };
 }

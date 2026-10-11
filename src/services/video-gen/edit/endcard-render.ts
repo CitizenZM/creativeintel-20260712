@@ -10,7 +10,7 @@
  * (Christmas / New Year: red, green and gold with a snow sparkle layer).
  */
 import { readFile } from "node:fs/promises";
-import sharp from "sharp";
+import sharp, { type OverlayOptions } from "sharp";
 import { pangoEscape } from "../glm-assemble";
 import { DEFAULT_STYLE } from "./brand-style";
 import { encodeQr } from "./qr";
@@ -227,7 +227,7 @@ async function textPng(markup: string, look: Look, px: number, width: number, he
 
 /** Transparent canvas with images placed at (left, top); parts outside the canvas are cropped. */
 async function compose(W: number, H: number, items: { input: Buffer; left: number; top: number }[], bgSvg?: string): Promise<Buffer> {
-  const ops: sharp.OverlayOptions[] = [];
+  const ops: OverlayOptions[] = [];
   for (const it of items) {
     const s = await size(it.input);
     const x0 = Math.max(0, it.left);

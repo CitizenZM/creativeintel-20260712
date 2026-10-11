@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
 const TOP_TEARDOWNS_PER_COMPETITOR = Number(process.env.TOP_N_DEEP) || 5;
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -73,3 +74,5 @@ export async function GET(
     sellingPoints,
   });
 }
+
+export const GET = withAccess(unguardedGET);

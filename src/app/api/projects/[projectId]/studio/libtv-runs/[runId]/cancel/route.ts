@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { cancelRun, getRunWithJobs } from "@/services/video-gen/libtv-queue";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(
+async function unguardedPOST(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; runId: string }> }
 ) {
@@ -23,3 +24,5 @@ export async function POST(
   }
   return NextResponse.json({ run });
 }
+
+export const POST = withAccess(unguardedPOST);

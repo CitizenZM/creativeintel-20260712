@@ -45,12 +45,29 @@ export interface PrincipalDeps {
  * verified match is an owner, so the owner's very first request isn't treated as a member.
  * Owners are never blocked. Errors propagate (and aren't cached) so the gate can fail closed.
  */
+/**
+ * How long a previously confirmed answer may stand in when the database is unreachable, instead of
+ * failing every request closed with a 503. Only ever a value this process already confirmed — a
+ * user with no confirmed answer is still refused.
+ */
+export const STALE_ON_ERROR_MS = 10 * 60_000;
+
 export function createPrincipalLookup(deps: PrincipalDeps) {
   return async function getPrincipal(clerkUserId: string): Promise<Principal> {
     const cached = deps.cache.get(clerkUserId);
     if (cached) return cached;
 
-    const row = await deps.findUser(clerkUserId);
+    let row: PrincipalRow | null;
+    try {
+      row = await deps.findUser(clerkUserId);
+    } catch (err) {
+      const stale = deps.cache.getStale(clerkUserId, STALE_ON_ERROR_MS);
+      if (stale) {
+        console.warn("[auth] principal lookup failed — using the last confirmed answer:", err instanceof Error ? err.message : err);
+        return stale;
+      }
+      throw err;
+    }
     let role: AppUserRole = row?.role === "owner" ? "owner" : "member";
     if (role !== "owner") {
       const owners = parseOwnerEmails(deps.ownerEmails());

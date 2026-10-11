@@ -10,10 +10,11 @@ import { extractSearchKeywords, quickBrandUnderstanding } from "@/services/resea
 import { getCampaignPlatform } from "@/lib/campaign-platform";
 import { gateCandidates } from "@/services/research/ranking";
 import { saveUnrankedCandidates } from "@/services/research/persist";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -85,3 +86,5 @@ export async function POST(
     );
   }
 }
+
+export const POST = withAccess(unguardedPOST);

@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
 // Bulk-delete terminal (complete | error) jobs for a project.
 // Active jobs (pending | running) are preserved.
-export async function POST(
+async function unguardedPOST(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -13,3 +14,5 @@ export async function POST(
   });
   return NextResponse.json({ deleted: result.count });
 }
+
+export const POST = withAccess(unguardedPOST);

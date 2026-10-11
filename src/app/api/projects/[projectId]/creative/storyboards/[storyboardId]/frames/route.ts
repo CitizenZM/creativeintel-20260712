@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { archiveAround, archiveStoryboard } from "@/services/artifacts/archive";
 import { LIVE, appendFrameHistory, type FrameHistoryEntry } from "@/services/creative-library";
+import { withAccess } from "@/lib/auth/route-guard";
 
 // Grid-owned fields keep their current values on undo — only content reverts.
 const GRID_FIELDS = ["frameNumber", "startSec", "endSec", "duration", "segment"];
@@ -11,7 +12,7 @@ const GRID_FIELDS = ["frameNumber", "startSec", "endSec", "duration", "segment"]
  * recent history snapshot and drop that snapshot. Returns how many earlier
  * edits can still be undone.
  */
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string; storyboardId: string }> }
 ) {
@@ -91,7 +92,7 @@ const PATCHABLE_FIELDS = new Set([
   "feedback",
 ]);
 
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string; storyboardId: string }> }
 ) {
@@ -155,3 +156,6 @@ export async function PATCH(
 
   return NextResponse.json({ ok: true, frames: updated.frames });
 }
+
+export const POST = withAccess(unguardedPOST);
+export const PATCH = withAccess(unguardedPATCH);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateImageByEngine } from "@/services/ai/image-engine";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 30;
 
@@ -28,7 +29,7 @@ function generateFrameImage(
   });
 }
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -79,7 +80,7 @@ export async function POST(
   }
 }
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -90,3 +91,6 @@ export async function GET(
   });
   return NextResponse.json(assets);
 }
+
+export const POST = withAccess(unguardedPOST);
+export const GET = withAccess(unguardedGET);

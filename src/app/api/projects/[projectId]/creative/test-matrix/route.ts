@@ -11,6 +11,7 @@ import {
 } from "@/services/ai/prompts/script-templates";
 import { withIdempotency } from "@/lib/idempotency";
 import { NarrativeType } from "@/generated/prisma/enums";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
@@ -35,7 +36,7 @@ const validTypes: NarrativeType[] = [
   "TREND_RIDING", "BEFORE_AFTER",
 ];
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -57,7 +58,7 @@ export async function GET(
   return NextResponse.json({ variants });
 }
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -165,3 +166,6 @@ export async function POST(
     );
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

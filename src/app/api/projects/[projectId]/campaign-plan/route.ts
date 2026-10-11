@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { CampaignPlanError, createCampaignPlan, getCampaignPlan } from "@/services/creative/campaign-plan.store";
 import { summarizePlan } from "@/services/creative/campaign-planner";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
@@ -29,14 +30,14 @@ const bodySchema = z.object({
   overrides: z.record(z.string(), z.unknown()).optional(),
 });
 
-export async function GET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const stored = await getCampaignPlan(projectId);
   if (!stored) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ plan: stored.plan, planAt: stored.planAt, summary: stored.plan ? summarizePlan(stored.plan) : null });
 }
 
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const parsed = bodySchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues.slice(0, 5) }, { status: 400 });
@@ -48,3 +49,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

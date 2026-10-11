@@ -12,12 +12,13 @@ import { loadAiSettings } from "@/services/settings/ai-settings";
 import { getBrandKitCompleteness } from "@/services/brand-kit";
 import { serverApprovalBudget } from "@/services/ops/approval-budget";
 import { accountLimitOfProject } from "@/services/ops/account-allowance";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 // GLM and ComfyUI runs render on the server right after approval.
 export const maxDuration = 300;
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string; runId: string }> }
 ) {
@@ -95,3 +96,5 @@ export async function POST(
 
   return NextResponse.json({ run });
 }
+
+export const POST = withAccess(unguardedPOST);

@@ -6,15 +6,16 @@
 import { NextResponse } from "next/server";
 import { listStructures, saveStructureFromTeardown } from "@/services/structures";
 import { viewerCanUseProject, viewerTenant } from "@/services/workspace";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
+async function unguardedGET(req: Request) {
   const category = new URL(req.url).searchParams.get("category");
   return NextResponse.json({ structures: await listStructures(category, await viewerTenant()) });
 }
 
-export async function POST(req: Request) {
+async function unguardedPOST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { projectId?: unknown; teardownId?: unknown };
   if (typeof body.projectId !== "string" || typeof body.teardownId !== "string") {
     return NextResponse.json({ error: "projectId and teardownId are required" }, { status: 400 });
@@ -29,3 +30,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

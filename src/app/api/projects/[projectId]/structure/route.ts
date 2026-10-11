@@ -5,17 +5,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { findStructureForProject } from "@/services/structures";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(_req: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const sel = await prisma.campaignSelection.findUnique({ where: { projectId }, select: { structureId: true } });
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { category: true } });
   return NextResponse.json({ structureId: sel?.structureId ?? null, category: project?.category ?? null });
 }
 
-export async function PUT(req: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPUT(req: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const body = (await req.json().catch(() => ({}))) as { structureId?: unknown };
   const structureId = typeof body.structureId === "string" && body.structureId ? body.structureId : null;
@@ -29,3 +30,6 @@ export async function PUT(req: Request, { params }: { params: Promise<{ projectI
   });
   return NextResponse.json({ ok: true, structureId });
 }
+
+export const GET = withAccess(unguardedGET);
+export const PUT = withAccess(unguardedPUT);

@@ -4,8 +4,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { activateStoryboard, archiveStoryboard } from "@/services/creative-library";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string; storyboardId: string }> }
 ) {
@@ -37,7 +38,7 @@ export async function PATCH(
   return NextResponse.json({ ok: true, storyboard: board });
 }
 
-export async function DELETE(
+async function unguardedDELETE(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; storyboardId: string }> }
 ) {
@@ -46,3 +47,6 @@ export async function DELETE(
   if (!board) return NextResponse.json({ error: "Storyboard not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }
+
+export const PATCH = withAccess(unguardedPATCH);
+export const DELETE = withAccess(unguardedDELETE);

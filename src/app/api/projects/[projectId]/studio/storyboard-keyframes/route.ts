@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateImageByEngine } from "@/services/ai/image-engine";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -60,3 +61,5 @@ export async function POST(
     return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }
+
+export const POST = withAccess(unguardedPOST);

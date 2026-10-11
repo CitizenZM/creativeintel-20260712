@@ -13,7 +13,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
-import sharp from "sharp";
+import sharp, { type OverlayOptions } from "sharp";
 import { DEFAULT_STYLE, type BrandStyle } from "../src/services/video-gen/edit/brand-style";
 import { END_CARD_THEMES, endCardLayers, endCardSlots, layerFilter, layerInputArgs, RENDERABLE_END_CARDS, type EndCardData, type EndCardTemplate, type EndCardTheme, type LayerAnim } from "../src/services/video-gen/edit/endcard-render";
 import { ctaButtonPng, finePrintPng, logoPng } from "../src/services/video-gen/edit/text-layers";
@@ -209,7 +209,7 @@ async function main() {
   const tw = LANDSCAPE ? 384 : 270;
   const th = LANDSCAPE ? 216 : 480;
   for (const label of ["final", "mid", "last1s"]) {
-    const items: sharp.OverlayOptions[] = [];
+    const items: OverlayOptions[] = [];
     // Always the full grid (12 × 4): partial runs (--only) refresh their cells, the rest are kept.
     for (const [r, theme] of END_CARD_THEMES.entries())
       for (const [col, id] of RENDERABLE_END_CARDS.entries()) {

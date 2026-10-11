@@ -8,11 +8,12 @@ import { parseOperatorAction } from "@/services/operator";
 import { cloneAdIntoProject } from "@/services/creative/ad-cloner.store";
 import { CampaignPlanError } from "@/services/creative/campaign-plan.store";
 import { summarizePlan } from "@/services/creative/campaign-planner";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const body = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
   const parsed = parseOperatorAction("clone-ad", { ...body, projectId });
@@ -25,3 +26,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof CampaignPlanError ? err.status : 500 });
   }
 }
+
+export const POST = withAccess(unguardedPOST);

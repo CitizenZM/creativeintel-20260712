@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assembleScriptVideo, getAssemblyReadiness } from "@/services/video-gen/assemble";
+import { withAccess } from "@/lib/auth/route-guard";
 
 // Cloudinary concatenation itself is URL-based and fast, but uploading each
 // remote clip URL into Cloudinary (cloudinary.uploader.upload) happens
@@ -19,7 +20,7 @@ const bodySchema = z.object({
   musicUrl: z.string().optional(),
 });
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -102,7 +103,7 @@ export async function POST(
   }
 }
 
-export async function GET(
+async function unguardedGET(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -131,3 +132,6 @@ export async function GET(
     );
   }
 }
+
+export const POST = withAccess(unguardedPOST);
+export const GET = withAccess(unguardedGET);

@@ -4,6 +4,7 @@ import { brandKitUpdateSchema } from "@/lib/validations";
 import { ensureBrandKit, getBrandKitCompleteness, refreshCompleteness } from "@/services/brand-kit";
 import { getStorageStatus } from "@/services/storage";
 import { readStatusMap } from "@/lib/field-status";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 30;
 
@@ -38,7 +39,7 @@ const FIELD_STATUS_KEY: Record<string, (typeof KIT_FIELD_KEYS)[number]> = {
   productSummary: "productSummary",
 };
 
-export async function GET(
+async function unguardedGET(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -62,7 +63,7 @@ export async function GET(
   });
 }
 
-export async function PUT(
+async function unguardedPUT(
   req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -138,7 +139,7 @@ export async function PUT(
  *   { confirm: "all" }              — confirm every suggested field and set
  *                                      verified:true on every unverified asset
  */
-export async function PATCH(
+async function unguardedPATCH(
   req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -188,3 +189,7 @@ export async function PATCH(
 
   return NextResponse.json({ kit: freshKit, assets: freshKit.assets, completeness, storage: getStorageStatus() });
 }
+
+export const GET = withAccess(unguardedGET);
+export const PUT = withAccess(unguardedPUT);
+export const PATCH = withAccess(unguardedPATCH);

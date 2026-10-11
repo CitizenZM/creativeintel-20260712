@@ -4,14 +4,15 @@
  */
 import { NextResponse } from "next/server";
 import { getBalanceEstimate, recordBalance } from "@/services/video-gen/libtv-balance";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function unguardedGET() {
   return NextResponse.json(await getBalanceEstimate());
 }
 
-export async function POST(request: Request) {
+async function unguardedPOST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { balance?: unknown; note?: unknown };
   const balance = Number(body.balance);
   if (!Number.isInteger(balance) || balance < 0 || balance > 100_000_000) {
@@ -20,3 +21,6 @@ export async function POST(request: Request) {
   const note = typeof body.note === "string" ? body.note.slice(0, 200) : null;
   return NextResponse.json(await recordBalance(balance, note), { status: 201 });
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

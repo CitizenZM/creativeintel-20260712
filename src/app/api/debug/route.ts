@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import OpenAI from "openai";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 30;
 
 // Dev-only diagnostics endpoint. Never expose in production: it leaks
 // partial env/config state and makes a live billed OpenAI call on every
 // request, so gate hard on NODE_ENV rather than trusting a header/token.
-export async function GET() {
+async function unguardedGET() {
   if (process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
@@ -45,3 +46,5 @@ export async function GET() {
 
   return NextResponse.json(results);
 }
+
+export const GET = withAccess(unguardedGET);

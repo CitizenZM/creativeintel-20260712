@@ -17,10 +17,11 @@ import {
 import { getRunWithJobs, listRuns } from "@/services/video-gen/libtv-queue";
 import { getBrandKitCompleteness } from "@/services/brand-kit";
 import { DEFAULT_BUDGET_MODE, modelOptions, type BudgetMode } from "@/services/video-gen/libtv-pricing";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -43,7 +44,7 @@ export async function GET(
   });
 }
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -101,3 +102,6 @@ export async function POST(
     );
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

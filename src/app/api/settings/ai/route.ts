@@ -7,14 +7,15 @@ import { NextResponse } from "next/server";
 import { settingsPatchSchema } from "@/services/settings/ai-settings-core";
 import { saveAiSettings } from "@/services/settings/ai-settings";
 import { getAiSettingsView } from "@/services/settings/ai-settings-view";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function unguardedGET() {
   return NextResponse.json(await getAiSettingsView());
 }
 
-export async function PUT(request: Request) {
+async function unguardedPUT(request: Request) {
   const body = await request.json().catch(() => null);
   const parsed = settingsPatchSchema.safeParse(body);
   if (!parsed.success) {
@@ -31,3 +32,6 @@ export async function PUT(request: Request) {
   }
   return NextResponse.json(await getAiSettingsView());
 }
+
+export const GET = withAccess(unguardedGET);
+export const PUT = withAccess(unguardedPUT);

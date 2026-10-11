@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { suggestCompetitors } from "@/services/competitor-suggest";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -10,7 +11,7 @@ const MIN_COMPETITORS = 3;
  * Add AI-suggested competitors until the project tracks at least three (or
  * `count` more when asked). Body: { count?: number }.
  */
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const body = (await request.json().catch(() => ({}))) as { count?: unknown };
   const current = await prisma.competitor.count({ where: { projectId, excluded: false } });
@@ -27,3 +28,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     );
   }
 }
+
+export const POST = withAccess(unguardedPOST);

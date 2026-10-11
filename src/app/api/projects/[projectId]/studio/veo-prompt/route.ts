@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { findActiveStoryboard } from "@/services/creative-library";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -76,7 +77,7 @@ const veoResultSchema = z.object({
   })).optional().default([]),
 });
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -332,3 +333,5 @@ Format: vertical 9:16, 720p minimum, 24fps.`;
     );
   }
 }
+
+export const POST = withAccess(unguardedPOST);

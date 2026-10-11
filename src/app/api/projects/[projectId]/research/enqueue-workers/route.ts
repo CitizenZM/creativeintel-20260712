@@ -24,6 +24,7 @@ import {
 } from "@/services/research/adapters/browser-adapters";
 import type { AdapterContext } from "@/services/research/adapters/types";
 import type { SearchKeywords } from "@/services/research/keyword-extractor";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -44,7 +45,7 @@ interface TaskOutcome {
   note?: string;
 }
 
-export async function POST(
+async function unguardedPOST(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -116,3 +117,5 @@ export async function POST(
     failed,
   });
 }
+
+export const POST = withAccess(unguardedPOST);

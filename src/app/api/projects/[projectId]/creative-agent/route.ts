@@ -11,6 +11,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { creativeAgentTurn, creativeEditHistory, undoCreativeEdit } from "@/services/creative/creative-agent.store";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
@@ -21,12 +22,12 @@ const bodySchema = z.union([
 
 const reply = (r: { status: number; body: Record<string, unknown> }) => NextResponse.json(r.body, { status: r.status });
 
-export async function GET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   return reply(await creativeEditHistory(projectId));
 }
 
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const parsed = bodySchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues.slice(0, 5) }, { status: 400 });
@@ -38,3 +39,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

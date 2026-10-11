@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -14,7 +15,7 @@ const scriptSchema = z.object({
   })),
 });
 
-export async function POST(
+async function unguardedPOST(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; assetId: string }> }
 ) {
@@ -100,3 +101,5 @@ Generate a realistic ~300 word script/transcript that this video likely contains
     );
   }
 }
+
+export const POST = withAccess(unguardedPOST);
