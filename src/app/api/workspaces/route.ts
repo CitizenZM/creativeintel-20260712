@@ -6,10 +6,11 @@ import {
   getActiveWorkspace,
   listWorkspaces,
 } from "@/services/workspace";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function unguardedGET() {
   const [workspaces, active] = await Promise.all([
     listWorkspaces(),
     getActiveWorkspace(),
@@ -19,7 +20,7 @@ export async function GET() {
 
 const createSchema = z.object({ name: z.string().min(1).max(60) });
 
-export async function POST(request: Request) {
+async function unguardedPOST(request: Request) {
   const json = await request.json().catch(() => null);
   const parsed = createSchema.safeParse(json);
   if (!parsed.success) {
@@ -35,3 +36,6 @@ export async function POST(request: Request) {
   });
   return res;
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

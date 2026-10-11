@@ -7,13 +7,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { askPerformance } from "@/services/performance/agent";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const bodySchema = z.object({ question: z.string().trim().min(3).max(500) });
 
-export async function POST(req: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(req: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Body must be { question: string (3–500 chars) }" }, { status: 400 });
@@ -21,3 +22,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ project
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
   return NextResponse.json(await askPerformance(projectId, parsed.data.question));
 }
+
+export const POST = withAccess(unguardedPOST);

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
 /** The brand's cast and setting options — what a script can pick from. */
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -17,7 +18,7 @@ export async function GET(
   });
 }
 
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -49,3 +50,6 @@ export async function PATCH(
 
   return NextResponse.json(brand);
 }
+
+export const GET = withAccess(unguardedGET);
+export const PATCH = withAccess(unguardedPATCH);

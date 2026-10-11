@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { buildZip, type ZipEntry } from "@/lib/zip";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ interface FrameLike {
   duration?: string | null;
 }
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -249,3 +250,5 @@ export async function GET(
     },
   });
 }
+
+export const GET = withAccess(unguardedGET);

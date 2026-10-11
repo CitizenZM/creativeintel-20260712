@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -14,7 +15,7 @@ export async function GET(
   return NextResponse.json(jobs);
 }
 
-export async function DELETE(
+async function unguardedDELETE(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -22,3 +23,6 @@ export async function DELETE(
   await prisma.falVideoJob.deleteMany({ where: { projectId } });
   return NextResponse.json({ ok: true });
 }
+
+export const GET = withAccess(unguardedGET);
+export const DELETE = withAccess(unguardedDELETE);

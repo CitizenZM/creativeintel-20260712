@@ -111,3 +111,20 @@ describe("projectAccessFor", () => {
     expect(normalizeShareAccess(null)).toBeNull();
   });
 });
+
+describe("createPrincipalLookup — DB outage", () => {
+  it("falls back to the last confirmed answer, but still refuses a user it never confirmed", async () => {
+    let t = 0;
+    const cache = createTtlCache<Principal>({ ttlMs: 30_000, now: () => t });
+    const findUser = vi.fn(async (): Promise<PrincipalRow | null> => ({ id: "ann", role: "member", status: "active", email: "a@x.co" }));
+    const get = createPrincipalLookup({ findUser, verifiedEmail: async () => null, ownerEmails: () => "", cache });
+    await get("u");
+    t = 60_000; // expired
+    findUser.mockRejectedValue(new Error("db down"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await get("u")).toMatchObject({ appUserId: "ann" });
+    await expect(get("never-seen")).rejects.toThrow("db down");
+    t = 60_000 + 11 * 60_000; // beyond the stale window
+    await expect(get("u")).rejects.toThrow("db down");
+  });
+});

@@ -5,10 +5,11 @@
  */
 import { NextResponse } from "next/server";
 import { cloneRunForRerender, getRunWithJobs } from "@/services/video-gen/libtv-queue";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string; runId: string }> }
 ) {
@@ -25,3 +26,5 @@ export async function POST(
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ run: result.run }, { status: 201 });
 }
+
+export const POST = withAccess(unguardedPOST);

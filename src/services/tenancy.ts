@@ -11,9 +11,16 @@ import { prisma } from "@/lib/db";
  */
 export type TenantId = string | null;
 
-/** The tenant a project belongs to; undefined when the project doesn't exist. */
-export async function tenantOfProject(projectId: string): Promise<TenantId | undefined> {
-  const p = await prisma.project.findUnique({
+/**
+ * The tenant a project belongs to; undefined when the project doesn't exist. Pass `db` (a transaction
+ * client) when calling from inside a transaction, so the lookup doesn't need a second pooled
+ * connection while the transaction holds one.
+ */
+export async function tenantOfProject(
+  projectId: string,
+  db: Pick<typeof prisma, "project"> = prisma,
+): Promise<TenantId | undefined> {
+  const p = await db.project.findUnique({
     where: { id: projectId },
     select: { workspace: { select: { ownerId: true, owner: { select: { role: true } } } } },
   });

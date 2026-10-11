@@ -5,8 +5,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { categoryFromBrief, runSelection, selectBodySchema } from "./_select";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const parsed = selectBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid body" }, { status: 400 });
@@ -24,3 +25,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   }
   return NextResponse.json({ category, choice: results[0].choice });
 }
+
+export const POST = withAccess(unguardedPOST);

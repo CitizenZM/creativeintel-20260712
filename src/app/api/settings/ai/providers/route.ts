@@ -2,10 +2,11 @@
 import { NextResponse } from "next/server";
 import { providerInputSchema } from "@/services/settings/ai-settings-core";
 import { createProvider, ProviderInputError } from "@/services/settings/ai-settings";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
+async function unguardedPOST(request: Request) {
   const body = await request.json().catch(() => null);
   const parsed = providerInputSchema.safeParse(body);
   if (!parsed.success) {
@@ -24,3 +25,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Could not save the provider" }, { status: 500 });
   }
 }
+
+export const POST = withAccess(unguardedPOST);

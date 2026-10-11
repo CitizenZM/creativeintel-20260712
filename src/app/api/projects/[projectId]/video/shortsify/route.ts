@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { createRenderJob, runShortsify } from "@/services/video/runner";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -17,7 +18,7 @@ const bodySchema = z
     message: "videoReferenceId or sourceUrl required",
   });
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -35,3 +36,5 @@ export async function POST(
   waitUntil(runShortsify(jobId, projectId, parsed.data));
   return NextResponse.json({ jobId, status: "running" }, { status: 202 });
 }
+
+export const POST = withAccess(unguardedPOST);

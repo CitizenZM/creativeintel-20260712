@@ -4,8 +4,9 @@
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string; assetId: string }> }
 ) {
@@ -24,3 +25,5 @@ export async function PATCH(
   if (!count) return NextResponse.json({ error: "Ad not found" }, { status: 404 });
   return NextResponse.json({ ok: true, ...data });
 }
+
+export const PATCH = withAccess(unguardedPATCH);

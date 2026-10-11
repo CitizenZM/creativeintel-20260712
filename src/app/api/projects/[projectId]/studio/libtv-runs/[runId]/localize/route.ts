@@ -9,11 +9,12 @@ import { parseOperatorAction } from "@/services/operator";
 import { isServerEngine } from "@/services/video-gen/libtv-pricing";
 import { missingLocales } from "@/services/video-gen/localize";
 import { loadAiSettings } from "@/services/settings/ai-settings";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string; runId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string; runId: string }> }) {
   const { projectId, runId } = await params;
   const body = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
   const parsed = parseOperatorAction("localize-run", { ...body, projectId, runId });
@@ -44,3 +45,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     { status: 202 }
   );
 }
+
+export const POST = withAccess(unguardedPOST);

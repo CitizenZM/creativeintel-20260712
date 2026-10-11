@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { runAnalysisPipeline, ANALYSIS_STAGES, type AnalysisStage } from "@/services/ai/analysis-pipeline";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
@@ -10,7 +11,7 @@ function parseStage(value: unknown): AnalysisStage | undefined {
     : undefined;
 }
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -42,3 +43,5 @@ export async function POST(
     );
   }
 }
+
+export const POST = withAccess(unguardedPOST);

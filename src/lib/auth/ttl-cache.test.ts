@@ -51,3 +51,17 @@ describe("createTtlCache", () => {
     expect(cache.size).toBe(2);
   });
 });
+
+describe("getStale", () => {
+  it("serves an expired value within maxAge, not beyond; get() still treats it as expired", () => {
+    let t = 0;
+    const c = createTtlCache<string>({ ttlMs: 1_000, now: () => t });
+    c.set("k", "v");
+    t = 5_000;
+    expect(c.get("k")).toBeUndefined();
+    expect(c.getStale("k", 10_000)).toBe("v");
+    t = 20_000;
+    expect(c.getStale("k", 10_000)).toBeUndefined();
+    expect(c.getStale("missing", 10_000)).toBeUndefined();
+  });
+});

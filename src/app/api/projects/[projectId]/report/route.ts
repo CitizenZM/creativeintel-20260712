@@ -8,11 +8,12 @@ import { buildCampaignReportModel, llmNarrator, loadReportInputs } from "@/servi
 import { renderReportHtml } from "@/services/reports/report-html";
 import { DOCX_CONTENT_TYPE, renderReportDocx } from "@/services/reports/report-docx";
 import { archiveInBackground, archiveReport } from "@/services/artifacts/archive";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-export async function GET(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const url = new URL(request.url);
   const format = url.searchParams.get("format") ?? "html";
@@ -36,3 +37,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
     headers: { "Content-Type": "text/html; charset=utf-8", "Content-Disposition": `inline; filename="${name}.html"`, "Cache-Control": "no-store" },
   });
 }
+
+export const GET = withAccess(unguardedGET);

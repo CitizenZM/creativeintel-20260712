@@ -25,6 +25,7 @@ import {
 } from "@/services/brand-kit-suggest";
 import { readStatusMap } from "@/lib/field-status";
 import { uploadFromUrl } from "@/services/storage";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -73,7 +74,7 @@ const SCHEMA_KEY: Record<string, string> = {
   productSummary: "productSummary",
 };
 
-export async function POST(
+async function unguardedPOST(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -255,3 +256,5 @@ export async function POST(
     aiError,
   });
 }
+
+export const POST = withAccess(unguardedPOST);

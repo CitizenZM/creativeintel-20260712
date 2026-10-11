@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeCompetitor } from "@/lib/brand-name";
+import { withAccess } from "@/lib/auth/route-guard";
 
 /** Add a competitor by hand; it is researched on the next run. */
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -38,7 +39,7 @@ export async function POST(
   return NextResponse.json({ competitor }, { status: 201 });
 }
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -89,3 +90,6 @@ export async function GET(
     })),
   });
 }
+
+export const POST = withAccess(unguardedPOST);
+export const GET = withAccess(unguardedGET);

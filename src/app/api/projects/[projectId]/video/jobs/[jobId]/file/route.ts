@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { createReadStream, statSync } from "node:fs";
 import { ReadableStream } from "node:stream/web";
 import { prisma } from "@/lib/db";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; jobId: string }> }
 ) {
@@ -46,3 +47,5 @@ export async function GET(
     );
   }
 }
+
+export const GET = withAccess(unguardedGET);

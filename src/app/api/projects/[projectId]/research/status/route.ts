@@ -9,6 +9,7 @@ import {
 } from "@/services/research/job-progress";
 import { getTaskStatusCounts } from "@/services/worker-tasks";
 import { sameTenantProjectIds } from "@/services/tenancy";
+import { withAccess } from "@/lib/auth/route-guard";
 
 const DEFAULT_RESEARCH_SECONDS = 180;
 
@@ -40,7 +41,7 @@ async function estimateResearchEta(
   return Math.max(10, Math.round(typical - elapsed));
 }
 
-export async function GET(
+async function unguardedGET(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -80,3 +81,5 @@ export async function GET(
     completedAt: job.completedAt,
   });
 }
+
+export const GET = withAccess(unguardedGET);

@@ -7,18 +7,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { parseOperatorAction } from "@/services/operator";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function GET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { imageAdSets: true } });
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
   return NextResponse.json({ sets: Array.isArray(project.imageAdSets) ? project.imageAdSets : [] });
 }
 
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const body = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
   const parsed = parseOperatorAction("image-ads", { ...body, projectId });
@@ -33,3 +34,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     return NextResponse.json({ error: msg }, { status: /not found/i.test(msg) ? 404 : /Unknown image ad|No product image/.test(msg) ? 400 : 500 });
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

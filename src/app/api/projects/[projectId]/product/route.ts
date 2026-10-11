@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db";
 import { scrapeProductPageDetailed } from "@/services/research/product-page-scraper";
 import type { ProductPageData, ScrapeOutcome } from "@/services/research/product-page-scraper";
 import { readStatusMap } from "@/lib/field-status";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 30;
 
@@ -68,7 +69,7 @@ async function commitScrape(projectId: string, productUrl: string, scraped: Prod
   return project;
 }
 
-export async function GET(
+async function unguardedGET(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -81,7 +82,7 @@ export async function GET(
   return NextResponse.json(project);
 }
 
-export async function POST(
+async function unguardedPOST(
   req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -112,7 +113,7 @@ export async function POST(
   });
 }
 
-export async function PATCH(
+async function unguardedPATCH(
   req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -188,3 +189,7 @@ export async function PATCH(
 
   return NextResponse.json(project);
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);
+export const PATCH = withAccess(unguardedPATCH);

@@ -10,10 +10,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ensureBrandKit, refreshCompleteness } from "@/services/brand-kit";
 import { viewerCanUseProject } from "@/services/workspace";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 30;
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -85,3 +86,5 @@ export async function POST(
   const completeness = await refreshCompleteness(projectId);
   return NextResponse.json({ copiedAssets: toCopy.length, completeness });
 }
+
+export const POST = withAccess(unguardedPOST);

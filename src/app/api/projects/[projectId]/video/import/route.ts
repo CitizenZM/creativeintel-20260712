@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { createRenderJob, runImport } from "@/services/video/runner";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -10,7 +11,7 @@ const bodySchema = z.object({
   url: z.string().url(),
 });
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -28,3 +29,5 @@ export async function POST(
   waitUntil(runImport(jobId, projectId, parsed.data));
   return NextResponse.json({ jobId, status: "running" }, { status: 202 });
 }
+
+export const POST = withAccess(unguardedPOST);

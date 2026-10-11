@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ACTIVE_WORKSPACE_COOKIE, findAccessibleWorkspace } from "@/services/workspace";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
 const schema = z.object({ id: z.string().min(1) });
 
-export async function POST(request: Request) {
+async function unguardedPOST(request: Request) {
   const json = await request.json().catch(() => null);
   const parsed = schema.safeParse(json);
   if (!parsed.success) {
@@ -24,3 +25,5 @@ export async function POST(request: Request) {
   });
   return res;
 }
+
+export const POST = withAccess(unguardedPOST);

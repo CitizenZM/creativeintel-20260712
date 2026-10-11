@@ -4,11 +4,12 @@
  */
 import { NextResponse } from "next/server";
 import { parseOperatorAction } from "@/services/operator";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string; runId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string; runId: string }> }) {
   const { projectId, runId } = await params;
   const body = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
   const parsed = parseOperatorAction("preflight", { ...body, projectId, runId });
@@ -20,3 +21,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof PreflightError ? err.status : 500 });
   }
 }
+
+export const POST = withAccess(unguardedPOST);

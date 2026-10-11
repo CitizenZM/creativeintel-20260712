@@ -1,10 +1,11 @@
 /** POST {final: boolean} — pick (or unpick) this run as its script's deliverable. */
 import { NextResponse } from "next/server";
 import { getRunWithJobs, setRunFinal } from "@/services/video-gen/libtv-queue";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string; runId: string }> }
 ) {
@@ -21,3 +22,5 @@ export async function POST(
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ run: await getRunWithJobs(runId) });
 }
+
+export const POST = withAccess(unguardedPOST);

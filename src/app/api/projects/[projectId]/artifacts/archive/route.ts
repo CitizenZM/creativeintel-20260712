@@ -9,11 +9,12 @@ import { prisma } from "@/lib/db";
 import { zipStream } from "@/lib/zip-stream";
 import { safeFileName } from "@/services/artifacts/kinds";
 import { archiveEntries, contentDisposition, latestOnly, listWhere, openStoredUrl, parseListFilters } from "@/services/artifacts/serve";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function GET(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const f = parseListFilters(new URL(request.url).searchParams);
   const [project, rows] = await Promise.all([
@@ -44,3 +45,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
     headers: { "Content-Type": "application/zip", "Content-Disposition": contentDisposition(filename), "Cache-Control": "no-store" },
   });
 }
+
+export const GET = withAccess(unguardedGET);

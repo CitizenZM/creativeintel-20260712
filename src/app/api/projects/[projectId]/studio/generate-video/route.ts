@@ -4,10 +4,11 @@ import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { prisma } from "@/lib/db";
 import { getVideoModel, VIDEO_MODELS } from "@/services/video-gen/models";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -179,3 +180,5 @@ export async function POST(
     status: "generating",
   });
 }
+
+export const POST = withAccess(unguardedPOST);

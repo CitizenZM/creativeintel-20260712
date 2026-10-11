@@ -1,5 +1,7 @@
 import { PrismaClient } from "@/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
+import { attachDatabasePool } from "@vercel/functions";
 
 const globalForPrisma = globalThis as unknown as { prisma: InstanceType<typeof PrismaClient> };
 
@@ -28,9 +30,35 @@ export function splitSchema(url: string | undefined): {
   }
 }
 
+/**
+ * Connection pool sizing for Vercel Fluid Compute. One function instance serves many concurrent
+ * requests through this one pool, and every instance opens its own pool against Supabase's
+ * Supavisor (transaction mode, :6543), whose client-connection cap is shared with the other apps on
+ * that database. node-postgres' defaults (10 connections, wait forever for one, 10 s idle) let a
+ * busy instance hoard connections and hang requests when the cap is reached. Instead:
+ * - DB_POOL_MAX (default 5) connections per instance;
+ * - fail fast after 5 s waiting for a connection (DB_POOL_ACQUIRE_TIMEOUT_MS) rather than hang;
+ * - release idle connections after 5 s, and attachDatabasePool() closes them before the instance
+ *   is suspended so they don't linger as dead clients on the pooler.
+ */
+export function poolOptions(env: NodeJS.ProcessEnv = process.env) {
+  const int = (raw: string | undefined, fallback: number, min: number, max: number) => {
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= min && n <= max ? Math.floor(n) : fallback;
+  };
+  return {
+    max: int(env.DB_POOL_MAX, 5, 1, 50),
+    connectionTimeoutMillis: int(env.DB_POOL_ACQUIRE_TIMEOUT_MS, 5_000, 500, 60_000),
+    idleTimeoutMillis: int(env.DB_POOL_IDLE_TIMEOUT_MS, 5_000, 1_000, 60_000),
+  };
+}
+
 function createPrismaClient() {
   const { connectionString, schema, ssl } = splitSchema(process.env.APP_DATABASE_URL || process.env.DATABASE_URL);
-  const adapter = new PrismaPg({ connectionString, ssl }, schema ? { schema } : undefined);
+  const pool = new Pool({ connectionString, ssl, ...poolOptions() });
+  // Idle clients are closed before Fluid suspends the instance (no-op outside Vercel).
+  attachDatabasePool(pool);
+  const adapter = new PrismaPg(pool, schema ? { schema } : undefined);
   return new PrismaClient({ adapter });
 }
 

@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { archiveBeforeReplace, archiveBrandAssets } from "@/services/artifacts/archive";
 import { refreshCompleteness } from "@/services/brand-kit";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function DELETE(
+async function unguardedDELETE(
   _req: Request,
   { params }: { params: Promise<{ projectId: string; assetId: string }> }
 ) {
@@ -25,3 +26,5 @@ export async function DELETE(
 
   return NextResponse.json({ deleted: assetId, completeness });
 }
+
+export const DELETE = withAccess(unguardedDELETE);

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { brandAssetMetaSchema } from "@/lib/validations";
 import { ensureBrandKit, refreshCompleteness } from "@/services/brand-kit";
 import { readImageMeta, sniffImageContentType, uploadBuffer } from "@/services/storage";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -25,7 +26,7 @@ function mimeAllowed(type: string): boolean {
   return ALLOWED_MIME.has(t) || AUDIO_MIME.has(t) || t.startsWith("font/") || t === "application/font-woff" || t === "application/x-font-ttf";
 }
 
-export async function GET(
+async function unguardedGET(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -34,7 +35,7 @@ export async function GET(
   return NextResponse.json({ assets: kit.assets });
 }
 
-export async function POST(
+async function unguardedPOST(
   req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -145,3 +146,6 @@ export async function POST(
     { status: 201 }
   );
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

@@ -11,10 +11,11 @@ import { rowsFromCsv } from "@/services/performance/import";
 import { loadLearning, saveRows } from "@/services/performance/store";
 import { loadElementLearning, saveElementMaps } from "@/services/performance/agent";
 import { z } from "zod";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(_req: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const [rows, learning, elements] = await Promise.all([
     prisma.adPerformance.findMany({ where: { projectId }, orderBy: [{ dateFrom: "desc" }, { impressions: "desc" }], take: 200 }),
@@ -24,7 +25,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ project
   return NextResponse.json({ rows, learning, elements });
 }
 
-export async function POST(req: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(req: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -65,7 +66,7 @@ const mapSchema = z.object({
     .max(500),
 });
 
-export async function PUT(req: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPUT(req: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const parsed = mapSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid mappings", issues: parsed.error.issues }, { status: 400 });
@@ -74,3 +75,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ projectI
   const saved = await saveElementMaps(projectId, parsed.data.mappings);
   return NextResponse.json({ ok: true, saved, elements: await loadElementLearning(projectId) });
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);
+export const PUT = withAccess(unguardedPUT);

@@ -7,17 +7,18 @@
 import { NextResponse } from "next/server";
 import { parseOperatorAction } from "@/services/operator";
 import { setBudgetAction, spendReportAction } from "@/services/ops/operator-ops";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const since = new URL(request.url).searchParams.get("since") ?? undefined;
   const r = await spendReportAction({ projectId, since });
   return NextResponse.json(r.body, { status: r.status });
 }
 
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body || body.confirm !== true) return NextResponse.json({ error: "Confirm the new budget (confirm: true)" }, { status: 400 });
@@ -26,3 +27,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   const r = await setBudgetAction(parsed.data);
   return NextResponse.json(r.body, { status: r.status });
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

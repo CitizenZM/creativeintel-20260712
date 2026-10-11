@@ -8,6 +8,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { creativeDirectionLine } from "@/lib/style-categories";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -35,7 +36,7 @@ const actorSchema = z.object({
   ),
 });
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -96,3 +97,5 @@ export async function POST(
     );
   }
 }
+
+export const POST = withAccess(unguardedPOST);

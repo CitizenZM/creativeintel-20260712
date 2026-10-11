@@ -14,6 +14,7 @@ import { currentAppUser } from "@/services/app-user";
 import { invalidateShares } from "@/services/access";
 import { clerkErrorMessage, listPendingInvitations, sendInvitation } from "@/services/invitations";
 import { shareProjects } from "@/services/project-shares";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ async function owner() {
   return me?.role === "owner" ? me : null;
 }
 
-export async function GET() {
+async function unguardedGET() {
   if (!(await owner())) return NextResponse.json({ error: "Owner only" }, { status: 403 });
   try {
     return NextResponse.json({ invitations: await listPendingInvitations() });
@@ -37,7 +38,7 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+async function unguardedPOST(request: Request) {
   const me = await owner();
   if (!me) return NextResponse.json({ error: "Owner only" }, { status: 403 });
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
@@ -72,3 +73,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: duplicate ? 409 : 502 });
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

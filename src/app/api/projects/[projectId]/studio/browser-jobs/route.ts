@@ -29,6 +29,7 @@ import {
   type BrandContext,
   type ScriptSceneLike,
 } from "@/services/video-gen/prompt-compiler";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -72,7 +73,7 @@ interface FromScriptBody {
   resolution?: string;
 }
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -294,7 +295,7 @@ async function handleFromScript(projectId: string, body: FromScriptBody) {
   return NextResponse.json({ created, skipped });
 }
 
-export async function GET(
+async function unguardedGET(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -321,3 +322,6 @@ export async function GET(
     );
   }
 }
+
+export const POST = withAccess(unguardedPOST);
+export const GET = withAccess(unguardedGET);

@@ -2,10 +2,11 @@
 import { NextResponse } from "next/server";
 import { currentAppUser } from "@/services/app-user";
 import { clerkErrorMessage, revokeInvitation } from "@/services/invitations";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function unguardedDELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const me = await currentAppUser();
   if (me?.role !== "owner") return NextResponse.json({ error: "Owner only" }, { status: 403 });
   const { id } = await params;
@@ -18,3 +19,5 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return NextResponse.json({ error: clerkErrorMessage(err) }, { status: 502 });
   }
 }
+
+export const DELETE = withAccess(unguardedDELETE);

@@ -7,10 +7,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
-export async function GET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -37,7 +38,7 @@ const postSchema = z
   })
   .catch({});
 
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const input = postSchema.parse(await request.json().catch(() => ({})));
   const project = await prisma.project.findUnique({
@@ -76,3 +77,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

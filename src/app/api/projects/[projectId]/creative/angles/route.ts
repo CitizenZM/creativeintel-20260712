@@ -13,6 +13,7 @@ import {
   isVideoType,
   defaultTemplateBatch,
 } from "@/services/ai/prompts/script-templates";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 120;
 
@@ -35,7 +36,7 @@ const anglesSchema = z.object({
 });
 
 /** Every saved angle, newest generation first. */
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -47,7 +48,7 @@ export async function GET(
   return NextResponse.json({ angles });
 }
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -198,3 +199,6 @@ async function generateAngles(projectId: string) {
 
     return { angles: saved, batchId };
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

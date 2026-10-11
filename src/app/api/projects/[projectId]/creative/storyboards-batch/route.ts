@@ -7,12 +7,13 @@ import { renderVisualDirection } from "@/lib/visual-direction";
 import { withIdempotency } from "@/lib/idempotency";
 import { pMapSettled } from "@/lib/parallel";
 import { LIVE, createStoryboardVersion } from "@/services/creative-library";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
 const CONCURRENCY = 4;
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -117,3 +118,5 @@ export async function POST(
     );
   }
 }
+
+export const POST = withAccess(unguardedPOST);

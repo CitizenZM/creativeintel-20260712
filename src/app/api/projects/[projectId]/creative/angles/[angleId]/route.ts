@@ -5,8 +5,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { LIVE, isSelectionStatus } from "@/services/creative-library";
+import { withAccess } from "@/lib/auth/route-guard";
 
-export async function PATCH(
+async function unguardedPATCH(
   request: Request,
   { params }: { params: Promise<{ projectId: string; angleId: string }> }
 ) {
@@ -32,7 +33,7 @@ export async function PATCH(
   return NextResponse.json({ ok: true, status: body.status });
 }
 
-export async function DELETE(
+async function unguardedDELETE(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; angleId: string }> }
 ) {
@@ -44,3 +45,6 @@ export async function DELETE(
   if (!count) return NextResponse.json({ error: "Angle not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }
+
+export const PATCH = withAccess(unguardedPATCH);
+export const DELETE = withAccess(unguardedDELETE);

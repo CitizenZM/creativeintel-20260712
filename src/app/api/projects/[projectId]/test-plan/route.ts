@@ -8,18 +8,19 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { parseOperatorAction } from "@/services/operator";
 import { createTestPlan, TestPlanError } from "@/services/creative/test-plan.store";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function GET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedGET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { testPlan: true, testPlanAt: true, campaignPlan: true } });
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
   return NextResponse.json({ testPlan: project.testPlan ?? null, testPlanAt: project.testPlanAt, hasCampaignPlan: !!project.campaignPlan });
 }
 
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+async function unguardedPOST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const body = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
   const parsed = parseOperatorAction("test-plan", { narrative: false, ...body, projectId });
@@ -33,3 +34,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof TestPlanError ? err.status : 500 });
   }
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);

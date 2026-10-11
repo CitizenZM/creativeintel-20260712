@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import * as cheerio from "cheerio";
 import { ensureBrandKit, refreshCompleteness } from "@/services/brand-kit";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 60;
 
@@ -186,7 +187,7 @@ async function generateAIImage(prompt: string, width = 1024, height = 1024, seed
 
 // ─── Route handlers ───────────────────────────────────────────────────────────
 
-export async function GET(
+async function unguardedGET(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -277,7 +278,7 @@ async function seedBrandKitCtaOptions(projectId: string, ctaLanguage: unknown): 
   await refreshCompleteness(projectId);
 }
 
-export async function POST(
+async function unguardedPOST(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -414,7 +415,7 @@ export async function POST(
   return NextResponse.json({ productImages: allImages, summary });
 }
 
-export async function PATCH(
+async function unguardedPATCH(
   req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -435,3 +436,7 @@ export async function PATCH(
 
   return NextResponse.json(brand);
 }
+
+export const GET = withAccess(unguardedGET);
+export const POST = withAccess(unguardedPOST);
+export const PATCH = withAccess(unguardedPATCH);

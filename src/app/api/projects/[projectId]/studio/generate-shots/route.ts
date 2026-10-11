@@ -29,6 +29,7 @@ import {
   type ScriptSceneLike,
 } from "@/services/video-gen/prompt-compiler";
 import { getVideoModel } from "@/services/video-gen/models";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
 
@@ -40,7 +41,7 @@ interface ShotJobResult {
   skipped?: boolean;
 }
 
-export async function POST(
+async function unguardedPOST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -285,3 +286,5 @@ async function handlePost(
 
   return NextResponse.json({ jobs: results });
 }
+
+export const POST = withAccess(unguardedPOST);

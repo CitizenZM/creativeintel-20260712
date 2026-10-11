@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { pollJob, stripEndpointMarker, PollError } from "@/services/video-gen/poll";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 30;
 
-export async function GET(
+async function unguardedGET(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; jobId: string }> }
 ) {
@@ -28,7 +29,7 @@ export async function GET(
   }
 }
 
-export async function DELETE(
+async function unguardedDELETE(
   _request: Request,
   { params }: { params: Promise<{ projectId: string; jobId: string }> }
 ) {
@@ -36,3 +37,6 @@ export async function DELETE(
   await prisma.falVideoJob.deleteMany({ where: { id: jobId, projectId } }).catch(() => {});
   return NextResponse.json({ ok: true });
 }
+
+export const GET = withAccess(unguardedGET);
+export const DELETE = withAccess(unguardedDELETE);

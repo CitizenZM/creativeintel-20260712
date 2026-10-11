@@ -53,7 +53,9 @@ export async function accountLimitOfUser(userId: string, db: Db = prisma): Promi
 
 /** The member account a project belongs to and its allowance; null for the admin's (uncapped) projects. */
 export async function accountLimitOfProject(projectId: string, db: Db = prisma): Promise<AccountLimit | null> {
-  const tenant = await tenantOfProject(projectId);
+  // Same client as the caller: inside the spend ledger's transaction this must not take a second
+  // connection from the pool (N concurrent reservations would each hold one and wait for another).
+  const tenant = await tenantOfProject(projectId, db);
   if (!tenant) return null;
   return accountLimitOfUser(tenant, db);
 }

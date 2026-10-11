@@ -8,10 +8,11 @@ import { NextResponse } from "next/server";
 import { getVisionModel } from "@/services/ai/claude-client";
 import { envAvailability, recommendedVisionModel, resolveStrictFree, visionModelOptions } from "@/services/settings/ai-settings-core";
 import { loadAiSettings } from "@/services/settings/ai-settings";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function unguardedGET() {
   const snap = await loadAiSettings();
   const strictFree = resolveStrictFree(snap.settings.strictFree, process.env.AI_COST_MODE).effective;
   const env = envAvailability(process.env);
@@ -22,3 +23,5 @@ export async function GET() {
     strictFree,
   });
 }
+
+export const GET = withAccess(unguardedGET);

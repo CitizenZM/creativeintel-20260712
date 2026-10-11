@@ -6,11 +6,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { contentDisposition, downloadPlan, openStoredUrl } from "@/services/artifacts/serve";
+import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function GET(request: Request, { params }: { params: Promise<{ projectId: string; artifactId: string }> }) {
+async function unguardedGET(request: Request, { params }: { params: Promise<{ projectId: string; artifactId: string }> }) {
   const { projectId, artifactId } = await params;
   const inline = new URL(request.url).searchParams.get("inline") === "1";
   const a = await prisma.projectArtifact.findFirst({ where: { id: artifactId, projectId }, include: { blob: { select: { artifactId: true } } } });
@@ -37,3 +38,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
   if (!body) return NextResponse.json({ error: "The stored file could not be fetched (missing or broken URL)", url }, { status: 502 });
   return new Response(body, { headers: headers(a.contentType || "application/octet-stream", a.bytes) });
 }
+
+export const GET = withAccess(unguardedGET);
