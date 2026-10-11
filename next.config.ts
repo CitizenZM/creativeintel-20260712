@@ -1,7 +1,37 @@
 import path from "node:path";
 import type { NextConfig } from "next";
 
+/**
+ * Security headers on every response (pages and API). Deliberately conservative so nothing that
+ * works today breaks:
+ * - CSP enforces only the directives that can't break the app — no framing (clickjacking), no
+ *   <base> hijacking, no plugins, upgrade any stray http:// subresource. A full script-src policy
+ *   needs Clerk's and Next's script origins/nonces worked out first.
+ * - Permissions-Policy turns off device APIs the app never uses.
+ * - COOP same-origin-allow-popups keeps "Open on platform" (window.open) working.
+ * - HSTS adds includeSubDomains (clerk., accounts., clkmail. are all HTTPS).
+ */
+export const SECURITY_HEADERS = [
+  {
+    key: "Content-Security-Policy",
+    value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; upgrade-insecure-requests",
+  },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), interest-cohort=()",
+  },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+];
+
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
+  async headers() {
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+  },
   serverExternalPackages: ["pg", "ffmpeg-static", "msedge-tts"],
   // The GLM executor assembles masters with ffmpeg on the server; ship the
   // binary with the functions that run it.
