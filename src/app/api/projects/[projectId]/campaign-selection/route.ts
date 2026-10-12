@@ -4,6 +4,7 @@ import { sanitizeStyleCategories } from "@/lib/style-categories";
 import { readStatusMap } from "@/lib/field-status";
 import { campaignFieldKey } from "@/lib/setup-suggest";
 import { withAccess } from "@/lib/auth/route-guard";
+import { patchProject } from "@/services/row-patch";
 
 // Only these fields may be written from the request body. A raw `...body` spread
 // would let an unknown field or a wrong-typed value (e.g. totalDurationSec as a
@@ -55,15 +56,17 @@ async function markCampaignFieldsConfirmed(
   mark: "confirmed" | "suggested" = "confirmed"
 ) {
   if (touchedKeys.length === 0) return;
-  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { fieldStatus: true } });
-  // Keep bookkeeping keys such as __suggestedAt; readStatusMap alone drops them.
-  const raw =
-    project?.fieldStatus && typeof project.fieldStatus === "object" && !Array.isArray(project.fieldStatus)
-      ? (project.fieldStatus as Record<string, unknown>)
-      : {};
-  const next: Record<string, unknown> = { ...raw, ...readStatusMap(raw) };
-  for (const k of touchedKeys) next[campaignFieldKey(k)] = mark;
-  await prisma.project.update({ where: { id: projectId }, data: { fieldStatus: next as never } });
+  // Merged onto the CURRENT map (conflict-safe): parallel field saves each add their own marks.
+  await patchProject(projectId, (project) => {
+    // Keep bookkeeping keys such as __suggestedAt; readStatusMap alone drops them.
+    const raw =
+      project.fieldStatus && typeof project.fieldStatus === "object" && !Array.isArray(project.fieldStatus)
+        ? (project.fieldStatus as Record<string, unknown>)
+        : {};
+    const next: Record<string, unknown> = { ...raw, ...readStatusMap(raw) };
+    for (const k of touchedKeys) next[campaignFieldKey(k)] = mark;
+    return { fieldStatus: next as never };
+  });
 }
 
 async function unguardedGET(

@@ -11,6 +11,7 @@ import { scrapeProductPageDetailed } from "@/services/research/product-page-scra
 import type { ProductPageData, ScrapeOutcome } from "@/services/research/product-page-scraper";
 import { readStatusMap } from "@/lib/field-status";
 import { withAccess } from "@/lib/auth/route-guard";
+import { patchProject } from "@/services/row-patch";
 
 export const maxDuration = 30;
 
@@ -176,16 +177,15 @@ async function unguardedPATCH(
 
   // Details typed or edited by a person are confirmed by definition — clear
   // any "suggested" mark on the touched fields too.
-  const existing = await prisma.project.findUnique({ where: { id: projectId }, select: { fieldStatus: true } });
-  const status = readStatusMap(existing?.fieldStatus);
-  const nextStatus = { ...status };
-  for (const key of Object.keys(data)) nextStatus[key] = "confirmed";
-
-  const project = await prisma.project.update({
-    where: { id: projectId },
-    data: { ...data, productConfirmedAt: new Date(), fieldStatus: nextStatus as never },
-    select: PROJECT_SELECT,
+  // Merged onto the CURRENT status map, so a concurrent mark on another field survives.
+  const res = await patchProject(projectId, (row) => {
+    const nextStatus = { ...readStatusMap(row.fieldStatus) };
+    for (const key of Object.keys(data)) nextStatus[key] = "confirmed";
+    return { ...data, productConfirmedAt: new Date(), fieldStatus: nextStatus as never };
   });
+  if (!res) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: PROJECT_SELECT });
+  if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   return NextResponse.json(project);
 }

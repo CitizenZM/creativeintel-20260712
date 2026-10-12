@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { patchResearchJob } from "@/services/row-patch";
 
 export type JobStepStatus = "pending" | "running" | "complete" | "error";
 
@@ -67,6 +68,10 @@ export async function createJob(
   return row.id;
 }
 
+// Every steps writer below is a conflict-safe read-modify-write (patchResearchJob: the mutation is applied
+// to the CURRENT steps and written only if nobody wrote the job meanwhile, retried otherwise) — per-owner
+// tasks run in parallel and would otherwise overwrite each other's step / source updates.
+//
 // startStep/completeStep/failStep mark step-status transitions and must never
 // be lost. They write immediately (read-modify-write against the live row)
 // rather than going through scheduleWrite's debounce: scheduleWrite keeps
@@ -78,17 +83,14 @@ export async function createJob(
 // non-authoritative progress ticks from updateStep are still debounced.
 export async function startStep(jobId: string, name: string) {
   await flush(jobId);
-  const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
-  if (!row) return;
-  const steps = (row.steps as unknown as JobStep[] | null) ?? [];
-  const next = steps.map((s) =>
-    s.name === name
-      ? { ...s, status: "running" as const, startedAt: new Date().toISOString() }
-      : s
-  );
-  await prisma.researchJob.update({
-    where: { id: jobId },
-    data: { steps: next as never, currentStep: name },
+  await patchResearchJob(jobId, (row) => {
+    const steps = (row.steps as unknown as JobStep[] | null) ?? [];
+    const next = steps.map((s) =>
+      s.name === name
+        ? { ...s, status: "running" as const, startedAt: new Date().toISOString() }
+        : s
+    );
+    return { steps: next as never, currentStep: name };
   });
 }
 
@@ -99,19 +101,16 @@ export async function updateStep(
   message?: string
 ) {
   scheduleWrite(jobId, async () => {
-    const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
-    if (!row) return;
-    const steps = (row.steps as unknown as JobStep[] | null) ?? [];
-    const next = steps.map((s) =>
-      s.name === name ? { ...s, progress, ...(message ? { message } : {}) } : s
-    );
-    const completed = next.filter((s) => s.status === "complete").length;
-    const total = next.length || 1;
-    const cur = next.find((s) => s.name === name)?.progress ?? 0;
-    const overall = Math.round(((completed + cur / 100) / total) * 100);
-    await prisma.researchJob.update({
-      where: { id: jobId },
-      data: { steps: next as never, progress: overall, currentStep: name },
+    await patchResearchJob(jobId, (row) => {
+      const steps = (row.steps as unknown as JobStep[] | null) ?? [];
+      const next = steps.map((s) =>
+        s.name === name ? { ...s, progress, ...(message ? { message } : {}) } : s
+      );
+      const completed = next.filter((s) => s.status === "complete").length;
+      const total = next.length || 1;
+      const cur = next.find((s) => s.name === name)?.progress ?? 0;
+      const overall = Math.round(((completed + cur / 100) / total) * 100);
+      return { steps: next as never, progress: overall, currentStep: name };
     });
   });
 }
@@ -126,9 +125,7 @@ export async function recordStepSources(
   // Written directly (not debounced): scheduleWrite keeps only the latest
   // pending writer per job, so a queued updateStep would drop these.
   await flush(jobId);
-  {
-    const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
-    if (!row) return;
+  await patchResearchJob(jobId, (row) => {
     const steps = (row.steps as unknown as JobStep[] | null) ?? [];
     const next = steps.map((s) => {
       if (s.name !== name) return s;
@@ -150,11 +147,8 @@ export async function recordStepSources(
       }
       return { ...s, sources: [...merged.values()] };
     });
-    await prisma.researchJob.update({
-      where: { id: jobId },
-      data: { steps: next as never },
-    });
-  }
+    return { steps: next as never };
+  });
 }
 
 /** Flatten every step's source outcomes for GET /research/status. */
@@ -174,45 +168,39 @@ export function collectSources(steps: JobStep[] | null | undefined): JobSourceSt
 
 export async function completeStep(jobId: string, name: string) {
   await flush(jobId);
-  const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
-  if (!row) return;
-  const steps = (row.steps as unknown as JobStep[] | null) ?? [];
-  const next = steps.map((s) =>
-    s.name === name
-      ? {
-          ...s,
-          status: "complete" as const,
-          progress: 100,
-          completedAt: new Date().toISOString(),
-        }
-      : s
-  );
-  const completed = next.filter((s) => s.status === "complete").length;
-  const overall = Math.round((completed / (next.length || 1)) * 100);
-  await prisma.researchJob.update({
-    where: { id: jobId },
-    data: { steps: next as never, progress: overall },
+  await patchResearchJob(jobId, (row) => {
+    const steps = (row.steps as unknown as JobStep[] | null) ?? [];
+    const next = steps.map((s) =>
+      s.name === name
+        ? {
+            ...s,
+            status: "complete" as const,
+            progress: 100,
+            completedAt: new Date().toISOString(),
+          }
+        : s
+    );
+    const completed = next.filter((s) => s.status === "complete").length;
+    const overall = Math.round((completed / (next.length || 1)) * 100);
+    return { steps: next as never, progress: overall };
   });
 }
 
 export async function failStep(jobId: string, name: string, error: string) {
   await flush(jobId);
-  const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
-  if (!row) return;
-  const steps = (row.steps as unknown as JobStep[] | null) ?? [];
-  const next = steps.map((s) =>
-    s.name === name
-      ? {
-          ...s,
-          status: "error" as const,
-          message: error,
-          completedAt: new Date().toISOString(),
-        }
-      : s
-  );
-  await prisma.researchJob.update({
-    where: { id: jobId },
-    data: { steps: next as never, error },
+  await patchResearchJob(jobId, (row) => {
+    const steps = (row.steps as unknown as JobStep[] | null) ?? [];
+    const next = steps.map((s) =>
+      s.name === name
+        ? {
+            ...s,
+            status: "error" as const,
+            message: error,
+            completedAt: new Date().toISOString(),
+          }
+        : s
+    );
+    return { steps: next as never, error };
   });
 }
 
@@ -240,23 +228,19 @@ function finalizeDanglingSteps(
 
 export async function completeJob(jobId: string) {
   await flush(jobId);
-  const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
-  const steps = (row?.steps as unknown as JobStep[] | null) ?? [];
-  const next = finalizeDanglingSteps(steps, "complete");
-  await prisma.researchJob.update({
-    where: { id: jobId },
-    data: { steps: next as never, status: "complete", progress: 100, completedAt: new Date() },
+  await patchResearchJob(jobId, (row) => {
+    const steps = (row.steps as unknown as JobStep[] | null) ?? [];
+    const next = finalizeDanglingSteps(steps, "complete");
+    return { steps: next as never, status: "complete", progress: 100, completedAt: new Date() };
   });
 }
 
 export async function failJob(jobId: string, error: string) {
   await flush(jobId);
-  const row = await prisma.researchJob.findUnique({ where: { id: jobId } });
-  const steps = (row?.steps as unknown as JobStep[] | null) ?? [];
-  const next = finalizeDanglingSteps(steps, "error", error);
-  await prisma.researchJob.update({
-    where: { id: jobId },
-    data: { steps: next as never, status: "error", error, completedAt: new Date() },
+  await patchResearchJob(jobId, (row) => {
+    const steps = (row.steps as unknown as JobStep[] | null) ?? [];
+    const next = finalizeDanglingSteps(steps, "error", error);
+    return { steps: next as never, status: "error", error, completedAt: new Date() };
   });
 }
 

@@ -23,6 +23,7 @@ import { extractKeyframes, extractTranscriptSegments, frameTimestamps } from "@/
 import { NarrativeType } from "@/generated/prisma/enums";
 import { cached } from "@/services/cache";
 import { pMap } from "@/lib/parallel";
+import { patchResearchJob } from "@/services/row-patch";
 
 /** Ads torn down per owner (plus any pinned ones). */
 export const TOP_N_DEEP = Number(process.env.TOP_N_DEEP) || 5;
@@ -394,25 +395,26 @@ function jsonArray<T>(value: unknown): T[] {
 async function recordStage(jobId: string | undefined, result: StageResult): Promise<void> {
   if (!jobId) return;
   try {
-    const job = await prisma.researchJob.findUnique({ where: { id: jobId } });
-    if (!job) return;
-    const steps = jsonArray<Record<string, unknown>>(job.steps);
-    const name = `AI analysis · ${STAGE_LABELS[result.stage]}`;
-    const entry = {
-      name,
-      status: result.ok ? "complete" : "error",
-      progress: 100,
-      message: result.error ?? `${result.count} item${result.count === 1 ? "" : "s"}`,
-      stage: result.stage,
-      ok: result.ok,
-      count: result.count,
-      error: result.error ?? null,
-      completedAt: new Date().toISOString(),
-    };
-    const idx = steps.findIndex((s) => s.name === name);
-    if (idx >= 0) steps[idx] = entry;
-    else steps.push(entry);
-    await prisma.researchJob.update({ where: { id: jobId }, data: { steps: steps as never } });
+    // Stages run in parallel: merge onto the CURRENT steps and write only if nobody wrote the job meanwhile.
+    await patchResearchJob(jobId, (job) => {
+      const steps = jsonArray<Record<string, unknown>>(job.steps);
+      const name = `AI analysis · ${STAGE_LABELS[result.stage]}`;
+      const entry = {
+        name,
+        status: result.ok ? "complete" : "error",
+        progress: 100,
+        message: result.error ?? `${result.count} item${result.count === 1 ? "" : "s"}`,
+        stage: result.stage,
+        ok: result.ok,
+        count: result.count,
+        error: result.error ?? null,
+        completedAt: new Date().toISOString(),
+      };
+      const idx = steps.findIndex((s) => s.name === name);
+      if (idx >= 0) steps[idx] = entry;
+      else steps.push(entry);
+      return { steps: steps as never };
+    });
   } catch {
     // job bookkeeping must never break the pipeline
   }

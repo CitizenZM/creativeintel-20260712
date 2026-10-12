@@ -5,6 +5,8 @@ import { ensureBrandKit, getBrandKitCompleteness, refreshCompleteness } from "@/
 import { getStorageStatus } from "@/services/storage";
 import { readStatusMap } from "@/lib/field-status";
 import { withAccess } from "@/lib/auth/route-guard";
+import { patchBrandKit } from "@/services/row-patch";
+import { planKitSave } from "@/services/brand-kit-merge";
 
 export const maxDuration = 30;
 
@@ -90,7 +92,7 @@ async function unguardedPUT(
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  const kit = await ensureBrandKit(projectId);
+  await ensureBrandKit(projectId);
 
   const input = parsed.data;
   const data: Record<string, unknown> = {};
@@ -108,19 +110,32 @@ async function unguardedPUT(
   if (input.skuName !== undefined) data.skuName = input.skuName || null;
   if (input.productSummary !== undefined) data.productSummary = input.productSummary || null;
 
-  // Every field present in the PATCH/PUT body becomes "confirmed" — it's the
-  // user's own value now — unless the caller explicitly says it's a
-  // suggestion write.
-  const statusMap = readStatusMap(kit.fieldStatus);
-  for (const bodyKey of Object.keys(data)) {
-    const statusKey = FIELD_STATUS_KEY[bodyKey];
-    if (!statusKey) continue;
-    if (isSuggestedWrite) statusMap[statusKey] = "suggested";
-    else delete statusMap[statusKey]; // absent = confirmed (the user's own value)
-  }
-  data.fieldStatus = statusMap;
+  // What the client had loaded (same shape as the body): only the fields it changed are written, so a
+  // save never reverts a field someone else (or a suggestion) filled since. Unparseable → write all.
+  const baselineParsed = body && typeof body === "object" && body.baseline ? brandKitUpdateSchema.safeParse(body.baseline) : null;
+  const baseline = baselineParsed?.success ? (baselineParsed.data as Record<string, unknown>) : null;
+  const columnToStatusKey: Record<string, string> = FIELD_STATUS_KEY;
 
-  await prisma.brandKit.update({ where: { projectId }, data });
+  // Every field the user changed in the PATCH/PUT body becomes "confirmed" — it's the
+  // user's own value now — unless the caller explicitly says it's a
+  // suggestion write. Decided against the CURRENT row and written only if nobody wrote
+  // the kit meanwhile (retried otherwise), so concurrent saves of different fields all survive.
+  const written = await patchBrandKit<Record<string, unknown> & { fieldStatus: unknown }>(
+    projectId,
+    (row) => {
+      const plan = planKitSave({
+        candidate: data,
+        baseline,
+        current: row,
+        currentStatus: readStatusMap(row.fieldStatus),
+        columnToStatusKey,
+        suggested: isSuggestedWrite,
+      });
+      return { ...plan.data, fieldStatus: plan.status };
+    },
+    { fieldStatus: true, ...Object.fromEntries(Object.keys(columnToStatusKey).map((c) => [c, true as const])) }
+  );
+  if (!written) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   const completeness = await refreshCompleteness(projectId);
   const freshKit = await prisma.brandKit.findUniqueOrThrow({
@@ -150,15 +165,12 @@ async function unguardedPATCH(
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   const kit = await ensureBrandKit(projectId);
-  const statusMap = readStatusMap(kit.fieldStatus);
 
+  // Status changes are applied to the CURRENT map (conflict-safe), not the one read above.
   const confirm = body?.confirm;
   if (confirm === "all") {
-    for (const key of Object.keys(statusMap)) delete statusMap[key];
-    await prisma.$transaction([
-      prisma.brandKit.update({ where: { projectId }, data: { fieldStatus: statusMap } }),
-      prisma.brandAsset.updateMany({ where: { brandKitId: kit.id, verified: false }, data: { verified: true } }),
-    ]);
+    await patchBrandKit(projectId, () => ({ fieldStatus: {} }));
+    await prisma.brandAsset.updateMany({ where: { brandKitId: kit.id, verified: false }, data: { verified: true } });
   } else if (Array.isArray(confirm)) {
     // "logo" / "packshots" aren't tracked in fieldStatus — they're derived
     // from BrandAsset.verified (see field-status rule 2) — so confirming
@@ -167,10 +179,13 @@ async function unguardedPATCH(
     const assetKindsToVerify = confirm
       .filter((k): k is string => typeof k === "string" && k in ASSET_KIND)
       .map((k) => ASSET_KIND[k]);
-    for (const key of confirm) {
-      if (typeof key === "string" && !(key in ASSET_KIND)) delete statusMap[key];
-    }
-    await prisma.brandKit.update({ where: { projectId }, data: { fieldStatus: statusMap } });
+    await patchBrandKit(projectId, (row) => {
+      const statusMap = readStatusMap(row.fieldStatus);
+      for (const key of confirm) {
+        if (typeof key === "string" && !(key in ASSET_KIND)) delete statusMap[key];
+      }
+      return { fieldStatus: statusMap };
+    });
     if (assetKindsToVerify.length) {
       await prisma.brandAsset.updateMany({
         where: { brandKitId: kit.id, verified: false, kind: { in: assetKindsToVerify } },

@@ -125,6 +125,32 @@ function numOrUndefined(v: string): number | undefined {
   return v.trim() !== "" && Number.isFinite(n) ? n : undefined;
 }
 
+/** The PUT body for a form — also what we send as `baseline` (the form as loaded), so the server saves only what changed. */
+function savePayload(form: FormState) {
+  const dims: SkuDimensions = {
+    height: numOrUndefined(form.dims.height),
+    width: numOrUndefined(form.dims.width),
+    depth: numOrUndefined(form.dims.depth),
+    weightG: numOrUndefined(form.dims.weightG),
+  };
+  const hasDims = Object.values(dims).some((v) => typeof v === "number");
+  return {
+    colorsHex: form.colors.filter((c) => /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c.hex.trim())),
+    ctaOptions: form.ctas
+      .filter((c) => c.text.trim())
+      .map((c, i) => ({ text: c.text.trim(), priority: i + 1 })),
+    offerText: form.offerText.trim(),
+    landingUrl: form.landingUrl.trim(),
+    claimsAllowed: form.claimsAllowed,
+    claimsForbidden: form.claimsForbidden,
+    toneGuidelines: form.toneGuidelines.trim(),
+    doNotShow: form.doNotShow,
+    skuName: form.skuName.trim(),
+    skuDimensionsCm: hasDims ? dims : null,
+    productSummary: form.productSummary.trim(),
+  };
+}
+
 function CompletenessRing({ score }: { score: number }) {
   const radius = 26;
   const circumference = 2 * Math.PI * radius;
@@ -246,6 +272,8 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
   const [suggesting, setSuggesting] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const suggestedAtRef = useRef<string | null>(null);
+  // The save payload of the kit as last loaded from the server (see savePayload).
+  const baselineRef = useRef<ReturnType<typeof savePayload> | null>(null);
   const autoSuggestTried = useRef(false);
 
   // Offered only when this kit is still thin — once it is filled in, a copy
@@ -293,7 +321,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
 
   const applyResponse = useCallback((d: BrandKitResponse) => {
     const kit = d.kit;
-    setForm({
+    const loaded: FormState = {
       colors: kit.colorsHex || [],
       ctas: kit.ctaOptions || [],
       offerText: kit.offerText || "",
@@ -310,7 +338,9 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
         weightG: kit.skuDimensionsCm?.weightG?.toString() ?? "",
       },
       productSummary: kit.productSummary || "",
-    });
+    };
+    setForm(loaded);
+    baselineRef.current = savePayload(loaded);
     setAssets(d.assets || []);
     setCompleteness(d.completeness);
     if (d.storage) setStorage(d.storage);
@@ -435,32 +465,10 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
     setError(null);
     setNotice(null);
     try {
-      const dims: SkuDimensions = {
-        height: numOrUndefined(form.dims.height),
-        width: numOrUndefined(form.dims.width),
-        depth: numOrUndefined(form.dims.depth),
-        weightG: numOrUndefined(form.dims.weightG),
-      };
-      const hasDims = Object.values(dims).some((v) => typeof v === "number");
-
       const res = await fetch(`/api/projects/${projectId}/brand-kit`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          colorsHex: form.colors.filter((c) => /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c.hex.trim())),
-          ctaOptions: form.ctas
-            .filter((c) => c.text.trim())
-            .map((c, i) => ({ text: c.text.trim(), priority: i + 1 })),
-          offerText: form.offerText.trim(),
-          landingUrl: form.landingUrl.trim(),
-          claimsAllowed: form.claimsAllowed,
-          claimsForbidden: form.claimsForbidden,
-          toneGuidelines: form.toneGuidelines.trim(),
-          doNotShow: form.doNotShow,
-          skuName: form.skuName.trim(),
-          skuDimensionsCm: hasDims ? dims : null,
-          productSummary: form.productSummary.trim(),
-        }),
+        body: JSON.stringify({ ...savePayload(form), baseline: baselineRef.current }),
       });
 
       const payload = await res.json().catch(() => ({}));

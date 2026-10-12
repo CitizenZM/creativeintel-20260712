@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { normalizeCompetitor } from "@/lib/brand-name";
 import { readStatusMap } from "@/lib/field-status";
+import { patchProject } from "@/services/row-patch";
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -124,10 +125,13 @@ Return JSON: {"competitors":[{"name":"Brand","url":"https://brand.com","reason":
   }
 
   if (added.length) {
-    const map = readStatusMap(project.fieldStatus) as Record<string, string>;
-    const raw = (project.fieldStatus && typeof project.fieldStatus === "object" ? project.fieldStatus : {}) as Record<string, unknown>;
-    for (const a of added) map[`competitor.${a.id}`] = "suggested";
-    await prisma.project.update({ where: { id: projectId }, data: { fieldStatus: { ...raw, ...map } as never } });
+    // The LLM call above takes seconds: add the marks to the CURRENT map, not the one read before it.
+    await patchProject(projectId, (row) => {
+      const map = readStatusMap(row.fieldStatus) as Record<string, string>;
+      const raw = (row.fieldStatus && typeof row.fieldStatus === "object" ? row.fieldStatus : {}) as Record<string, unknown>;
+      for (const a of added) map[`competitor.${a.id}`] = "suggested";
+      return { fieldStatus: { ...raw, ...map } as never };
+    });
   }
   return added;
 }

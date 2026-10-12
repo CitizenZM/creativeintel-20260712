@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { archiveAround, archiveStoryboard } from "@/services/artifacts/archive";
 import { LIVE, appendFrameHistory, type FrameHistoryEntry } from "@/services/creative-library";
 import { withAccess } from "@/lib/auth/route-guard";
+import { patchRow, type RowModel } from "@/lib/optimistic-json";
 
 // Grid-owned fields keep their current values on undo — only content reverts.
 const GRID_FIELDS = ["frameNumber", "startSec", "endSec", "duration", "segment"];
@@ -121,40 +122,51 @@ async function unguardedPATCH(
     return NextResponse.json({ error: "Storyboard not found" }, { status: 404 });
   }
 
-  const existingFrames = Array.isArray(storyboard.frames)
-    ? (storyboard.frames as Array<Record<string, unknown>>)
-    : [];
-
-  const previous = existingFrames.find((f) => f.frameNumber === frameNumber);
-  if (!previous) {
+  const snapshotFrames = Array.isArray(storyboard.frames) ? (storyboard.frames as Array<Record<string, unknown>>) : [];
+  if (!snapshotFrames.some((f) => f.frameNumber === frameNumber)) {
     return NextResponse.json({ error: `Frame ${frameNumber} not found` }, { status: 404 });
   }
 
-  const frames = existingFrames.map((frame) =>
-    frame.frameNumber === frameNumber ? { ...frame, ...updates } : frame
-  );
+  // The Creative page fires one PATCH per frame in parallel (attaching each keyframe image), so the
+  // merge is done against the CURRENT frames / history and written only if nobody wrote the storyboard
+  // meanwhile — a plain read → write of the whole array would let the PATCHes overwrite each other.
+  let missingFrame = false;
+  const written = await archiveAround("storyboard frames", (o) => archiveStoryboard(storyboardId, o), () =>
+    patchRow<{ updatedAt: Date; frames: unknown; frameHistory: unknown }>(
+      prisma.storyboard as unknown as RowModel,
+      { id: storyboardId },
+      (current) => {
+        const existingFrames = Array.isArray(current.frames) ? (current.frames as Array<Record<string, unknown>>) : [];
 
-  // Keep what the frame said before this edit — an edit must never be the
-  // only copy of the frame's content.
-  // A generated keyframe image being attached is not an edit a person would
-  // want to undo, so image-only updates leave the history alone.
-  const changed = Object.entries(updates).some(
-    ([key, value]) => key !== "imageUrl" && JSON.stringify(previous[key]) !== JSON.stringify(value)
-  );
+        const previous = existingFrames.find((f) => f.frameNumber === frameNumber);
+        missingFrame = !previous;
+        if (!previous) return null;
 
-  const updated = await archiveAround("storyboard frames", (o) => archiveStoryboard(storyboardId, o), () =>
-    prisma.storyboard.update({
-      where: { id: storyboardId },
-      data: {
-        frames: frames as never,
-        ...(changed
-          ? { frameHistory: appendFrameHistory(storyboard.frameHistory, frameNumber, previous) as never }
-          : {}),
+        const frames = existingFrames.map((frame) =>
+          frame.frameNumber === frameNumber ? { ...frame, ...updates } : frame
+        );
+
+        // Keep what the frame said before this edit — an edit must never be the
+        // only copy of the frame's content.
+        // A generated keyframe image being attached is not an edit a person would
+        // want to undo, so image-only updates leave the history alone.
+        const changed = Object.entries(updates).some(
+          ([key, value]) => key !== "imageUrl" && JSON.stringify(previous[key]) !== JSON.stringify(value)
+        );
+
+        return {
+          frames: frames as never,
+          ...(changed ? { frameHistory: appendFrameHistory(current.frameHistory, frameNumber, previous) as never } : {}),
+        };
       },
-    })
+      { select: { frames: true, frameHistory: true }, label: `storyboard ${storyboardId}` }
+    )
   );
 
-  return NextResponse.json({ ok: true, frames: updated.frames });
+  if (!written) return NextResponse.json({ error: "Storyboard not found" }, { status: 404 });
+  if (missingFrame) return NextResponse.json({ error: `Frame ${frameNumber} not found` }, { status: 404 });
+
+  return NextResponse.json({ ok: true, frames: written.data!.frames });
 }
 
 export const POST = withAccess(unguardedPOST);

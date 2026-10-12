@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
+import { createFakeModel } from "@/test-utils/fake-rows";
 
 const db = vi.hoisted(() => ({
-  project: { findUnique: vi.fn(), update: vi.fn() },
+  project: { findUnique: vi.fn(), updateMany: vi.fn() },
   brandKit: { findUnique: vi.fn() },
 }));
 const storage = vi.hoisted(() => ({ uploadBuffer: vi.fn() }));
@@ -54,7 +55,8 @@ describe("renderImageAdSet", () => {
 describe("generateImageAdSet", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    db.project.findUnique.mockResolvedValue({ id: "p1", brandName: "TCL", productName: "QM8L", productBrief: brief, campaignPlan: null, productPageImages: [], imageAdSets: null });
+    db.project.findUnique.mockResolvedValue({ id: "p1", brandName: "TCL", productName: "QM8L", productBrief: brief, campaignPlan: null, productPageImages: [], imageAdSets: null, updatedAt: new Date(1) });
+    db.project.updateMany.mockResolvedValue({ count: 1 });
     db.brandKit.findUnique.mockResolvedValue({ colorsHex: [], assets: [] });
     storage.uploadBuffer.mockImplementation(async (i: { filename: string; buffer: Buffer }) => ({ url: `https://cdn.test/${i.filename}`, provider: "vercel-blob", bytes: i.buffer.length, publicId: i.filename }));
   });
@@ -64,7 +66,23 @@ describe("generateImageAdSet", () => {
     expect(set.items).toHaveLength(1);
     expect(set.items[0]).toMatchObject({ template: "hero-product", format: "728x90", w: 728, h: 90, url: expect.stringMatching(/^https:\/\/cdn\.test\/.+\.png$/) });
     expect(storage.uploadBuffer).toHaveBeenCalledWith(expect.objectContaining({ contentType: "image/png", folder: "image-ads/p1" }));
-    expect(db.project.update).toHaveBeenCalledWith({ where: { id: "p1" }, data: { imageAdSets: [expect.objectContaining({ version: 1, items: set.items })] } });
+    expect(db.project.updateMany).toHaveBeenCalledWith({ where: { id: "p1", updatedAt: new Date(1) }, data: { imageAdSets: [expect.objectContaining({ version: 1, items: set.items })] } });
+  }, 120_000);
+
+  it("puts the new set in front of the sets stored WHILE it rendered (both survive)", async () => {
+    const older = { version: 1, createdAt: "2026-10-01T00:00:00Z", items: [{ url: "https://cdn.test/older.png" }] };
+    const project = createFakeModel([{ id: "p1", brandName: "TCL", productName: "QM8L", productBrief: brief, campaignPlan: null, productPageImages: [], imageAdSets: null }]);
+    db.project.findUnique.mockImplementation(project.findUnique);
+    db.project.updateMany.mockImplementation(project.updateMany);
+    // another render finishes and stores its set between our read and our write
+    project.onBeforeWrite = (n) => {
+      if (n === 0) project.concurrentWrite("p1", { imageAdSets: [older] });
+    };
+    const set = await generateImageAdSet("p1", { templates: ["hero-product"], formats: ["728x90"], assets: { product: await packshot() } });
+    const stored = project.rows.get("p1")!.imageAdSets as Array<{ items: unknown }>;
+    expect(stored).toHaveLength(2);
+    expect(stored[0].items).toEqual(set.items);
+    expect(stored[1]).toEqual(older);
   }, 120_000);
 
   it("refuses to ship without hosted storage", async () => {

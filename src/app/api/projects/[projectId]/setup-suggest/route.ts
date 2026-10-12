@@ -21,6 +21,7 @@ import {
   type SetupSuggestInput,
 } from "@/lib/setup-suggest";
 import { withAccess } from "@/lib/auth/route-guard";
+import { patchProject } from "@/services/row-patch";
 
 export const maxDuration = 30;
 
@@ -91,59 +92,72 @@ async function unguardedPOST(
     maxTokens: 512,
   }).catch(() => null);
 
-  const currentStatus = readStatusMap(project.fieldStatus);
   const filled: string[] = [];
+
+  const PROJECT_RETURN = {
+    brandName: true,
+    category: true,
+    productName: true,
+    productPageTitle: true,
+    productPageText: true,
+    brandUrl: true,
+    briefingText: true,
+    campaignGoal: true,
+    goalType: true,
+    fieldStatus: true,
+    brand: { select: { productCategory: true, productDescription: true, targetAudience: true } },
+  } as const;
 
   let updatedProject = project;
   if (suggestion) {
-    const { projectData, statusPatch } = applySuggestions(
-      { campaignGoal: project.campaignGoal, goalType: project.goalType },
-      suggestion
-    );
-
-    const nextStatus = { ...currentStatus, ...statusPatch, [SUGGESTED_AT_KEY]: new Date().toISOString() };
-    filled.push(...Object.keys(statusPatch));
-
-    if (Object.keys(projectData).length > 0 || true) {
-      updatedProject = await prisma.project.update({
-        where: { id: projectId },
-        data: { ...projectData, fieldStatus: nextStatus as never },
-        select: {
-          brandName: true,
-          category: true,
-          productName: true,
-          productPageTitle: true,
-          productPageText: true,
-          brandUrl: true,
-          briefingText: true,
-          campaignGoal: true,
-          goalType: true,
-          fieldStatus: true,
-          brand: { select: { productCategory: true, productDescription: true, targetAudience: true } },
-        },
-      });
-    }
-
-    // Platform lives on CampaignSelection but its review state is tracked in
-    // Project.fieldStatus (keys prefixed "campaign.") per the shared convention.
+    // The model call above takes seconds: "is the field still empty?" is decided NOW, against the
+    // current rows, so a value the user typed meanwhile is never overwritten by the guess.
+    let platformFilled = false;
     if (emptyFields.platform && suggestion.platform) {
-      await prisma.campaignSelection.upsert({
-        where: { projectId },
-        create: { projectId, platform: suggestion.platform },
-        update: { platform: suggestion.platform },
-      });
-      filled.push("campaign.platform");
-      await prisma.project.update({
-        where: { id: projectId },
-        data: { fieldStatus: { ...nextStatus, [campaignFieldKey("platform")]: "suggested" } as never },
-      });
+      const selection = await prisma.campaignSelection.findUnique({ where: { projectId }, select: { platform: true } });
+      if (!selection) {
+        await prisma.campaignSelection.create({ data: { projectId, platform: suggestion.platform } }).then(
+          () => (platformFilled = true),
+          () => undefined // lost a create race: someone else made the row — fall through to the conditional fill
+        );
+      }
+      if (!platformFilled) {
+        // Conditional write: only a row whose platform is still empty takes the suggestion.
+        const { count } = await prisma.campaignSelection.updateMany({
+          where: { projectId, OR: [{ platform: null }, { platform: "" }] },
+          data: { platform: suggestion.platform },
+        });
+        platformFilled = count > 0;
+      }
     }
+
+    // Project fields + review marks: decided and merged against the CURRENT row (retried on conflict).
+    await patchProject<{ campaignGoal: string | null; goalType: string | null; fieldStatus: unknown }>(
+      projectId,
+      (row) => {
+        const { projectData, statusPatch } = applySuggestions({ campaignGoal: row.campaignGoal, goalType: row.goalType }, suggestion);
+        // Platform lives on CampaignSelection but its review state is tracked in
+        // Project.fieldStatus (keys prefixed "campaign.") per the shared convention.
+        const platformPatch = platformFilled ? { [campaignFieldKey("platform")]: "suggested" } : {};
+        filled.length = 0;
+        filled.push(...Object.keys(statusPatch), ...(platformFilled ? ["campaign.platform"] : []));
+        const nextStatus = {
+          ...readStatusMap(row.fieldStatus),
+          ...statusPatch,
+          [SUGGESTED_AT_KEY]: new Date().toISOString(),
+          ...platformPatch,
+        };
+        return { ...projectData, fieldStatus: nextStatus as never };
+      },
+      { campaignGoal: true, goalType: true, fieldStatus: true }
+    );
+    const fresh = await prisma.project.findUnique({ where: { id: projectId }, select: PROJECT_RETURN });
+    if (fresh) updatedProject = fresh;
   } else {
     // AI unavailable — still mark that we tried, so auto-run doesn't retry every load.
-    await prisma.project.update({
-      where: { id: projectId },
-      data: { fieldStatus: { ...currentStatus, [SUGGESTED_AT_KEY]: new Date().toISOString() } as never },
-    });
+    await patchProject(projectId, (row) => ({
+      fieldStatus: { ...readStatusMap(row.fieldStatus), [SUGGESTED_AT_KEY]: new Date().toISOString() } as never,
+    }));
   }
 
   const finalCampaignSelection = await prisma.campaignSelection.findUnique({ where: { projectId } });
