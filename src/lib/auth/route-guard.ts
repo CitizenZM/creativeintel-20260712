@@ -70,15 +70,18 @@ export function withAccess<H extends RouteHandler>(handler: H): H {
     const denied = await checkRouteAccess(request);
     if (denied) return denied;
     const projectId = projectIdFromPath(new URL(request.url).pathname);
+    const state: { refusal?: unknown } = {};
     const run = () => handler(request, ...rest);
+    const refused = (err: unknown) =>
+      NextResponse.json({ error: (err as Error).message, code: "BUDGET_EXCEEDED" }, { status: 402 });
     try {
-      return projectId
-        ? await withSpendScope({ projectId, actorId: request.headers.get(ACTOR_HEADER) }, run)
+      const res = projectId
+        ? await withSpendScope({ projectId, actorId: request.headers.get(ACTOR_HEADER), state }, run)
         : await run();
+      // A route that caught the refusal and answered a generic error: say what really happened.
+      return isBudgetExceeded(state.refusal) && res.status >= 400 ? refused(state.refusal) : res;
     } catch (err) {
-      if (isBudgetExceeded(err)) {
-        return NextResponse.json({ error: err.message, code: "BUDGET_EXCEEDED" }, { status: 402 });
-      }
+      if (isBudgetExceeded(err)) return refused(err);
       throw err;
     }
   };

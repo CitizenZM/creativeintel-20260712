@@ -121,6 +121,33 @@ describe("withAccess — spend scope and budget refusals", () => {
     expect(await res.json()).toMatchObject({ code: "BUDGET_EXCEEDED", error: expect.stringMatching(/monthly AI allowance/) });
   });
 
+  it("a refusal the route caught and turned into a generic 500 still answers 402", async () => {
+    const { withSpendGuard, MemorySpendLedger } = await import("@/services/ops/budget-guard");
+    const ledger = new MemorySpendLedger();
+    await ledger.setBudget({ projectId: P }, 0.0001);
+    const POST = withAccess(async (_r: Request) => {
+      try {
+        await withSpendGuard({ projectId: P, kind: "llm", model: "m" }, 0.05, async () => "never", { ledger });
+        return Response.json({ ok: true });
+      } catch {
+        return Response.json({ error: "Failed to generate angles" }, { status: 500 }); // what many routes do
+      }
+    });
+    const res = await POST(req(`/api/projects/${P}/creative/angles`, { method: "POST" }));
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ code: "BUDGET_EXCEEDED", error: expect.stringMatching(/Budget exceeded/) });
+  });
+
+  it("a successful response is never rewritten, even after a refusal was noted", async () => {
+    const { noteRefusal } = await import("@/services/ops/spend-scope");
+    const refusal = new BudgetExceededError({ projectId: P, kind: "llm", model: "m" }, 1, { level: "project", limitUsd: 1, spentUsd: 1 });
+    const POST = withAccess(async (_r: Request) => {
+      noteRefusal(refusal); // e.g. one optional step was refused, the rest succeeded
+      return Response.json({ ok: true });
+    });
+    expect((await POST(req(`/api/projects/${P}/x`, { method: "POST" }))).status).toBe(200);
+  });
+
   it("other errors still propagate", async () => {
     const GET = withAccess(async (_r: Request): Promise<Response> => {
       throw new Error("boom");
