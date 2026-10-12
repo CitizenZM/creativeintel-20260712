@@ -14,6 +14,8 @@ vi.mock("@/services/access", () => ({ getPrincipal: m.getPrincipal, getProjectTe
 
 import { checkRouteAccess, withAccess } from "./route-guard";
 import { ACTOR_HEADER } from "./actor";
+import { currentSpendScope } from "@/services/ops/spend-scope";
+import { BudgetExceededError } from "@/services/ops/budget-guard";
 
 const P = "cabcdefghijklmnopqrstuvw";
 const req = (p: string, init: RequestInit & { actor?: string } = {}) => {
@@ -82,6 +84,48 @@ describe("checkRouteAccess (in-handler second gate)", () => {
     m.getProjectTenant.mockResolvedValue({ ownerId: "bob", share: null });
     expect((await GET(req(`/api/projects/${P}`), ctx)).status).toBe(404);
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("withAccess — spend scope and budget refusals", () => {
+  beforeEach(() => {
+    m.mode = "clerk";
+    m.auth.mockResolvedValue({ userId: "clerk_ann" });
+    m.getPrincipal.mockResolvedValue({ appUserId: "ann", role: "member", status: "active" });
+    m.getProjectTenant.mockResolvedValue({ ownerId: "ann" });
+  });
+  afterEach(() => vi.resetAllMocks());
+
+  it("opens the project's spend scope, with the signed-in actor, for the handler", async () => {
+    const GET = withAccess(async (_r: Request) => Response.json(currentSpendScope() ?? null));
+    const body = await (await GET(req(`/api/projects/acme-${P}/insights`, { actor: "ann" }))).json();
+    expect(body).toMatchObject({ projectId: P, actorId: "ann", guarded: false });
+  });
+
+  it("has no scope outside /api/projects/[id]", async () => {
+    const GET = withAccess(async (_r: Request) => Response.json({ scope: currentSpendScope() ?? null }));
+    expect((await (await GET(req("/api/workspaces"))).json()).scope).toBeNull();
+  });
+
+  it("a budget / allowance refusal from the handler becomes a 402, not a 500", async () => {
+    const refusal = new BudgetExceededError({ projectId: P, kind: "llm", model: "m" }, 0.05, {
+      level: "account",
+      limitUsd: 1,
+      spentUsd: 0.99,
+    });
+    const POST = withAccess(async (_r: Request): Promise<Response> => {
+      throw refusal;
+    });
+    const res = await POST(req(`/api/projects/${P}/creative/scripts`, { method: "POST" }));
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ code: "BUDGET_EXCEEDED", error: expect.stringMatching(/monthly AI allowance/) });
+  });
+
+  it("other errors still propagate", async () => {
+    const GET = withAccess(async (_r: Request): Promise<Response> => {
+      throw new Error("boom");
+    });
+    await expect(GET(req(`/api/projects/${P}`))).rejects.toThrow("boom");
   });
 });
 

@@ -29,7 +29,7 @@ async function owner() {
   return me?.role === "owner" ? me : null;
 }
 
-async function unguardedGET() {
+async function unguardedGET(_request: Request) {
   if (!(await owner())) return NextResponse.json({ error: "Owner only" }, { status: 403 });
   try {
     return NextResponse.json({ invitations: await listPendingInvitations() });

@@ -18,7 +18,7 @@ export function setStrictFreeOverride(value: boolean | null): void {
   _dbOverride = value;
 }
 
-let _paidFallback = true;
+let _paidFallback = false;
 
 /** Set by the settings loader. */
 export function setPaidFallback(value: boolean): void {

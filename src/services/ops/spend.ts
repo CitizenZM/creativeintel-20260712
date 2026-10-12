@@ -3,6 +3,7 @@
  * job, estimated from the live price table. See budget-guard.ts for the reserve → call → reconcile cycle.
  */
 import { guardDisabled, isBudgetExceeded, settleOpenJob, spendLedger, withSpendGuard, type SpendKind } from "./budget-guard";
+import { currentSpendScope } from "./spend-scope";
 import { jobModel, jobUnitUsd, llmCostUsd, qcCallUsd, type CostJob } from "./cost-model";
 import { loadPriceTable } from "./prices";
 
@@ -85,6 +86,39 @@ export async function guardLlm<T>(
   const model = est.model ?? (scope.kind === "vision_qc" ? (qcEstimateModel() ?? prices.qc.defaultModel) : DEFAULT_TEXT_MODEL);
   const usd = llmCostUsd(prices, model, est.inTokens, est.outTokens).usd ?? 0;
   return withSpendGuard({ projectId: scope.projectId, runId: scope.runId ?? null, kind: scope.kind ?? "llm", model }, usd, call, { prices });
+}
+
+type PromptPartLike = { type: "text"; text: string } | { type: "image_url"; url: string };
+
+/**
+ * What a text / vision call is estimated at before it runs: ~4 chars per input token, ~1k tokens per
+ * image, and half of maxTokens as output (the ledger adds headroom on top, then reconciles to the
+ * provider's reported cost).
+ */
+export function estimateTextCall(opts: {
+  systemPrompt: string;
+  userPrompt: string | PromptPartLike[];
+  maxTokens?: number;
+}): { inTokens: number; outTokens: number; vision: boolean } {
+  const parts = typeof opts.userPrompt === "string" ? null : opts.userPrompt;
+  const userChars = parts ? parts.reduce((n, p) => n + (p.type === "text" ? p.text.length : 0), 0) : (opts.userPrompt as string).length;
+  const images = parts ? parts.filter((p) => p.type === "image_url").length : 0;
+  return {
+    inTokens: Math.ceil((opts.systemPrompt.length + userChars) / 4) + images * 1000,
+    outTokens: Math.ceil((opts.maxTokens ?? 4096) / 2),
+    vision: images > 0,
+  };
+}
+
+/**
+ * A model call for whichever project the current request / job is working for (spend-scope.ts):
+ * reserved in the ledger, refused over budget or allowance, reconciled afterwards. With no scope, or
+ * already inside a guard (the reservation covers it), the call just runs.
+ */
+export async function guardScopedLlm<T>(est: { inTokens: number; outTokens: number; vision?: boolean }, call: () => Promise<T>): Promise<T> {
+  const scope = currentSpendScope();
+  if (!scope || scope.guarded) return call();
+  return guardLlm({ projectId: scope.projectId, kind: est.vision ? "vision_qc" : "llm" }, est, call);
 }
 
 /**

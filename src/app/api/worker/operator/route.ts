@@ -60,6 +60,8 @@ import { storyboardFrames } from "@/services/video-gen/server-executor";
 import { driveServerRun } from "@/services/video-gen/server-engines";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { serverApprovalBudget } from "@/services/ops/approval-budget";
+import { withSpendScope } from "@/services/ops/spend-scope";
+import { isBudgetExceeded } from "@/services/ops/budget-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -96,7 +98,24 @@ export async function GET(request: Request) {
   return NextResponse.json({ run: summarize(run) });
 }
 
+/**
+ * Operator actions that name a project run under that project's spend scope: any paid model call
+ * they make (product-brief, plan-campaign, clone-ad, …) is reserved against its budget, so a
+ * budget set with set-budget holds for these too — not only inside the autopilot.
+ */
 export async function POST(request: Request) {
+  const body = (await request.clone().json().catch(() => null)) as { projectId?: unknown } | null;
+  const projectId = typeof body?.projectId === "string" && /^[a-z0-9]{10,40}$/i.test(body.projectId) ? body.projectId : null;
+  const run = () => handleOperatorPost(request);
+  try {
+    return projectId ? await withSpendScope({ projectId }, run) : await run();
+  } catch (err) {
+    if (isBudgetExceeded(err)) return NextResponse.json({ error: err.message, code: "BUDGET_EXCEEDED" }, { status: 402 });
+    throw err;
+  }
+}
+
+async function handleOperatorPost(request: Request) {
   if (!hasWorkerToken(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const parsed = operatorActionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid action", issues: parsed.error.issues }, { status: 400 });
