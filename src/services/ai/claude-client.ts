@@ -2,6 +2,8 @@ import OpenAI, { APIConnectionError } from "openai";
 import { jsonrepair } from "jsonrepair";
 import { ZodSchema } from "zod";
 import { isStrictFree, paidFallbackAllowed } from "@/lib/cost-mode";
+import { estimateTextCall, guardScopedLlm } from "@/services/ops/spend";
+import { currentSpendScope } from "@/services/ops/spend-scope";
 import { ZHIPU_BASE_URL, ZHIPU_FREE, zhipuKey } from "./zhipu";
 import { cachedAiSettings, cachedProvider, loadAiSettings } from "@/services/settings/ai-settings";
 import { CUSTOM_PREFIX, routeOrder, visionModelChoice } from "@/services/settings/ai-settings-core";
@@ -649,7 +651,7 @@ async function callModel(
   throw lastErr;
 }
 
-export async function analyzeWithClaude<T>(options: {
+type AnalyzeOptions<T> = {
   systemPrompt: string;
   userPrompt: UserPrompt;
   responseSchema: ZodSchema<T>;
@@ -658,7 +660,25 @@ export async function analyzeWithClaude<T>(options: {
   model?: string;
   /** Which model class this task needs; default "standard". Ignored when `model` is set. */
   tier?: ModelTier;
-}): Promise<T> {
+};
+
+/**
+ * Every text / vision model call in the app goes through here. When it runs for a project (a
+ * /api/projects/[id]/** request, an operator action — src/services/ops/spend-scope.ts) and isn't
+ * already inside a spend guard, its cost is reserved in the spend ledger first: refused (402-style
+ * BudgetExceededError) when the run's / project's budget or the member account's monthly allowance
+ * can't cover it, otherwise reconciled with the usage the provider reported. Strict free mode with
+ * no paid fallback can't spend, so it skips the ledger. MOCK_AI and calls with no project scope
+ * (scripts, tests) are untouched.
+ */
+export async function analyzeWithClaude<T>(options: AnalyzeOptions<T>): Promise<T> {
+  if (!currentSpendScope() || process.env.MOCK_AI === "true") return analyzeUnguarded(options);
+  await loadAiSettings();
+  if (isStrictFree() && !paidFallbackAllowed()) return analyzeUnguarded(options);
+  return guardScopedLlm(estimateTextCall(options), () => analyzeUnguarded(options));
+}
+
+async function analyzeUnguarded<T>(options: AnalyzeOptions<T>): Promise<T> {
   const { systemPrompt, userPrompt, responseSchema, maxTokens = 4096, model: modelOverride, tier } = options;
 
   if (process.env.MOCK_AI === "true") {

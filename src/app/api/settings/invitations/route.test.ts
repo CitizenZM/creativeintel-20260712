@@ -52,7 +52,7 @@ describe("/api/settings/invitations", () => {
   it("is owner-only for GET, POST and DELETE", async () => {
     for (const who of [null, MEMBER]) {
       m.currentAppUser.mockResolvedValue(who);
-      expect((await GET()).status).toBe(403);
+      expect((await GET(new Request("https://creative.xark.io/api/settings/invitations"))).status).toBe(403);
       expect((await post({ email: "a@b.co" })).status).toBe(403);
       expect((await DELETE(new Request("http://x"), { params: Promise.resolve({ id: "inv_1" }) })).status).toBe(403);
     }
@@ -120,7 +120,7 @@ describe("/api/settings/invitations", () => {
     m.getInvitationList.mockResolvedValue({
       data: [{ id: "inv_1", emailAddress: "a@b.co", createdAt: 5, publicMetadata: { invitedBy: "barronzuo@gmail.com" } }],
     });
-    expect(await (await GET()).json()).toEqual({
+    expect(await (await GET(new Request("https://creative.xark.io/api/settings/invitations"))).json()).toEqual({
       invitations: [{ id: "inv_1", email: "a@b.co", createdAt: 5, invitedBy: "barronzuo@gmail.com" }],
     });
     m.revokeInvitation.mockResolvedValue({ id: "inv_1", emailAddress: "a@b.co", status: "revoked" });

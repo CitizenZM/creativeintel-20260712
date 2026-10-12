@@ -108,7 +108,7 @@ export const DEFAULT_AI_SETTINGS: AiEngineSettings = {
   image: "auto",
   video: "auto",
   strictFree: null,
-  paidFallback: true,
+  paidFallback: false,
   visionModel: null,
 };
 

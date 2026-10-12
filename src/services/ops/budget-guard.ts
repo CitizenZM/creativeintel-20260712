@@ -19,6 +19,7 @@
  */
 import { captureAiUsage, type AiUsageEntry } from "@/services/ai/usage";
 import { DEFAULT_PRICES, imageCostUsd, llmCostUsd, videoCostUsd, type PriceTable } from "./cost-model";
+import { runGuarded } from "./spend-scope";
 
 export type SpendKind = "image" | "video" | "vision_qc" | "llm" | "tts";
 
@@ -239,11 +240,13 @@ export interface GuardOptions<T> {
 export async function withSpendGuard<T>(scope: SpendScope, estUsd: number, call: () => Promise<T>, opts: GuardOptions<T> = {}): Promise<T> {
   const ledger = opts.ledger ?? (await spendLedger());
   const res = await chargeOrRefuse(scope, estUsd, ledger);
-  if (!res) return call();
+  // Whatever runs inside is covered by this reservation (or free): nested paid calls aren't reserved again.
+  const guarded = () => runGuarded(call);
+  if (!res) return guarded();
   const usage: AiUsageEntry[] = [];
   let result: T;
   try {
-    result = await captureAiUsage(usage, call);
+    result = await captureAiUsage(usage, guarded);
   } catch (err) {
     const spent = costOfUsage(usage, opts.prices);
     // Paid work done before the failure (an image generated, then its upload failed) is still spend.

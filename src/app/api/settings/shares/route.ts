@@ -6,7 +6,7 @@ import { withAccess } from "@/lib/auth/route-guard";
 
 export const dynamic = "force-dynamic";
 
-async function unguardedGET() {
+async function unguardedGET(_request: Request) {
   const me = await currentAppUser();
   if (me?.role !== "owner") return NextResponse.json({ error: "Owner only" }, { status: 403 });
   return NextResponse.json({ shares: await listShares() });

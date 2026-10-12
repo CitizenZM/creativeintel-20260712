@@ -9,7 +9,8 @@
  * skipped; a failing one falls through to the next.
  */
 import OpenAI from "openai";
-import { isStrictFree } from "@/lib/cost-mode";
+import { isStrictFree, paidFallbackAllowed } from "@/lib/cost-mode";
+import { DEFAULT_PRICES, imageCostUsd } from "@/services/ops/cost-model";
 import { cachedAiSettings, cachedProvider, loadAiSettings } from "@/services/settings/ai-settings";
 import { CUSTOM_PREFIX, routeOrder } from "@/services/settings/ai-settings-core";
 import { generateImagePersisted, isZhipuConfigured } from "./zhipu";
@@ -195,7 +196,14 @@ export async function persistDataUrl(url: string, folder: string): Promise<strin
 
 export async function generateImageByEngine(req: ImageRequest): Promise<string> {
   // A member account past its monthly allowance gets no more paid images (no-op for the admin).
-  await assertAccountAllowance(req.projectId, 0, { kind: "image", model: "image-engine" });
+  // Estimated at the priciest engine in the fallback order (gpt-image-1) — the engine isn't known
+  // yet — unless strict free mode without paid fallback makes the call free by construction.
+  await loadAiSettings();
+  const mayCost = !(isStrictFree() && !paidFallbackAllowed());
+  await assertAccountAllowance(req.projectId, mayCost ? imageCostUsd(DEFAULT_PRICES, "gpt-image-1").usd ?? 0.042 : 0, {
+    kind: "image",
+    model: "image-engine",
+  });
   const order = await imageEngineOrder(req.defaults);
   let lastErr: unknown = null;
   for (const engine of order) {

@@ -3,6 +3,9 @@ import { auth } from "@clerk/nextjs/server";
 import { selectAuthMode } from "./mode";
 import { decideAccess, deniedResponse } from "./gate";
 import { ACTOR_HEADER } from "./actor";
+import { projectIdFromPath } from "./paths";
+import { withSpendScope } from "@/services/ops/spend-scope";
+import { isBudgetExceeded } from "@/services/ops/budget-guard";
 import { getPrincipal, getProjectTenant } from "@/services/access";
 
 /**
@@ -55,12 +58,29 @@ export async function checkRouteAccess(request: Request): Promise<Response | nul
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RouteHandler = (request: any, ...rest: any[]) => Response | Promise<Response>;
 
-/** Wrap a route handler so checkRouteAccess runs first. Keeps the handler's exact signature. */
+/**
+ * Wrap a route handler so checkRouteAccess runs first. Keeps the handler's exact signature.
+ * For /api/projects/[projectId]/** it also opens the project's spend scope (who is paying: the
+ * project, and the signed-in actor), so every paid model call the handler — or the background work
+ * it starts — makes is reserved in the spend ledger; and a budget / allowance refusal that bubbles
+ * out of the handler becomes a clear 402 instead of a generic 500.
+ */
 export function withAccess<H extends RouteHandler>(handler: H): H {
   const guarded = async (request: Request, ...rest: unknown[]) => {
     const denied = await checkRouteAccess(request);
     if (denied) return denied;
-    return handler(request, ...rest);
+    const projectId = projectIdFromPath(new URL(request.url).pathname);
+    const run = () => handler(request, ...rest);
+    try {
+      return projectId
+        ? await withSpendScope({ projectId, actorId: request.headers.get(ACTOR_HEADER) }, run)
+        : await run();
+    } catch (err) {
+      if (isBudgetExceeded(err)) {
+        return NextResponse.json({ error: err.message, code: "BUDGET_EXCEEDED" }, { status: 402 });
+      }
+      throw err;
+    }
   };
   return guarded as unknown as H;
 }
