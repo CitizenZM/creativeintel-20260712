@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { isGoalType } from "@/lib/style-categories";
 import { readStatusMap } from "@/lib/field-status";
 import { withAccess } from "@/lib/auth/route-guard";
+import { patchProject } from "@/services/row-patch";
 
 async function unguardedGET(
   _request: Request,
@@ -47,28 +48,27 @@ async function unguardedPATCH(
   // "Confirm all suggestions" — clears every "suggested" mark on this project
   // to "confirmed" without changing any value. Setup page calls this.
   if (body && typeof body === "object" && body.action === "confirmAllSuggestions") {
-    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { fieldStatus: true } });
-    if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    const status = readStatusMap(project.fieldStatus);
-    const nextStatus = Object.fromEntries(
-      Object.entries(status).map(([k, v]) => [k, v === "suggested" ? "confirmed" : v])
-    );
-    const updated = await prisma.project.update({
-      where: { id: projectId },
-      data: { fieldStatus: nextStatus as never },
-    });
+    // Merged onto the CURRENT status map: another writer may have added a mark since we looked.
+    const res = await patchProject(projectId, (row) => ({
+      fieldStatus: Object.fromEntries(
+        Object.entries(readStatusMap(row.fieldStatus)).map(([k, v]) => [k, v === "suggested" ? "confirmed" : v])
+      ) as never,
+    }));
+    if (!res) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    const updated = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!updated) return NextResponse.json({ error: "Project not found" }, { status: 404 });
     return NextResponse.json(updated);
   }
 
   // Confirm one suggested field without changing its value (FieldShell's Confirm button).
   if (body && typeof body === "object" && body.action === "confirmField" && typeof body.field === "string") {
-    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { fieldStatus: true } });
-    if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    const status = readStatusMap(project.fieldStatus);
-    const updated = await prisma.project.update({
-      where: { id: projectId },
-      data: { fieldStatus: { ...status, [body.field]: "confirmed" } as never },
-    });
+    const field = body.field as string;
+    const res = await patchProject(projectId, (row) => ({
+      fieldStatus: { ...readStatusMap(row.fieldStatus), [field]: "confirmed" } as never,
+    }));
+    if (!res) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    const updated = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!updated) return NextResponse.json({ error: "Project not found" }, { status: 404 });
     return NextResponse.json(updated);
   }
 
@@ -93,11 +93,16 @@ async function unguardedPATCH(
   // any "suggested" mark on it so it reads as confirmed (green).
   const touchedTracked = TRACKED_FIELDS.filter((f) => f in data);
   if (touchedTracked.length > 0) {
-    const existing = await prisma.project.findUnique({ where: { id: projectId }, select: { fieldStatus: true } });
-    const status = readStatusMap(existing?.fieldStatus);
-    const nextStatus = { ...status };
-    for (const f of touchedTracked) nextStatus[f] = "confirmed";
-    data.fieldStatus = nextStatus;
+    // The status map is merged onto the CURRENT row, so a concurrent confirm / suggestion mark survives.
+    const res = await patchProject(projectId, (row) => {
+      const nextStatus = { ...readStatusMap(row.fieldStatus) };
+      for (const f of touchedTracked) nextStatus[f] = "confirmed";
+      return { ...data, fieldStatus: nextStatus };
+    });
+    if (!res) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json(project);
   }
 
   try {

@@ -13,6 +13,11 @@ import { agentOutputSchema, HISTORY_LIMIT, popHistory, pushHistory, runCreativeA
 import type { ProductBrief } from "./product-brief";
 
 type Result = { status: number; body: Record<string, unknown> };
+
+const STALE_MESSAGE = "The plan changed while the assistant was working — try again";
+/** Thrown inside the write transaction (rolling it back) when what this turn was built on has moved on. */
+class StaleEdit extends Error {}
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const err = (status: number, error: string): Result => ({ status, body: { error } });
 
 /** The agent's model call, inside the spend guard (refused before the provider when over budget). */
@@ -65,19 +70,34 @@ export async function creativeAgentTurn(projectId: string, message: string, stor
       ...(out.planChanged ? { plan } : {}),
       ...(out.framesChanged && board && frames ? { storyboard: { id: board.id, frames } } : {}),
     }) as never;
-    const writes = [
-      prisma.project.update({
-        where: { id: projectId },
-        data: { ...(out.planChanged ? { campaignPlan: out.plan as object, campaignPlanAt: new Date() } : {}), creativeEditHistory: history as object },
-      }),
-    ];
+    const projectData = { ...(out.planChanged ? { campaignPlan: out.plan as object, campaignPlanAt: new Date() } : {}), creativeEditHistory: history as object };
+    let boardData: { frames: object[]; frameHistory: object } | null = null;
     if (out.framesChanged && board && out.frames) {
       let fh: unknown = board.frameHistory;
       const changed = new Set(out.changedFrames);
       for (const [k, f] of (frames ?? []).entries()) if (changed.has(Number(f.frameNumber ?? k + 1))) fh = appendFrameHistory(fh, Number(f.frameNumber ?? k + 1), f);
-      writes.push(prisma.storyboard.update({ where: { id: board.id }, data: { frames: out.frames as object[], frameHistory: fh as object } }) as never);
+      boardData = { frames: out.frames as object[], frameHistory: fh as object };
     }
-    await archiveAround("creative agent edit", archiveEdit(projectId, board?.id), () => prisma.$transaction(writes));
+    // The model call took seconds. If the plan / history / frames this turn was built on changed in the
+    // meantime (another edit, undo, regenerate), writing would silently revert that change: refuse instead.
+    try {
+      await archiveAround("creative agent edit", archiveEdit(projectId, board?.id), () =>
+        prisma.$transaction(async (tx) => {
+          const now = await tx.project.findUnique({ where: { id: projectId }, select: { campaignPlan: true, creativeEditHistory: true, updatedAt: true } });
+          if (!now || !sameJson(now.campaignPlan, project.campaignPlan) || !sameJson(now.creativeEditHistory, project.creativeEditHistory)) throw new StaleEdit();
+          // Conditional on the row not having been written since this read, too.
+          if ((await tx.project.updateMany({ where: { id: projectId, updatedAt: now.updatedAt }, data: projectData })).count !== 1) throw new StaleEdit();
+          if (boardData && board) {
+            const b = await tx.storyboard.findUnique({ where: { id: board.id }, select: { frames: true, frameHistory: true, updatedAt: true } });
+            if (!b || !sameJson(b.frames, board.frames) || !sameJson(b.frameHistory, board.frameHistory)) throw new StaleEdit();
+            if ((await tx.storyboard.updateMany({ where: { id: board.id, updatedAt: b.updatedAt }, data: boardData })).count !== 1) throw new StaleEdit();
+          }
+        })
+      );
+    } catch (e) {
+      if (e instanceof StaleEdit) return err(409, STALE_MESSAGE);
+      throw e;
+    }
   }
   const depth = Array.isArray(history) ? history.length : 0;
   return {

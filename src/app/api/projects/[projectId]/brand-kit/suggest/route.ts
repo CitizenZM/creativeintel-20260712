@@ -26,6 +26,8 @@ import {
 import { readStatusMap } from "@/lib/field-status";
 import { uploadFromUrl } from "@/services/storage";
 import { withAccess } from "@/lib/auth/route-guard";
+import { patchBrandKit } from "@/services/row-patch";
+import { KIT_COLUMN_OF } from "@/services/brand-kit-merge";
 
 export const maxDuration = 60;
 
@@ -74,6 +76,24 @@ const SCHEMA_KEY: Record<string, string> = {
   productSummary: "productSummary",
 };
 
+/** The kit columns suggestions may fill, as emptyFieldKeys() reads them. */
+function existingKitValues(kit: Record<string, unknown>): ExistingKitValues {
+  return {
+    colorsHex: kit.colorsHex as ExistingKitValues["colorsHex"],
+    fonts: kit.fonts as ExistingKitValues["fonts"],
+    ctaOptions: kit.ctaOptions as ExistingKitValues["ctaOptions"],
+    offerText: kit.offerText as string | null,
+    landingUrl: kit.landingUrl as string | null,
+    claimsAllowed: kit.claimsAllowed as string[] | null | undefined,
+    claimsForbidden: kit.claimsForbidden as string[] | null,
+    toneGuidelines: kit.toneGuidelines as string | null,
+    doNotShow: kit.doNotShow as string[] | null,
+    skuName: kit.skuName as string | null,
+    skuDimensionsCm: kit.skuDimensionsCm as ExistingKitValues["skuDimensionsCm"],
+    productSummary: kit.productSummary as string | null,
+  };
+}
+
 async function unguardedPOST(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
@@ -109,20 +129,7 @@ async function unguardedPOST(
     ensureBrandKit(projectId),
   ]);
 
-  const existing: ExistingKitValues = {
-    colorsHex: kit.colorsHex as ExistingKitValues["colorsHex"],
-    fonts: kit.fonts as ExistingKitValues["fonts"],
-    ctaOptions: kit.ctaOptions as ExistingKitValues["ctaOptions"],
-    offerText: kit.offerText,
-    landingUrl: kit.landingUrl,
-    claimsAllowed: kit.claimsAllowed as string[] | null | undefined,
-    claimsForbidden: kit.claimsForbidden as string[] | null,
-    toneGuidelines: kit.toneGuidelines,
-    doNotShow: kit.doNotShow as string[] | null,
-    skuName: kit.skuName,
-    skuDimensionsCm: kit.skuDimensionsCm as ExistingKitValues["skuDimensionsCm"],
-    productSummary: kit.productSummary,
-  };
+  const existing = existingKitValues(kit);
 
   const empty = emptyFieldKeys(existing);
   const fallbackLandingUrl = project.productUrl || project.brandUrl || null;
@@ -163,21 +170,31 @@ async function unguardedPOST(
     suggestedKeys.push("landingUrl");
   }
 
-  if (Object.keys(kitData).length > 0) {
-    const statusMap = readStatusMap(kit.fieldStatus);
-    for (const key of suggestedKeys) statusMap[key] = "suggested";
-    await prisma.brandKit.update({
-      where: { projectId },
-      data: { ...kitData, fieldStatus: { ...statusMap, __suggestedAt: new Date().toISOString() } },
-    });
-  } else {
-    // Still stamp __suggestedAt so auto-run doesn't retry every page load.
-    const statusMap = readStatusMap(kit.fieldStatus);
-    await prisma.brandKit.update({
-      where: { projectId },
-      data: { fieldStatus: { ...statusMap, __suggestedAt: new Date().toISOString() } },
-    });
-  }
+  // The model call above took seconds, so "is this field still empty?" is decided NOW against the
+  // current row (not the snapshot taken before it): a value the user typed meanwhile is never
+  // overwritten, and only the fields actually filled are marked "suggested".
+  const candidateKeys = suggestedKeys;
+  let filledKeys: string[] = [];
+  await patchBrandKit<Record<string, unknown> & { fieldStatus: unknown }>(
+    projectId,
+    (row) => {
+      const emptyNow = new Set(emptyFieldKeys(existingKitValues(row)));
+      const data: Record<string, unknown> = {};
+      const statusMap = readStatusMap(row.fieldStatus);
+      filledKeys = [];
+      for (const key of candidateKeys) {
+        const column = KIT_COLUMN_OF[key];
+        if (!column || !emptyNow.has(key) || kitData[column] === undefined) continue;
+        data[column] = kitData[column];
+        statusMap[key] = "suggested";
+        filledKeys.push(key);
+      }
+      // Always stamp __suggestedAt so auto-run doesn't retry every page load.
+      return { ...data, fieldStatus: { ...statusMap, __suggestedAt: new Date().toISOString() } };
+    },
+    { fieldStatus: true, ...Object.fromEntries(Object.values(KIT_COLUMN_OF).map((c) => [c, true as const])) }
+  );
+  suggestedKeys = filledKeys;
 
   // Packshots — seed from the product page's own images when thin.
   const packshotCount = await prisma.brandAsset.count({ where: { brandKitId: kit.id, kind: "PACKSHOT" } });

@@ -5,6 +5,7 @@
  */
 import { pMap } from "@/lib/parallel";
 import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
+import { patchProject } from "@/services/row-patch";
 import { deriveCopy, missingFacts, promoFrom, type BriefLike, type PlanLike } from "./copy";
 import { productCutout } from "./cutout";
 import { AD_FORMATS, formatById } from "./formats";
@@ -126,7 +127,17 @@ export async function generateImageAdSet(projectId: string, opts: ImageAdSetOpti
     skipped: rendered.skipped,
     copy: { headline: copy.headline, sub: copy.sub, cta: copy.cta, offerHeadline: copy.offerHeadline },
   };
-  const previous = Array.isArray(project.imageAdSets) ? (project.imageAdSets as unknown as ImageAdSet[]) : [];
-  await archiveAround("image ads", (o) => archiveProjectFields(projectId, ["imageAdSets"], o), () => prisma.project.update({ where: { id: projectId }, data: { imageAdSets: [set, ...previous].slice(0, 5) as object[] } }));
+  // The render + upload above takes a long time: the new set is put in front of the CURRENT sets (not the
+  // ones read before it) and written only if nobody wrote the project meanwhile (retried otherwise).
+  await archiveAround("image ads", (o) => archiveProjectFields(projectId, ["imageAdSets"], o), () =>
+    patchProject<{ imageAdSets: unknown }>(
+      projectId,
+      (row) => {
+        const previous = Array.isArray(row.imageAdSets) ? (row.imageAdSets as unknown as ImageAdSet[]) : [];
+        return { imageAdSets: [set, ...previous].slice(0, 5) as object[] };
+      },
+      { imageAdSets: true }
+    )
+  );
   return set;
 }

@@ -682,6 +682,8 @@ model Storyboard {
   frameHistory Json? // [{frameNumber, frame, editedAt}] — prior frame state, newest last
 
   createdAt DateTime @default(now())
+  // Optimistic-concurrency token for the frames / frameHistory read-merge-write (lib/optimistic-json.ts).
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@index([projectId, scriptId])
 }
@@ -967,6 +969,8 @@ model ResearchJob {
   startedAt   DateTime?
   completedAt DateTime?
   createdAt   DateTime  @default(now())
+  // Optimistic-concurrency token for the steps read-modify-write (lib/optimistic-json.ts).
+  updatedAt   DateTime  @default(now()) @updatedAt
 
   @@index([projectId, status])
 }
