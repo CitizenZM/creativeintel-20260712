@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const delivery = vi.hoisted(() => ({ runDigestCron: vi.fn() }));
 vi.mock("@/services/reports/delivery", () => delivery);
+// The heartbeat writes to the database; a route unit test must never reach one.
+vi.mock("@/services/ops/heartbeat", () => ({ cronHeartbeat: vi.fn(async () => {}) }));
 
 import { GET } from "./route";
 
