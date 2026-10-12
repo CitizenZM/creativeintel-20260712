@@ -15,12 +15,27 @@ export interface SpendScopeContext {
   /** AppUser.id of whoever triggered the work, when the proxy identified them. */
   actorId?: string | null;
   guarded?: boolean;
+  /**
+   * Shared by every copy of this scope: the first budget / allowance refusal raised under it. A route
+   * that catches the error and answers a generic 500 would hide it, so withAccess reads it back and
+   * answers 402 instead.
+   */
+  state: { refusal?: unknown };
 }
 
 const store = new AsyncLocalStorage<SpendScopeContext>();
 
-export function withSpendScope<T>(ctx: Omit<SpendScopeContext, "guarded">, fn: () => T): T {
-  return store.run({ ...ctx, guarded: false }, fn);
+export function withSpendScope<T>(
+  ctx: { projectId: string; actorId?: string | null; state?: SpendScopeContext["state"] },
+  fn: () => T,
+): T {
+  return store.run({ projectId: ctx.projectId, actorId: ctx.actorId, guarded: false, state: ctx.state ?? {} }, fn);
+}
+
+/** Remember a refusal on the current scope (no-op outside one) so the request can still answer 402. */
+export function noteRefusal(err: unknown): void {
+  const scope = store.getStore();
+  if (scope && scope.state.refusal === undefined) scope.state.refusal = err;
 }
 
 export function currentSpendScope(): SpendScopeContext | undefined {

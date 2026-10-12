@@ -19,7 +19,7 @@
  */
 import { captureAiUsage, type AiUsageEntry } from "@/services/ai/usage";
 import { DEFAULT_PRICES, imageCostUsd, llmCostUsd, videoCostUsd, type PriceTable } from "./cost-model";
-import { runGuarded } from "./spend-scope";
+import { noteRefusal, runGuarded } from "./spend-scope";
 
 export type SpendKind = "image" | "video" | "vision_qc" | "llm" | "tts";
 
@@ -239,7 +239,10 @@ export interface GuardOptions<T> {
 /** Reserve → call (with usage capture) → reconcile. The one wrapper every paid call site uses. */
 export async function withSpendGuard<T>(scope: SpendScope, estUsd: number, call: () => Promise<T>, opts: GuardOptions<T> = {}): Promise<T> {
   const ledger = opts.ledger ?? (await spendLedger());
-  const res = await chargeOrRefuse(scope, estUsd, ledger);
+  const res = await chargeOrRefuse(scope, estUsd, ledger).catch((err) => {
+    if (isBudgetExceeded(err)) noteRefusal(err);
+    throw err;
+  });
   // Whatever runs inside is covered by this reservation (or free): nested paid calls aren't reserved again.
   const guarded = () => runGuarded(call);
   if (!res) return guarded();
