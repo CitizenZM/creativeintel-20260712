@@ -304,6 +304,20 @@ export function findUnsourcedSocialProof(text: string, sourceText: string): stri
 const URGENCY_SIGNAL_REGEX =
   /\b(today|tonight|hours?|days?|weeks?|deadline|expir(?:es|ing)|ending|ends?|until|limited(?:\s+time)?|last chance|midnight|countdown|this\s+week(?:end)?)\b/i;
 
+/** Remove CTA choices the brand kit has explicitly ruled out before asking a model to rewrite. */
+export function repairScriptCta(script: ScriptV2, opts: ScriptClaimsAuditInput): ScriptV2 {
+  const approvedCtas = (opts.ctaOptions ?? []).map((value) => value.trim()).filter(Boolean);
+  const currentCta = script.cta?.text?.trim() ?? "";
+  const text = approvedCtas.length && currentCta && !approvedCtas.includes(currentCta)
+    ? approvedCtas[0]
+    : script.cta.text;
+  const urgency = script.cta.urgency && !URGENCY_SIGNAL_REGEX.test(opts.offerText ?? "")
+    ? ""
+    : script.cta.urgency;
+  if (text === script.cta.text && urgency === script.cta.urgency) return script;
+  return { ...script, cta: { ...script.cta, text, urgency } };
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

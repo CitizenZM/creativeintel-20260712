@@ -9,7 +9,7 @@ import {
   isVideoType,
   defaultTemplateBatch,
 } from "@/services/ai/prompts/script-templates";
-import { auditScriptClaims, scriptV2Schema, type ScriptV2 } from "@/lib/script-schema";
+import { auditScriptClaims, repairScriptCta, scriptV2Schema, type ScriptV2 } from "@/lib/script-schema";
 import { withIdempotency } from "@/lib/idempotency";
 import {
   loadScriptContext,
@@ -109,6 +109,7 @@ async function unguardedPOST(
     });
 
     const claimsAudit = auditContext(ctx);
+    generated = repairScriptCta(generated, claimsAudit);
     let audit = auditScriptClaims(generated, claimsAudit);
 
     if (!audit.ok) {
@@ -121,6 +122,7 @@ async function unguardedPOST(
         responseSchema: scriptV2Schema,
         maxTokens: 8000,
       });
+      generated = repairScriptCta(generated, claimsAudit);
       audit = auditScriptClaims(generated, claimsAudit);
     }
 

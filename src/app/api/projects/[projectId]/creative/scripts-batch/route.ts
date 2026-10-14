@@ -11,7 +11,7 @@ import {
   type ScriptTemplate,
   type VideoType,
 } from "@/services/ai/prompts/script-templates";
-import { auditScriptClaims, scriptV2Schema, type ScriptClaimsViolation, type ScriptV2 } from "@/lib/script-schema";
+import { auditScriptClaims, repairScriptCta, scriptV2Schema, type ScriptClaimsViolation, type ScriptV2 } from "@/lib/script-schema";
 import { withIdempotency } from "@/lib/idempotency";
 import { pMapSettled } from "@/lib/parallel";
 import {
@@ -99,6 +99,7 @@ async function unguardedPOST(
           maxTokens: 8000,
         });
 
+        generated = repairScriptCta(generated, claimsAudit);
         let audit = auditScriptClaims(generated, claimsAudit);
 
         if (!audit.ok) {
@@ -111,6 +112,7 @@ async function unguardedPOST(
             responseSchema: scriptV2Schema,
             maxTokens: 8000,
           });
+          generated = repairScriptCta(generated, claimsAudit);
           audit = auditScriptClaims(generated, claimsAudit);
         }
 

@@ -534,7 +534,7 @@ function recordUsage(provider: Route, model: string, capability: TextCapability,
       : id
         ? costForTokens(cachedProvider(id)?.prices, inputTokens, outputTokens)
         : null;
-  logAiUsage({ provider, model, capability, inputTokens, outputTokens, costUsd });
+  logAiUsage({ provider, model, capability, inputTokens, outputTokens, costUsd, projectId: currentSpendScope()?.projectId });
 }
 
 function describeErr(err: unknown): string {

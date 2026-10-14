@@ -28,6 +28,8 @@ async function unguardedPOST(
     duration = 5,
     scriptId,
     shotIndex,
+    imageUrl,
+    endImageUrl,
   } = body as {
     prompt: string;
     model?: string;
@@ -36,6 +38,8 @@ async function unguardedPOST(
     duration?: number;
     scriptId?: string;
     shotIndex?: number;
+    imageUrl?: string;
+    endImageUrl?: string;
   };
 
   if (!prompt) return NextResponse.json({ error: "prompt required" }, { status: 400 });
@@ -55,7 +59,12 @@ async function unguardedPOST(
 
   if (modelDef?.provider === "bach") {
     if (!bachConfigured()) return NextResponse.json({ error: "Bach API is not configured" }, { status: 503 });
-    const taskId = await submitBachVideo({ prompt, duration: Number(duration) || 5, aspectRatio, resolution });
+    for (const image of [imageUrl, endImageUrl]) {
+      if (image && (!URL.canParse(image) || new URL(image).protocol !== "https:")) {
+        return NextResponse.json({ error: "Reference images must use HTTPS URLs" }, { status: 400 });
+      }
+    }
+    const taskId = await submitBachVideo({ prompt, duration: Number(duration) || 5, aspectRatio, resolution, imageUrl, endImageUrl });
     const job = await prisma.falVideoJob.create({
       data: {
         projectId,
