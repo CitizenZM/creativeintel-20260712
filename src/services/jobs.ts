@@ -95,13 +95,16 @@ function createWriter(jobId: string) {
 /** Preserve successful items when a queued delivery is retried after a crash. */
 export function resumeJobSteps(
   items: readonly { key: string; label: string }[],
-  saved: JobStep[] | null | undefined
+  saved: JobStep[] | null | undefined,
+  preserveFailed = false
 ): JobStep[] {
   const byKey = new Map((saved ?? []).map((step) => [step.key, step]));
   return items.map((item) => {
     const previous = byKey.get(item.key);
     return previous?.status === "done"
       ? { ...item, status: "done", resultId: previous.resultId }
+      : preserveFailed && previous?.status === "failed"
+      ? { ...item, status: "failed", error: previous.error }
       : { ...item, status: "queued" };
   });
 }
@@ -134,19 +137,19 @@ export async function runJobItems<T>(
   const write = createWriter(jobId);
   const saved = await prisma.job.findUnique({ where: { id: jobId }, select: { steps: true, startedAt: true } });
   if (!saved) throw new Error(`Job ${jobId} was deleted`);
-  const steps = resumeJobSteps(items.map(describe), saved.steps as unknown as JobStep[] | null);
+  const steps = resumeJobSteps(items.map(describe), saved.steps as unknown as JobStep[] | null, !!options.requeueOnDeadline);
   let done = steps.filter((step) => step.status === "done").length;
-  let failed = 0;
+  let failed = steps.filter((step) => step.status === "failed").length;
   const ids: string[] = steps.flatMap((step) => step.resultId ? [step.resultId] : []);
-  const failures: JobFailure[] = [];
+  const failures: JobFailure[] = steps.filter((step) => step.status === "failed").map((step) => ({ key: step.key, label: step.label, error: step.error ?? "Item failed" }));
   let cancelled = false;
 
-  await write({ status: "running", startedAt: saved.startedAt ?? new Date(), steps, total: items.length, done, failed: 0, completedAt: null, error: null });
+  await write({ status: "running", startedAt: saved.startedAt ?? new Date(), steps, total: items.length, done, failed, completedAt: null, error: null });
 
   const settled = await pMapSettled(
     items,
     async (item, i) => {
-      if (steps[i].status === "done") return;
+      if (steps[i].status === "done" || (options.requeueOnDeadline && steps[i].status === "failed")) return;
       if (cancelled || (await cancelRequested(jobId))) {
         cancelled = true;
         steps[i] = { ...steps[i], status: "cancelled" };

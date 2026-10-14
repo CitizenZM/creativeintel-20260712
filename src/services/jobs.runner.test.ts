@@ -56,4 +56,18 @@ describe("runJobItems checkpoint recovery", () => {
     expect(worker).not.toHaveBeenCalled();
     expect(state.row.steps.map((step) => step.status)).toEqual(["queued", "queued"]);
   });
+
+  it("does not re-bill an item that already failed on an earlier delivery", async () => {
+    state.row.steps = [
+      { key: "a", label: "A", status: "failed" },
+      { key: "b", label: "B", status: "queued" },
+    ];
+    const worker = vi.fn(async () => ({ id: "script-b" }));
+    const status = await runJobItems("job-3", items, (item) => item, worker, { requeueOnDeadline: true });
+    expect(status).toBe("completed");
+    expect(worker).toHaveBeenCalledTimes(1);
+    expect(worker).toHaveBeenCalledWith(items[1], 1);
+    expect(state.row.done).toBe(1);
+    expect(state.row.steps.map((step) => step.status)).toEqual(["failed", "done"]);
+  });
 });

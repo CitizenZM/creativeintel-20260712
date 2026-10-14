@@ -18,4 +18,10 @@ describe("resumeJobSteps", () => {
       { key: "third", label: "Third", status: "queued" },
     ]);
   });
+
+  it("keeps failed items failed for automatic queue redelivery", () => {
+    expect(resumeJobSteps([{ key: "a", label: "A" }], [
+      { key: "a", label: "A", status: "failed", error: "provider rejected" },
+    ], true)).toEqual([{ key: "a", label: "A", status: "failed", error: "provider rejected" }]);
+  });
 });
