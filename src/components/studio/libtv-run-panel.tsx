@@ -91,6 +91,7 @@ export function LibtvRunPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState<string[]>([]);
+  const [reviewedMasterUrl, setReviewedMasterUrl] = useState<string | null>(null);
 
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -296,11 +297,16 @@ export function LibtvRunPanel({
 
   async function toggleFinal() {
     if (!activeRun) return;
+    if (!activeRun.isFinal && reviewedMasterUrl !== activeRun.masterMp4Url) {
+      setError("Review the final video and confirm its brand and packaging before delivery.");
+      return;
+    }
     setBusy("final");
     setError(null);
     try {
       const data = await post(`/api/projects/${projectId}/studio/libtv-runs/${activeRun.id}/final`, {
         final: !activeRun.isFinal,
+        brandApproved: !activeRun.isFinal && reviewedMasterUrl === activeRun.masterMp4Url,
       });
       onRunsChanged(data.run as LibtvRunView);
     } catch (err) {
@@ -742,9 +748,21 @@ export function LibtvRunPanel({
               </span>
             )}
             {activeRun.status === "completed" && activeRun.masterMp4Url && (
+              <div className="flex flex-col gap-2">
+              {!activeRun.isFinal && (
+                <label className="flex items-start gap-2 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={reviewedMasterUrl === activeRun.masterMp4Url}
+                    onChange={(event) => setReviewedMasterUrl(event.target.checked ? activeRun.masterMp4Url : null)}
+                    className="mt-0.5"
+                  />
+                  I reviewed this video and approved its brand and packaging for delivery.
+                </label>
+              )}
               <Button
                 onClick={toggleFinal}
-                disabled={busy === "final"}
+                disabled={busy === "final" || (!activeRun.isFinal && reviewedMasterUrl !== activeRun.masterMp4Url)}
                 size="sm"
                 variant={activeRun.isFinal ? "default" : "outline"}
                 className="h-8 rounded-md text-xs"
@@ -753,6 +771,7 @@ export function LibtvRunPanel({
                 <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
                 {activeRun.isFinal ? "Final version" : "Mark as final"}
               </Button>
+              </div>
             )}
             {activeRun.qcReport && (
               <QcCard

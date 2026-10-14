@@ -14,11 +14,11 @@ async function unguardedPOST(
   if (!existing || existing.projectId !== projectId) {
     return NextResponse.json({ error: "Run not found" }, { status: 404 });
   }
-  const body = (await request.json().catch(() => ({}))) as { final?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { final?: unknown; brandApproved?: unknown };
   if (typeof body.final !== "boolean") {
     return NextResponse.json({ error: "final must be a boolean" }, { status: 400 });
   }
-  const result = await setRunFinal(runId, body.final);
+  const result = await setRunFinal(runId, body.final, body.brandApproved === true);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({ run: await getRunWithJobs(runId) });
 }
