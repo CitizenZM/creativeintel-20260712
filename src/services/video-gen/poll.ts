@@ -5,7 +5,7 @@ import { logAiUsage } from "@/services/ai/usage";
 import { pollBachVideo } from "@/services/video-gen/bach";
 
 /** Paid video usage row, priced from the model table's costPerSecond. */
-function logPaidVideo(job: Pick<FalVideoJob, "model" | "projectId">, provider: string, seconds: number) {
+function logPaidVideo(job: Pick<FalVideoJob, "model" | "projectId" | "falRequestId">, provider: string, seconds: number) {
   const def = getVideoModel(job.model);
   logAiUsage({
     provider,
@@ -13,6 +13,7 @@ function logPaidVideo(job: Pick<FalVideoJob, "model" | "projectId">, provider: s
     capability: "video",
     videoSeconds: seconds,
     costUsd: def ? def.costPerSecond * seconds : null,
+    requestId: job.falRequestId,
     projectId: job.projectId,
   });
 }
@@ -84,7 +85,7 @@ export async function pollJob(job: FalVideoJob): Promise<PollResult> {
         error: result.error ?? null,
       },
     });
-    if (result.videoUrl) logPaidVideo(updated, "bach", job.durationSec ?? 5);
+    if (result.videoUrl) await logPaidVideo(updated, "bach", job.durationSec ?? 5);
     return { job: updated, status: updated.status, videoUrl: updated.videoUrl, error: updated.error };
   }
 
@@ -135,9 +136,9 @@ export async function pollVeoOperation(operationId: string): Promise<VeoPollResu
       if (videoUrl) {
         const jobs = await prisma.falVideoJob.findMany({
           where: { falRequestId: operationId, status: { notIn: ["completed", "failed"] } },
-          select: { model: true, projectId: true, durationSec: true },
+          select: { model: true, projectId: true, falRequestId: true, durationSec: true },
         });
-        for (const j of jobs) logPaidVideo(j, "veo", j.durationSec ?? 8);
+        for (const j of jobs) await logPaidVideo(j, "veo", j.durationSec ?? 8);
       }
       await prisma.falVideoJob.updateMany({
         where: { falRequestId: operationId },
@@ -219,7 +220,7 @@ async function pollFalJob(
       }
     }
 
-    if (video?.url) logPaidVideo(job, "fal", (video?.duration as number | undefined) ?? job.durationSec ?? 5);
+    if (video?.url) await logPaidVideo(job, "fal", (video?.duration as number | undefined) ?? job.durationSec ?? 5);
     const updated = await prisma.falVideoJob.update({
       where: { id: job.id },
       data: {

@@ -71,8 +71,10 @@ export async function pollBachVideo(taskId: string): Promise<{ status: "processi
   const data = await bachFetch(`/video/chrome/${encodeURIComponent(taskId)}`, { method: "GET" });
   const status = String(data.status ?? "").toUpperCase();
   if (status === "TASK_SUCCEEDED" && typeof data.video_url === "string") return { status: "completed", videoUrl: data.video_url };
+  if (status === "TASK_SUCCEEDED") throw new Error("Bach video task succeeded without a video URL");
   if (status === "TASK_FAILED") return { status: "failed", error: "Bach video generation failed" };
-  return { status: "processing" };
+  if (status === "TASK_PENDING" || status === "TASK_PROCESSING") return { status: "processing" };
+  throw new Error(`Bach video task returned an unknown status: ${status || "missing"}`);
 }
 
 export async function generateBachImage(input: {

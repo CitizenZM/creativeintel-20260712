@@ -521,8 +521,8 @@ export async function createOnRoute(
  * usually transient, so the provider stays eligible for the next call. Any
  * other error is thrown immediately (it won't be fixed by switching providers).
  */
-/** Fire-and-forget usage row for a completed call. */
-function recordUsage(provider: Route, model: string, capability: TextCapability, usage: OpenAI.CompletionUsage | undefined) {
+/** Persist usage before reporting a completed paid call to its caller. */
+function recordUsage(provider: Route, model: string, capability: TextCapability, usage: OpenAI.CompletionUsage | undefined, requestId: string | undefined, latencyMs: number) {
   const inputTokens = usage?.prompt_tokens ?? 0;
   const outputTokens = usage?.completion_tokens ?? 0;
   const id = customId(provider);
@@ -534,7 +534,7 @@ function recordUsage(provider: Route, model: string, capability: TextCapability,
       : id
         ? costForTokens(cachedProvider(id)?.prices, inputTokens, outputTokens)
         : null;
-  logAiUsage({ provider, model, capability, inputTokens, outputTokens, costUsd, projectId: currentSpendScope()?.projectId });
+  return logAiUsage({ provider, model, capability, inputTokens, outputTokens, costUsd, requestId, latencyMs, projectId: currentSpendScope()?.projectId });
 }
 
 function describeErr(err: unknown): string {
@@ -562,8 +562,9 @@ async function tryModels(
       continue;
     }
     try {
+      const startedAt = Date.now();
       const response = await createOnRoute(client, provider, messages, model, maxTokens, deadlineAt);
-      recordUsage(provider, model, capability, response.usage);
+      await recordUsage(provider, model, capability, response.usage, response.id, Date.now() - startedAt);
       if (i > 0) console.warn(`[ai] ${provider}: answered by fallback model ${model}`);
       return response;
     } catch (err) {

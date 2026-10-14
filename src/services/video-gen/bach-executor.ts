@@ -20,9 +20,9 @@ export const bachAdapter: EngineAdapter = {
   async generateImage(prompt, ctx) {
     const url = await generateImageByEngine({
       prompt: applyCorrections(prompt, Array.isArray(ctx.settings?.qcCorrections) ? ctx.settings.qcCorrections as string[] : undefined),
-      shape: ctx.aspectRatio === "1:1" ? "square" : "landscape",
+      shape: ctx.aspectRatio === "1:1" ? "square" : ctx.aspectRatio === "9:16" ? "portrait" : "landscape",
       openaiQuality: "medium",
-      pollinations: { width: 1024, height: 576, as: "url" },
+      pollinations: ctx.aspectRatio === "9:16" ? { width: 576, height: 1024, as: "url" } : { width: 1024, height: 576, as: "url" },
       folder: `bach-runs/${ctx.runId}`,
       projectId: ctx.projectId,
       defaults: { free: ["glm", "pollinations"], paid: ["bach", "openai", "fal", "pollinations"] },
@@ -52,7 +52,7 @@ export const bachAdapter: EngineAdapter = {
     if (!fetched.ok || !fetched.buffer) throw new Error(fetched.error ?? "Could not download Bach video");
     const uploaded = await uploadBuffer({ buffer: fetched.buffer, filename: `${ctx.nodeName}.mp4`, contentType: "video/mp4", folder: `bach-runs/${ctx.runId}` });
     if (uploaded.provider === "inline") throw new Error("Bach video requires configured public asset storage");
-    logAiUsage({ provider: "bach", model: MODEL, capability: "video", videoSeconds: ctx.durationSec, costUsd: COST_PER_SECOND * ctx.durationSec, projectId: ctx.projectId });
+    await logAiUsage({ provider: "bach", model: MODEL, capability: "video", videoSeconds: ctx.durationSec, costUsd: COST_PER_SECOND * ctx.durationSec, requestId: taskId, projectId: ctx.projectId });
     return { status: "SUCCESS", url: uploaded.url };
   },
 };

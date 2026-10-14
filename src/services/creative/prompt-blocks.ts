@@ -11,7 +11,7 @@
 import type { PlatformPlan } from "./campaign-plan.types";
 import { platformBrief, selectCreative } from "./library";
 import { playbookSlice } from "./playbooks";
-import { TO_CREATIVE_CATEGORY, type ProductBrief, type SpCategory } from "./product-brief";
+import { classifyProduct, TO_CREATIVE_CATEGORY, type ProductBrief, type SpCategory } from "./product-brief";
 import type { CampaignGoal, CreativeChoice, CreativeInputs, PlatformId } from "./types";
 
 /** Campaign platform ids (CAMPAIGN_PLATFORMS: tiktok|instagram|youtube|tvc|amazon + free text) → profile id. */
@@ -122,6 +122,8 @@ export function planBlock(plan: PlatformPlan, hookIndex = 0, opts: { brief?: Pro
 
 export interface CreativeBlockInput {
   brief?: ProductBrief | null;
+  /** Verified product-page/name text for category selection when no structured brief exists. */
+  productHint?: string | null;
   platform?: string | null;
   goalText?: string | null;
   /** Explicit goal (wins over goalText), e.g. the stored plan's goal. */
@@ -154,7 +156,10 @@ export function creativeBlock(input: CreativeBlockInput): { text: string; choice
       parts.push(choiceBlock(choice));
     }
   } else if (input.plan) parts.push(planBlock(input.plan, input.hookIndex ?? 0, { targetSec: input.targetSec }));
-  parts.push(playbookSlice({ category: input.brief?.category, platform, goal, maxWords: 400 }));
+  const category = input.brief?.category && input.brief.category !== "other"
+    ? input.brief.category
+    : classifyProduct(input.productHint ?? "");
+  parts.push(playbookSlice({ category, platform, goal, maxWords: 400 }));
   parts.push(
     `RULES: frame 1 bright with the product or subject; hero proof and key message by ${goal === "promo" ? "3 s — and the sale pitch (offer + reason to buy now) in the first 3 s" : "the platform hook second"}; product shown at least twice; every zoom lands on the product; one idea per ad; last second = logo + CTA button; every readable text inside the safe box (y 288–1220 on 9:16); no invented numbers, ratings or testimonials.`
   );

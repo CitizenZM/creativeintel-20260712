@@ -386,7 +386,7 @@ describe("assembly timing", () => {
     expect(store.runs.get("run1")!.status).toBe("completed");
   });
 
-  it("re-queues a clip whose submission was cut off before it got a task id", async () => {
+  it("stops a clip whose submission was cut off before it got a task id", async () => {
     seed();
     const k1 = store.jobs.find((j) => j.id === "k1")!;
     Object.assign(k1, { status: "completed", resultUrl: "https://cdn/K1.png" });
@@ -397,8 +397,8 @@ describe("assembly timing", () => {
     const adapter = fakeAdapter();
     await tickRun(adapter, "run1");
     await tickRun(adapter, "run1");
-    expect(adapter.submitVideo).toHaveBeenCalled();
-    expect(store.jobs.find((j) => j.id === "v1")!.nodeId).toBe("task-V1");
+    expect((adapter.submitVideo as ReturnType<typeof vi.fn>).mock.calls.some(([, ctx]) => ctx.nodeName === "V1")).toBe(false);
+    expect(store.jobs.find((j) => j.id === "v1")!.status).toBe("failed");
   });
 
   it("does not touch an assembly that is still in progress", async () => {
@@ -763,16 +763,17 @@ describe("clip reservations are released", () => {
     expect(adapter.submitVideo).toHaveBeenCalledTimes(2);
   });
 
-  it("closes a submit with an unknown outcome at its estimate", async () => {
+  it("halts a timed-out paid submit for reconciliation instead of resubmitting", async () => {
     const ledger = await paidClipRun();
     const adapter = fakeAdapter({ engine: "openrouter", submitVideo: vi.fn(async () => Promise.reject(new Error("request timed out"))) });
     await tickRun(adapter, "run1");
     const [clip] = await clips(ledger);
-    expect(clip.actualUsd).toBe(clip.estUsd);
-    expect(await ledger.openEntryForJob("v1", "video")).toBeNull();
+    expect(clip.actualUsd).toBeNull();
+    expect(statusOf("v1")).toBe("failed");
+    expect(adapter.submitVideo).toHaveBeenCalledTimes(1);
   });
 
-  it("closes the reservation of a clip whose invocation died before it got a task id", async () => {
+  it("halts a stale clip without a task ID and keeps its estimate reserved", async () => {
     const ledger = await paidClipRun();
     const { reserve } = { reserve: ledger.reserve.bind(ledger) };
     await reserve({ projectId: "p1", runId: "run1", jobId: "v1", kind: "video", model: "google/veo-3.1-lite" }, 0.126);
@@ -780,7 +781,8 @@ describe("clip reservations are released", () => {
     Object.assign(store.runs.get("run1")!, { status: "running" });
     await tickRun(fakeAdapter({ engine: "openrouter" }), "run1");
     const all = await clips(ledger);
-    expect(all[0].actualUsd).toBe(0.126);
+    expect(all[0].actualUsd).toBeNull();
+    expect(statusOf("v1")).toBe("failed");
   });
 });
 

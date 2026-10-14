@@ -403,13 +403,14 @@ export async function tickRun(
   }
 
   // A keyframe or clip whose invocation was cut off before it got a task id stays
-  // "running" forever: re-queue it after IMAGE_STALE_MS (fail it after MAX_IMAGE_ATTEMPTS).
+  // "running" forever. A video submission may already be billable: do not
+  // re-submit it automatically when the provider outcome is unknown.
   for (const j of run.jobs.filter((x) => (x.kind === "image" || x.kind === "video") && x.status === "running" && !x.nodeId)) {
     if (!j.startedAt || Date.now() - new Date(j.startedAt).getTime() < IMAGE_STALE_MS) continue;
-    if ((j.attempts ?? 0) >= MAX_IMAGE_ATTEMPTS) await jobFailed(j.id, `${j.kind === "video" ? "Clip" : "Keyframe"} submission timed out repeatedly`);
+    if (j.kind === "video") {
+      await prisma.libtvJob.updateMany({ where: { id: j.id, status: "running" }, data: { status: "failed", completedAt: new Date(), error: "Video submission outcome unknown; reconcile with provider before retrying" } });
+    } else if ((j.attempts ?? 0) >= MAX_IMAGE_ATTEMPTS) await jobFailed(j.id, "Keyframe submission timed out repeatedly");
     else await prisma.libtvJob.updateMany({ where: { id: j.id, status: "running" }, data: { status: "queued" } });
-    // Whether that submit reached the provider is unknown: its reservation closes at the estimate (a resubmit reserves afresh).
-    if (j.kind === "video") await releaseJobReservations(run, j.id, "estimate");
   }
 
   // Keyframes that finish asynchronously (engines with pollImage).
@@ -547,10 +548,13 @@ export async function tickRun(
       await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: taskId } });
       inFlight++;
     } catch (err) {
-      await jobFailed(j.id, errorText(err));
-      // A submit whose outcome is unknown (timeout, 5xx) stays reserved at its estimate: close it, so the
-      // resubmit's own reservation is the one its poll settles.
-      await releaseJobReservations(run, j.id, "estimate");
+      const message = errorText(err);
+      if (/timeout|timed out|abort|network|fetch failed|\b5\d\d\b/i.test(message)) {
+        await prisma.libtvJob.update({ where: { id: j.id }, data: { status: "failed", completedAt: new Date(), error: `Video submission outcome unknown: ${message}`.slice(0, 2000) } });
+      } else {
+        await jobFailed(j.id, message);
+        await releaseJobReservations(run, j.id, "estimate");
+      }
     }
   }
 

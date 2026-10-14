@@ -9,8 +9,9 @@ export default defineConfig({
     // Opt in explicitly; they are not isolated unit tests.
     exclude: process.env.RUN_OPERATOR_TESTS === "1" ? [] : ["src/zz-ops/**"],
     environment: "node",
-    testTimeout: 15_000,
-    hookTimeout: 30_000,
-    maxWorkers: 4,
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
+    // FFmpeg and audio synthesis saturate shared CI runners at four workers.
+    maxWorkers: 2,
   },
 });

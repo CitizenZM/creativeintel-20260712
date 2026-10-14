@@ -16,6 +16,20 @@ jobs:
   typecheck-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: creativeintel_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d creativeintel_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -26,6 +40,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Replay migrations on a fresh database
+        env:
+          APP_DATABASE_DIRECT_URL: postgresql://ci:ci@localhost:5432/creativeintel_ci
+        run: |
+          pnpm prisma migrate deploy
+          pnpm prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test

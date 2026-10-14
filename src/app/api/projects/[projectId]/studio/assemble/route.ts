@@ -17,7 +17,7 @@ export const maxDuration = 300;
 
 const bodySchema = z.object({
   scriptId: z.string().min(1, "scriptId required"),
-  transition: z.enum(["cut", "crossfade"]).optional(),
+  transition: z.literal("cut").optional(),
   musicUrl: z.string().optional(),
 });
 

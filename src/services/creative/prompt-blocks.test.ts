@@ -53,4 +53,10 @@ describe("prompt blocks", () => {
     expect(choice).toBeNull();
     expect(text).toContain("PLATFORM youtube_instream_skippable");
   });
+
+  it("selects the food playbook from verified product text when the structured brief is absent", () => {
+    const { text } = creativeBlock({ platform: "instagram_reels", productHint: "Moneta daily protein drink powder" });
+    expect(text).toContain("CATEGORY PLAYBOOK — Food & beverage");
+    expect(text).not.toContain("CATEGORY PLAYBOOK — General products");
+  });
 });

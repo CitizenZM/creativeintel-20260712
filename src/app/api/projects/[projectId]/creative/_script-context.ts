@@ -216,6 +216,7 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
   const totalDurationSec = (campaignSel?.totalDurationSec as number | null) || platformPlan?.durationSec || 30;
   const creativeInput: CreativeBlockInput = {
     brief: brief?.sellingPoints ? brief : null,
+    productHint: [project.productName, project.productPageTitle, project.productPageText?.slice(0, 500)].filter(Boolean).join(" "),
     platform: platformId,
     goalText: [project.campaignGoal, (project as { goalType?: string | null }).goalType, brandKit?.offerText].filter(Boolean).join(" "),
     ...(platformPlan && storedPlan ? { plan: platformPlan, goal: storedPlan.goal, promo: storedPlan.promo, runDate: storedPlan.runDate } : {}),

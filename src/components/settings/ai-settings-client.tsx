@@ -308,7 +308,7 @@ function FreeAllowance({ view }: { view: AiSettingsView }) {
 }
 
 function Usage({ view }: { view: AiSettingsView }) {
-  const { totals, engines, since, error } = view.usage;
+  const { totals, engines, since, error, latency } = view.usage;
   const tiles = [
     ["Tokens in", fmt.format(totals.inputTokens)],
     ["Tokens out", fmt.format(totals.outputTokens)],
@@ -385,6 +385,19 @@ function Usage({ view }: { view: AiSettingsView }) {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+          {latency.length > 0 && (
+            <div className="rounded-lg border border-border p-3 text-xs">
+              <p className="mb-2 font-medium">Recent model latency (up to 1,000 calls)</p>
+              <div className="space-y-1 text-muted-foreground">
+                {latency.slice(0, 12).map((row) => (
+                  <p key={`${row.provider}:${row.model}`} className="flex justify-between gap-3">
+                    <span className="truncate">{row.provider} / {row.model} · {row.samples} calls</span>
+                    <span className="shrink-0 tabular-nums">P50 {(row.p50Ms / 1000).toFixed(1)}s · P95 {(row.p95Ms / 1000).toFixed(1)}s</span>
+                  </p>
+                ))}
+              </div>
             </div>
           )}
         </>

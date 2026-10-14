@@ -28,7 +28,7 @@ export interface ImageRequest {
   prompt: string;
   /** Whole generation plus fallback/persistence budget; default 150 seconds. */
   budgetMs?: number;
-  shape: "landscape" | "square";
+  shape: "landscape" | "square" | "portrait";
   openaiQuality: "low" | "medium";
   pollinations: { width: number; height: number; as: "url" | "dataUrl" };
   /** Storage folder for persisted results. */
@@ -75,7 +75,7 @@ async function falGenerate(key: string, model: string, req: ImageRequest, deadli
       headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         prompt: req.prompt,
-        image_size: req.shape === "square" ? "square" : "landscape_16_9",
+        image_size: req.shape === "square" ? "square" : req.shape === "portrait" ? "portrait_9_16" : "landscape_16_9",
         num_inference_steps: 4,
         num_images: 1,
         enable_safety_checker: false,
@@ -97,12 +97,12 @@ async function falGenerate(key: string, model: string, req: ImageRequest, deadli
 }
 
 async function openaiImage(client: OpenAI, model: string, req: ImageRequest, withQuality: boolean, deadlineAt: number): Promise<string> {
-  const size = req.shape === "landscape" ? "1536x1024" : "1024x1024";
+  const size = req.shape === "landscape" ? "1536x1024" : req.shape === "portrait" ? "1024x1536" : "1024x1024";
   const response = await client.images.generate({
     model,
     prompt: req.prompt,
     n: 1,
-    size: size as "1024x1024" | "1536x1024",
+    size: size as "1024x1024" | "1536x1024" | "1024x1536",
     ...(withQuality ? { quality: req.openaiQuality } : {}),
   }, { timeout: remainingRequestMs(deadlineAt, 90_000), signal: AbortSignal.timeout(remainingRequestMs(deadlineAt)), maxRetries: 0 });
   const b64 = response.data?.[0]?.b64_json;
@@ -126,7 +126,7 @@ async function pollinations(req: ImageRequest, deadlineAt: number): Promise<stri
 
 /** One engine's attempt; null = not configured (skip). */
 async function runEngine(engine: ImageEngineId, req: ImageRequest, deadlineAt: number): Promise<string | null> {
-  const aspectRatio = req.shape === "square" ? "1:1" : "16:9";
+  const aspectRatio = req.shape === "square" ? "1:1" : req.shape === "portrait" ? "9:16" : "16:9";
   if (engine === "glm") {
     if (!isZhipuConfigured()) return null;
     return generateImagePersisted(req.prompt, { aspectRatio, folder: req.folder, projectId: req.projectId, deadlineAt });
@@ -135,30 +135,30 @@ async function runEngine(engine: ImageEngineId, req: ImageRequest, deadlineAt: n
     const key = process.env.OPENAI_API_KEY;
     if (!key) return null;
     const url = await openaiImage(new OpenAI({ apiKey: key }), "gpt-image-1", req, true, deadlineAt);
-    logAiUsage({ provider: "openai", model: "gpt-image-1", capability: "image", images: 1, costUsd: null, projectId: req.projectId });
+    await logAiUsage({ provider: "openai", model: "gpt-image-1", capability: "image", images: 1, costUsd: null, projectId: req.projectId });
     return url;
   }
   if (engine === "fal") {
     const key = process.env.FAL_KEY;
     if (!key) return null;
     const { url, costUsd } = await falGenerate(key, "fal-ai/flux/schnell", req, deadlineAt);
-    logAiUsage({ provider: "fal", model: "fal-ai/flux/schnell", capability: "image", images: 1, costUsd, projectId: req.projectId });
+    await logAiUsage({ provider: "fal", model: "fal-ai/flux/schnell", capability: "image", images: 1, costUsd, projectId: req.projectId });
     return url;
   }
   if (engine === "pollinations") {
     const url = await pollinations(req, deadlineAt);
-    logAiUsage({ provider: "pollinations", model: "flux", capability: "image", images: 1, costUsd: 0, projectId: req.projectId });
+    await logAiUsage({ provider: "pollinations", model: "flux", capability: "image", images: 1, costUsd: 0, projectId: req.projectId });
     return url;
   }
   if (engine === "bach") {
     if (!process.env.BACH_ACCESS_KEY || !process.env.BACH_SECRET_KEY) return null;
     const sourceUrl = await generateBachImage({
       prompt: req.prompt,
-      aspectRatio: req.shape === "square" ? "1:1" : "16:9",
+      aspectRatio,
       imageSize: "2K",
       quality: req.openaiQuality === "low" ? "low" : "medium",
     }, deadlineAt);
-    logAiUsage({ provider: "bach", model: "gpt-image2-economy", capability: "image", images: 1, costUsd: null, projectId: req.projectId });
+    await logAiUsage({ provider: "bach", model: "gpt-image2-economy", capability: "image", images: 1, costUsd: null, projectId: req.projectId });
     const fetched = await safeFetchBuffer(sourceUrl, { timeoutMs: remainingRequestMs(deadlineAt, 25_000), maxBytes: 20 * 1024 * 1024 });
     if (!fetched.ok || !fetched.buffer) return sourceUrl;
     const uploaded = await uploadBuffer({ buffer: fetched.buffer, filename: `bach-${Date.now()}.jpg`, contentType: fetched.contentType || "image/jpeg", folder: req.folder, signal: AbortSignal.timeout(remainingRequestMs(deadlineAt)) });
@@ -187,7 +187,7 @@ async function runEngine(engine: ImageEngineId, req: ImageRequest, deadlineAt: n
     p.type === "fal"
       ? (await falGenerate(p.apiKey, model, req, deadlineAt)).url
       : await openaiImage(new OpenAI({ apiKey: p.apiKey, baseURL: p.baseUrl ?? undefined }), model, req, false, deadlineAt);
-  logAiUsage({ provider: engine, model, capability: "image", images: 1, costUsd, projectId: req.projectId });
+  await logAiUsage({ provider: engine, model, capability: "image", images: 1, costUsd, projectId: req.projectId });
   return url;
 }
 

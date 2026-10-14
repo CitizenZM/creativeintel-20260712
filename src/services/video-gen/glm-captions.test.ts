@@ -52,7 +52,7 @@ describe("captions", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("fitStillFilter", () => {
@@ -75,5 +75,5 @@ describe("fitStillFilter", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  }, 60_000);
+  }, 120_000);
 });

@@ -44,4 +44,13 @@ describe("Bach API adapter", () => {
     await expect(generateBachImage({ prompt: "a product", aspectRatio: "16:9" }, Date.now() + 10_000)).resolves.toBe("https://example.com/image.png");
     await expect(pollBachVideo("video-1")).resolves.toMatchObject({ status: "completed", videoUrl: "https://example.com/video.mp4" });
   });
+
+  it("does not silently treat an unknown or incomplete terminal state as processing", async () => {
+    vi.stubEnv("BACH_ACCESS_KEY", "test-access");
+    vi.stubEnv("BACH_SECRET_KEY", "test-secret");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ code: 200, data: { status: "TASK_SUCCEEDED" } }), { status: 200 })));
+    await expect(pollBachVideo("missing-url")).rejects.toThrow(/without a video URL/);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ code: 200, data: { status: "TASK_REVIEW" } }), { status: 200 })));
+    await expect(pollBachVideo("unknown")).rejects.toThrow(/unknown status: TASK_REVIEW/);
+  });
 });
