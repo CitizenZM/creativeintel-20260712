@@ -107,7 +107,22 @@ export interface ScriptContext {
  * batch routes feed the prompt from an identical set.
  */
 export async function loadScriptContext(projectId: string): Promise<ScriptContext | null> {
-  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      brandName: true,
+      productName: true,
+      productPageTitle: true,
+      productUrl: true,
+      productPageText: true,
+      productBrief: true,
+      campaignPlan: true,
+      campaignGoal: true,
+      briefingText: true,
+      goalType: true,
+    },
+  });
   if (!project) return null;
 
   const [sellingPoints, campaignSel, deepAnal, audienceData, brandKit] =
