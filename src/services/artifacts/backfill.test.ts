@@ -78,6 +78,12 @@ describe("runBackfill", () => {
 
   it("a real run stores everything, rate-limits downloads, and a re-run adds nothing", async () => {
     const d = deps(projects);
+    let time = 0;
+    d.now = () => time;
+    d.sleep = async (ms) => {
+      d.sleeps.push(ms);
+      time += ms;
+    };
     const first = await runBackfill(d, { all: true, dryRun: false, downloadIntervalMs: 100 });
     const rows = (d.store as MemoryArtifactStore).rows;
     expect(first.totals.created).toBe(rows.length);
