@@ -55,7 +55,6 @@ export function poolOptions(env: NodeJS.ProcessEnv = process.env) {
 
 function createPrismaClient() {
   const url = process.env.VERCEL_ENV === "preview" ? process.env.PREVIEW_DATABASE_URL : process.env.APP_DATABASE_URL || process.env.DATABASE_URL;
-  if (process.env.VERCEL_ENV === "preview" && !url) throw new Error("Preview database is not configured");
   const { connectionString, schema, ssl } = splitSchema(url);
   const pool = new Pool({ connectionString, ssl, ...poolOptions() });
   // Idle clients are closed before Fluid suspends the instance (no-op outside Vercel).
@@ -64,6 +63,13 @@ function createPrismaClient() {
   return new PrismaClient({ adapter });
 }
 
-export const prisma = globalForPrisma.prisma || createPrismaClient();
+const missingPreviewDatabase = process.env.VERCEL_ENV === "preview" && !process.env.PREVIEW_DATABASE_URL;
+const unavailablePreviewClient = () => new Proxy(Object.create(null), {
+  get() { throw new Error("Preview database is not configured"); },
+}) as InstanceType<typeof PrismaClient>;
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+export const prisma = missingPreviewDatabase
+  ? unavailablePreviewClient()
+  : globalForPrisma.prisma || createPrismaClient();
+
+if (process.env.NODE_ENV !== "production" && !missingPreviewDatabase) globalForPrisma.prisma = prisma;
