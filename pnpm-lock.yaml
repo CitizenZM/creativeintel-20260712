@@ -30,7 +30,9 @@ overrides:
   '@modelcontextprotocol/sdk@<1.31.0': '>=1.31.0 <2'
 
 patchedDependencies:
-  braces@3.0.3: c0f41ff374a110b0a2fc6565651046bdc9aea3a83298298562c0acaa7557d053
+  braces@3.0.3:
+    hash: c0f41ff374a110b0a2fc6565651046bdc9aea3a83298298562c0acaa7557d053
+    path: patches/braces@3.0.3.patch
 
 importers:
 
