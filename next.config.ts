@@ -54,6 +54,10 @@ const nextConfig: NextConfig = {
   // local-files is disabled on Vercel. Its filesystem fallback must not pull
   // repository docs, source files, and tooling into every function bundle.
   outputFileTracingExcludes: {
+    // `out/` contains local render experiments and QA media (489 MB here).
+    // Server code uses runtime temp files and Blob; no route reads these
+    // repository fixtures in production.
+    "/*": ["./out/**"],
     "/api/**": [
       "./.git/**",
       "./.claude/**",
