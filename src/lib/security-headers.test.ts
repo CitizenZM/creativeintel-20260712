@@ -23,5 +23,7 @@ describe("security headers (next.config.ts)", () => {
 
   it("does not restrict scripts yet (Clerk + Next need a worked-out script-src first)", () => {
     expect(header("Content-Security-Policy")).not.toMatch(/script-src|default-src/);
+    expect(header("Content-Security-Policy-Report-Only")).toMatch(/script-src 'self'/);
+    expect(header("Content-Security-Policy-Report-Only")).toContain("report-uri /api/csp-report");
   });
 });

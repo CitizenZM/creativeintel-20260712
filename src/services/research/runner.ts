@@ -1,3 +1,4 @@
+import { ResearchWaiting, suspendForWorkers } from "./worker-await";
 import { prisma } from "@/lib/db";
 import { pMapSettled } from "@/lib/parallel";
 import { crawlWebsite, parseHtml as parseCrawlHtml, type CrawlResult } from "./website-crawler";
@@ -51,16 +52,28 @@ function toJobSources(reports: SourceReport[]): JobSourceStatus[] {
 }
 
 /**
- * The research request lives in one 300 s invocation. AI analysis is the slow,
- * failure-prone tail (free models rate-limit), so it only starts with enough of
- * that budget left, and its failure never throws away the ads already saved —
- * Insights runs the same analysis as its own job.
+ * Durable research runs each persisted phase in a fresh queue invocation.
+ * Legacy background callers retain the single-invocation analysis budget;
+ * failure never throws away the ads already saved.
  */
 const MAX_ELAPSED_BEFORE_ANALYSIS_MS = 110_000;
 /** The TikTok "for you" corpus is a nice-to-have; skip it past this point. */
 const MAX_ELAPSED_FOR_EXTRAS_MS = 150_000;
 
-export async function runResearch(projectId: string, jobId: string): Promise<void> {
+export interface ResearchCheckpoint {
+  phase: "crawl" | "understanding" | "keywords" | "discovery" | "extras" | "rank" | "analysis" | "complete";
+  brandCrawl?: CrawlResult | null;
+  brandContext?: Awaited<ReturnType<typeof quickBrandUnderstanding>>;
+  keywords?: Awaited<ReturnType<typeof extractSearchKeywords>>;
+  candidates?: AdCandidate[];
+  ignoredWorkerHashes?: string[];
+  phaseAttempts?: number;
+  waitingSince?: string;
+}
+export async function runResearch(projectId: string, jobId: string, continuation?: {
+  checkpoint: ResearchCheckpoint;
+  save: (checkpoint: ResearchCheckpoint) => Promise<void>;
+}): Promise<void> {
   const researchStartedAt = Date.now();
   try {
     const project = await prisma.project.findUnique({
@@ -75,6 +88,11 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
       return { ...c, name: n.name, url: n.url };
     });
 
+    const checkpoint = continuation?.checkpoint ?? { phase: "crawl" as const };
+    let brandCrawl: CrawlResult | null = checkpoint.brandCrawl ?? null;
+    let keywords = checkpoint.keywords;
+    let allCandidates: AdCandidate[] = checkpoint.candidates ?? [];
+    if (checkpoint.phase === "crawl") {
     // Step 1: parallel website crawls
     await startStep(jobId, "Crawl websites");
     const crawlTargets: { id: string; url: string }[] = [];
@@ -146,7 +164,8 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
       }
     }
 
-    let brandCrawl: CrawlResult | null = null;
+    suspendForWorkers();
+    brandCrawl = null;
     crawlResults.forEach((r, i) => {
       if (r.status !== "fulfilled") return;
       if (r.value.id === "brand") brandCrawl = r.value.result;
@@ -154,13 +173,22 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
     });
     await completeStep(jobId, "Crawl websites");
 
-    // Step 2: brand understanding + keywords (sequential, cheap)
+    await continuation?.save({ phase: "understanding", brandCrawl });
+    checkpoint.phase = "understanding";
+    if (continuation) return;
+    }
+    let brandContext = checkpoint.brandContext;
+    if (checkpoint.phase === "understanding") {
+    // Step 2: brand understanding and keyword extraction use separate queue deliveries.
     await startStep(jobId, "Brand understanding");
-    const briefing = [project.briefingText, project.briefingParsed]
-      .filter(Boolean)
-      .join("\n\n") || undefined;
-    const brandContext = await quickBrandUnderstanding(project.brandName, brandCrawl);
-    const keywords = await extractSearchKeywords(
+    brandContext = await quickBrandUnderstanding(project.brandName, brandCrawl);
+    await continuation?.save({ phase: "keywords", brandCrawl, brandContext });
+    checkpoint.phase = "keywords";
+    if (continuation) return;
+    }
+    if (checkpoint.phase === "keywords") {
+    const briefing = [project.briefingText, project.briefingParsed].filter(Boolean).join("\n\n") || undefined;
+    keywords = await extractSearchKeywords(
       project.brandName,
       brandCrawl,
       project.competitors.map((c) => c.name),
@@ -169,6 +197,12 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
     );
     await completeStep(jobId, "Brand understanding");
 
+    await continuation?.save({ phase: "discovery", brandCrawl, keywords });
+    checkpoint.phase = "discovery";
+    if (continuation) return;
+    }
+    if (!keywords) throw new Error("Research keywords checkpoint missing");
+    if (checkpoint.phase === "discovery") {
     // Step 3: ad discovery — adapters chosen by the campaign platform.
     await startStep(jobId, AD_DISCOVERY_STEP);
 
@@ -220,6 +254,7 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
       { concurrency: Math.max(1, owners.length) }
     );
 
+    suspendForWorkers();
     const groups: ClassifyGroup[] = owners.flatMap((owner, i) => {
       const r = perOwner[i];
       return r.status === "fulfilled"
@@ -232,7 +267,9 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
           ]
         : [];
     });
-    const shared = await classifyAdCandidateGroups(groups);
+    // Shared classification has one deadline across all batches; leave time for the optional feed.
+    const classifierMs = Math.max(1000, Math.min(75_000, 195_000 - (Date.now() - researchStartedAt)));
+    const shared = await classifyAdCandidateGroups(groups, { deadlineMs: classifierMs });
     await recordStepSources(jobId, AD_DISCOVERY_STEP, toJobSources([
       shared.degraded
         ? {
@@ -249,7 +286,7 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
           },
     ]));
 
-    const allCandidates: AdCandidate[] = [];
+    allCandidates = [];
     const summary: string[] = [];
     for (const g of groups) {
       const classified = shared.byKey.get(g.key) ?? [];
@@ -258,6 +295,11 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
     }
     await updateStep(jobId, AD_DISCOVERY_STEP, 95, `Paid candidates: ${summary.join(" · ")}`);
 
+    await continuation?.save({ phase: "extras", brandCrawl, keywords, candidates: allCandidates });
+    checkpoint.phase = "extras";
+    if (continuation) return;
+    }
+    if (checkpoint.phase === "extras") {
     // Brand-agnostic TikTok top-ads feed: stored as unowned corpus, never
     // allowed to occupy a competitor's Top-N slot.
     // Optional extra corpus — only when there is time to spare in this run.
@@ -272,8 +314,14 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
       await recordStepSources(jobId, AD_DISCOVERY_STEP, toJobSources([forYou.report]));
     }
 
+    suspendForWorkers();
     await completeStep(jobId, AD_DISCOVERY_STEP);
 
+    await continuation?.save({ phase: "rank", brandCrawl, keywords, candidates: allCandidates });
+    checkpoint.phase = "rank";
+    if (continuation) return;
+    }
+    if (checkpoint.phase === "rank") {
     // Step 4: gate, rank per owner, write ContentAsset rows.
     await startStep(jobId, RANK_STEP);
     const knownOwnerIds = new Set(project.competitors.map((c) => c.id));
@@ -301,6 +349,11 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
     );
     await completeStep(jobId, RANK_STEP);
 
+    await continuation?.save({ phase: "analysis", brandCrawl, keywords });
+    checkpoint.phase = "analysis";
+    // Return so analysis gets a fresh function budget after persisted ranking.
+    if (continuation) return;
+    }
     // Step 5: AI analysis. The pipeline now reads assets back from the DB;
     // it is no longer handed a video list.
     await startStep(jobId, "AI analysis");
@@ -335,7 +388,9 @@ export async function runResearch(projectId: string, jobId: string): Promise<voi
       });
     }
     await completeJob(jobId);
+    await continuation?.save({ phase: "complete" });
   } catch (err) {
+    if (err instanceof ResearchWaiting || continuation) throw err;
     const msg = err instanceof Error ? err.message : "Research failed";
     await failJob(jobId, msg).catch(() => {});
     await prisma.project

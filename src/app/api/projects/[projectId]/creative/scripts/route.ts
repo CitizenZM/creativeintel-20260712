@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { COMPLIANCE_FLAG } from "@/lib/script-pick";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
@@ -146,7 +147,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("Script generation failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate script" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

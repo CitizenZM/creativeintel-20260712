@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
+  $queryRaw: vi.fn(),
   appUser: { findUnique: vi.fn() },
   project: { findMany: vi.fn() },
   spendEntry: { aggregate: vi.fn(), create: vi.fn() },
@@ -9,6 +10,7 @@ const db = vi.hoisted(() => ({
 }));
 const tenancy = vi.hoisted(() => ({ tenantOfProject: vi.fn() }));
 vi.mock("@/lib/db", () => ({ prisma: db }));
+vi.mock("@/lib/sql-table", () => ({ sqlTable: (name: string) => name }));
 const actor = vi.hoisted(() => ({ id: null as string | null }));
 vi.mock("./actor", () => ({ currentActorId: async () => actor.id }));
 vi.mock("@/services/tenancy", () => ({
@@ -17,6 +19,7 @@ vi.mock("@/services/tenancy", () => ({
 }));
 
 import {
+  accountUsageBatch,
   accountSpentThisMonth,
   allowanceRefusalBody,
   assertAccountAllowance,
@@ -165,5 +168,17 @@ describe("assertAccountAllowance", () => {
     expect(allowanceRefusalBody(new Error("x"))).toBeNull();
     const project = new BudgetExceededError({ projectId: "p", kind: "image", model: "m" }, 1, { level: "project", limitUsd: 1, spentUsd: 1 });
     expect(allowanceRefusalBody(project)).toBeNull();
+  });
+});
+
+
+describe("accountUsageBatch", () => {
+  it("uses one query and the larger of ledger and provider spend for each member", async () => {
+    db.$queryRaw.mockResolvedValue([{ tenant: "ann", ledger: 0.8, provider: 0.5 }, { tenant: "bob", ledger: 0.1, provider: 1.2 }]);
+    const usage = await accountUsageBatch([{ id: "ann", monthlyAllowanceUsd: 2 }, { id: "bob", monthlyAllowanceUsd: 1 }, { id: "new", monthlyAllowanceUsd: 0 }]);
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(usage.get("ann")).toEqual({ allowanceUsd: 2, spentUsd: 0.8, remainingUsd: 1.2 });
+    expect(usage.get("bob")?.remainingUsd).toBe(0);
+    expect(usage.get("new")?.spentUsd).toBe(0);
   });
 });

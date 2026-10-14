@@ -23,5 +23,23 @@
       "path": "/api/cron/report-digest",
       "schedule": "0 14 * * 1"
     }
-  ]
+  ],
+  "functions": {
+    "src/app/api/queues/render/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "creativeintel-render"
+        }
+      ]
+    },
+    "src/app/api/queues/research/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "creativeintel-research"
+        }
+      ]
+    }
+  }
 }

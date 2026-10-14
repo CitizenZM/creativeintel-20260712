@@ -77,6 +77,15 @@ export async function getBrandKitCompleteness(projectId: string): Promise<BrandK
     include: { assets: { select: { kind: true, variant: true } } },
   });
 
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { category: true } }).catch(() => null);
+  return calculateBrandKitCompleteness(kit, project?.category);
+}
+
+/** Pure scoring, also used by the batched progress query. */
+export function calculateBrandKitCompleteness(kit: {
+  assets: { kind: string }[]; colorsHex: unknown; ctaOptions: unknown;
+  skuDimensionsCm: unknown; landingUrl: string | null; productSummary: string | null; claimsAllowed: unknown;
+} | null, category?: string | null): BrandKitCompleteness {
   if (!kit) {
     return {
       score: 0,
@@ -110,8 +119,7 @@ export async function getBrandKitCompleteness(projectId: string): Promise<BrandK
   const hasClaims = Array.isArray(kit.claimsAllowed); // an explicit empty array counts
   // Dimensions keep generated scenes at the right scale for a physical product;
   // a service (SaaS, finance, an accelerator…) has none to give.
-  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { category: true } }).catch(() => null);
-  const needsDimensions = !(project?.category && SERVICE_CATEGORIES.has(project.category));
+  const needsDimensions = !(category && SERVICE_CATEGORIES.has(category));
   const hasDimensions =
     !needsDimensions || (!!dims && [dims.height, dims.width, dims.depth].some((v) => typeof v === "number" && v > 0));
 

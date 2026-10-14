@@ -291,7 +291,8 @@ export class MemoryAutopilotStore implements AutopilotStore {
     return new Date(this.clock);
   }
   private copy(r: AutopilotRecord): AutopilotRecord {
-    const { leaseUntil: _l, ...rest } = r as AutopilotRecord & { leaseUntil?: Date | null };
+    const rest = { ...r } as AutopilotRecord & { leaseUntil?: Date | null };
+    delete rest.leaseUntil;
     return JSON.parse(JSON.stringify(rest), (k, v) => ((k === "createdAt" || k === "updatedAt") && typeof v === "string" ? new Date(v) : v));
   }
   async create(data: { projectId: string | null; input: AutopilotInput; state: AutopilotState }) {

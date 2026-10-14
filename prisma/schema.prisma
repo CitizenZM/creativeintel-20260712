@@ -284,6 +284,7 @@ model Project {
   // Disabled by default; sending also needs REPORT_DELIVERY_SEND=on.
   reportDelivery    Json?
   shares       ProjectShare[]
+  @@index([workspaceId, updatedAt])
 }
 
 model Brand {
@@ -349,6 +350,7 @@ model Competitor {
   // Removed by the user: skipped by research, hidden from lists and analysis.
   excluded     Boolean    @default(false)
   createdAt    DateTime   @default(now())
+  @@index([projectId, excluded, createdAt])
 }
 
 model ContentAsset {
@@ -759,6 +761,7 @@ model WorkerTask {
 
   @@index([status, kind, priority])
   @@index([projectId, kind])
+  @@index([status, updatedAt])
 }
 
 // ─── LibTV production runs — executed by the local libtv-worker ───────────────
@@ -1183,6 +1186,7 @@ model AiUsage {
   createdAt    DateTime @default(now())
 
   @@index([createdAt])
+  @@index([projectId, createdAt])
 }
 
 /// Real results of ads we made (Meta / TikTok exports or API), matched to our
@@ -1438,4 +1442,24 @@ model ProjectShare {
   @@unique([projectId, email])
   @@index([userId])
   @@index([email])
+}
+
+// Distributed provider slots and crawl single-flight ownership.
+model SharedLease {
+  key       String   @id
+  owner     String
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+model ResearchContinuation {
+  jobId          String   @id
+  projectId      String
+  checkpoint     Json?
+  waitingTaskIds Json?
+  status         String   @default("queued")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([status, updatedAt])
 }

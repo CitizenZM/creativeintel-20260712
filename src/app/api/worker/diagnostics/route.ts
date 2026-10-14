@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
@@ -31,7 +32,7 @@ async function check(fn: () => Promise<unknown>) {
     const detail = await fn();
     return { ok: true, ms: Date.now() - started, detail };
   } catch (err) {
-    return { ok: false, ms: Date.now() - started, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, ms: Date.now() - started, error: safePublicError(err) };
   }
 }
 
@@ -63,7 +64,7 @@ export async function GET(request: Request) {
         signal: AbortSignal.timeout(30_000),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: { message?: string }; usage?: unknown };
-      return { configured: true, status: res.status, error: body.error?.message, usage: body.usage };
+      return { configured: true, status: res.status, error: body.error ? safePublicError(body.error) : undefined, usage: body.usage };
     }),
   ]);
 
@@ -95,7 +96,7 @@ export async function GET(request: Request) {
             signal: AbortSignal.timeout(45_000),
           });
           const body = (await res.json().catch(() => ({}))) as { error?: { message?: string }; choices?: { message?: { content?: string } }[] };
-          return { status: res.status, error: body.error?.message, answer: body.choices?.[0]?.message?.content?.slice(0, 120) };
+          return { status: res.status, error: body.error ? safePublicError(body.error) : undefined, answer: body.choices?.[0]?.message?.content?.slice(0, 120) };
         };
         return { dataUrl: await ask(`data:${type};base64,${b64}`), rawBase64: await ask(b64) };
       }),
@@ -136,9 +137,9 @@ export async function GET(request: Request) {
           const body = (await res.json().catch(() => ({}))) as { usage?: { completion_tokens?: number }; error?: { message?: string } };
           const secs = (Date.now() - t0) / 1000;
           const out = body.usage?.completion_tokens ?? 0;
-          return { model, status: res.status, secs, outTokens: out, tokPerSec: out ? Math.round(out / secs) : 0, error: body.error?.message?.slice(0, 80) };
+          return { model, status: res.status, secs, outTokens: out, tokPerSec: out ? Math.round(out / secs) : 0, error: body.error ? safePublicError(body.error) : undefined };
         } catch (err) {
-          return { model, secs: (Date.now() - t0) / 1000, error: err instanceof Error ? err.message.slice(0, 80) : String(err) };
+          return { model, secs: (Date.now() - t0) / 1000, error: safePublicError(err) };
         }
       })
     );
@@ -207,10 +208,10 @@ export async function GET(request: Request) {
               outTokens: body.usage?.completion_tokens,
               quotes: (text.match(/onScreenText"\s*:\s*"[^"]{2,}/g) || []).length,
               sample: text.replace(/\s+/g, " ").slice(0, 400),
-              error: body.error?.message?.slice(0, 120),
+              error: body.error ? safePublicError(body.error) : undefined,
             };
           } catch (err) {
-            return { model, secs: (Date.now() - t0) / 1000, error: err instanceof Error ? err.message.slice(0, 80) : String(err) };
+            return { model, secs: (Date.now() - t0) / 1000, error: safePublicError(err) };
           }
         })
       ),

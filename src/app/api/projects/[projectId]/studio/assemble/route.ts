@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -97,7 +98,7 @@ async function unguardedPOST(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Assembly failed" },
+      { error: safePublicError(err) },
       { status: 422 }
     );
   }
@@ -127,7 +128,7 @@ async function unguardedGET(
     return NextResponse.json(readiness);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to compute readiness" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

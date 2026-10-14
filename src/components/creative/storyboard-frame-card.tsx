@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import {
   Loader2, ImageIcon, CheckCircle2, XCircle, RefreshCw,
   MessageSquare, ChevronDown, Camera, Zap, ChevronRight, Film, Undo2,
@@ -283,7 +284,7 @@ export function StoryboardFrameCard({
       <div className="aspect-video relative overflow-hidden bg-muted/60 group">
         {imageUrl ? (
           <>
-            <img src={imageUrl} alt={frame.scene} className="w-full h-full object-cover" onError={() => setImageUrl(null)} />
+            <Image unoptimized width={1024} height={1024} src={imageUrl} alt={frame.scene} className="w-full h-full object-cover" onError={() => setImageUrl(null)} />
             {/* Hover: regenerate */}
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
               <button

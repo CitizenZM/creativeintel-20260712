@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -328,7 +329,7 @@ Format: vertical 9:16, 720p minimum, 24fps.`;
   } catch (err) {
     console.error("VEO prompt generation failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate VEO prompts" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

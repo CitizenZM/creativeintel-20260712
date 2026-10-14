@@ -18,7 +18,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const STATE_DIR = join(homedir(), '.creativeintel-research-worker');
+const INSTANCE = (process.env.WORKER_INSTANCE_ID || 'single').replace(/[^a-zA-Z0-9_-]/g, '_');
+const STATE_DIR = join(homedir(), '.creativeintel-research-worker', INSTANCE);
 const SPACE_FILE = join(STATE_DIR, 'space.json');
 const RESULT_MARKER = '__RESULT__';
 
@@ -60,7 +61,7 @@ async function openSpace(name) {
       if (!/not found/i.test(err && err.message ? err.message : String(err))) throw err;
     }
   }
-  return await taskSpace(name);
+  return await taskSpace(name + " " + ${JSON.stringify(INSTANCE)});
 }
 function emit(value) { console.log(RESULT_MARKER + JSON.stringify(value)); }
 ${body}

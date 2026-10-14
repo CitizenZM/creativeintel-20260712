@@ -97,17 +97,21 @@ export function pangoEscape(text: string): string {
  */
 /** Brand fonts fetched from Google Fonts land here (see edit/brand-style.ts). */
 export const BRAND_FONT_DIR = path.join(tmpdir(), "brand-fonts");
+let fontConfigPromise: Promise<void> | undefined;
 
 export async function ensureFontconfig(fontFile: string): Promise<void> {
   if (process.env.FONTCONFIG_FILE) return;
-  const conf = path.join(tmpdir(), "creativeintel-fonts.conf");
-  await mkdir(path.join(tmpdir(), "fontconfig-cache"), { recursive: true }).catch(() => {});
-  await mkdir(BRAND_FONT_DIR, { recursive: true }).catch(() => {});
-  await writeFile(
-    conf,
-    `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig><dir>${path.dirname(fontFile)}</dir><dir>${BRAND_FONT_DIR}</dir><cachedir>${path.join(tmpdir(), "fontconfig-cache")}</cachedir></fontconfig>\n`
-  );
-  process.env.FONTCONFIG_FILE = conf;
+  fontConfigPromise ??= (async () => {
+    const conf = path.join(tmpdir(), "creativeintel-fonts.conf");
+    await mkdir(path.join(tmpdir(), "fontconfig-cache"), { recursive: true }).catch(() => {});
+    await mkdir(BRAND_FONT_DIR, { recursive: true }).catch(() => {});
+    await writeFile(
+      conf,
+      `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig><dir>${path.dirname(fontFile)}</dir><dir>${BRAND_FONT_DIR}</dir><cachedir>${path.join(tmpdir(), "fontconfig-cache")}</cachedir></fontconfig>\n`
+    );
+    process.env.FONTCONFIG_FILE = conf;
+  })();
+  await fontConfigPromise;
 }
 
 async function textPng(

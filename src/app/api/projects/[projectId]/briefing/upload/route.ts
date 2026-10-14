@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withAccess } from "@/lib/auth/route-guard";
@@ -59,7 +60,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("Briefing upload failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Upload failed" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

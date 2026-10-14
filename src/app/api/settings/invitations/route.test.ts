@@ -78,10 +78,10 @@ describe("/api/settings/invitations", () => {
     expect((await post({ email: "nope" })).status).toBe(400);
     m.findFirst.mockResolvedValueOnce({ id: "u" });
     expect((await post({ email: "x@y.com" })).status).toBe(409);
-    m.createInvitation.mockRejectedValueOnce({ errors: [{ longMessage: "There's already a pending invitation for this email" }] });
+    m.createInvitation.mockRejectedValueOnce({ errors: [{ code: "duplicate_record", longMessage: "Sensitive provider details" }] });
     const dup = await post({ email: "a@b.co" });
     expect(dup.status).toBe(409);
-    expect((await dup.json()).error).toMatch(/pending invitation/);
+    expect((await dup.json()).error).toMatch(/already has an account or invitation/);
   });
 
   it("shares only the ticked projects, at the chosen level, before inviting", async () => {

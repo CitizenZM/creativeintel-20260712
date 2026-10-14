@@ -64,8 +64,8 @@ export async function cutOutPackshot(packshot: Buffer): Promise<Buffer> {
         stack.push(p);
       }
     };
-    for (let x = 0; x < w; x++) (seed(x), seed((h - 1) * w + x));
-    for (let y = 0; y < h; y++) (seed(y * w), seed(y * w + w - 1));
+    for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1); }
     while (stack.length) {
       const p = stack.pop()!;
       data[p * 4 + 3] = 0;

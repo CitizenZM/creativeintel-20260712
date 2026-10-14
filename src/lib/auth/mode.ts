@@ -31,6 +31,14 @@ export function cfAccessConfigured(env: Env): boolean {
 }
 
 export function selectAuthMode(env: Env): AuthModeDecision {
+  // Preview must use a dedicated database and Clerk's test instance. Never inherit
+  // the production no-auth fallback or permit AUTH_PROVIDER=none on a hosted app.
+  if (env.VERCEL_ENV === "preview") {
+    if (!has(env.PREVIEW_DATABASE_URL) || !env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_") || !env.CLERK_SECRET_KEY?.startsWith("sk_test_")) {
+      return { mode: "locked", reason: "Preview requires PREVIEW_DATABASE_URL and a separate Clerk test instance" };
+    }
+    return { mode: "clerk", reason: "isolated preview with Clerk test authentication" };
+  }
   const override = env.AUTH_PROVIDER?.trim().toLowerCase();
   const clerk = clerkConfigured(env);
   const cf = cfAccessConfigured(env);
@@ -49,6 +57,7 @@ export function selectAuthMode(env: Env): AuthModeDecision {
           ? { mode: "cf-access", reason: "AUTH_PROVIDER=cf-access" }
           : { mode: "locked", reason: "AUTH_PROVIDER=cf-access but CF_ACCESS_TEAM_DOMAIN / CF_ACCESS_AUD are not both set" };
       case "none":
+        if (env.VERCEL === "1") return { mode: "locked", reason: "Hosted deployments require authentication" };
         return { mode: "none", reason: "AUTH_PROVIDER=none" };
       default:
         return { mode: "locked", reason: `unknown AUTH_PROVIDER "${override}" (expected clerk, cf-access or none)` };
@@ -57,6 +66,7 @@ export function selectAuthMode(env: Env): AuthModeDecision {
 
   if (clerk) return { mode: "clerk", reason: "Clerk keys set" };
   if (cf) return { mode: "cf-access", reason: "Cloudflare Access configured" };
+  if (env.VERCEL === "1") return { mode: "locked", reason: "Hosted deployments require authentication" };
   return { mode: "none", reason: "no auth provider configured" };
 }
 

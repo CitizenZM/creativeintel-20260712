@@ -13,7 +13,6 @@ import { brandFromUrl, newRowId, parsePrice } from "./helpers";
 import { AutopilotFatalError, type AutopilotForecast, type AutopilotSteps, type StepContext, type StepOutcome } from "./types";
 
 const money = (n: number) => Math.ceil(n * 100) / 100;
-const asMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const MAX_RENDER_MS = 24 * 3600_000;
 
 /**
@@ -284,7 +283,7 @@ const render = async (ctx: StepContext): Promise<StepOutcome> => {
   const runId = ctx.state.runId;
   if (!runId) throw new AutopilotFatalError("No run to render");
   const read = () => prisma.libtvRun.findUnique({ where: { id: runId }, select: { status: true, executor: true, masterMp4Url: true, error: true } });
-  let run = await read();
+  const run = await read();
   if (!run) throw new AutopilotFatalError("Run not found");
   const settled = (r: NonNullable<typeof run>): StepOutcome | null => {
     if (r.status === "completed") return { kind: "done", state: { masterUrl: r.masterMp4Url }, note: "master rendered" };
@@ -295,16 +294,8 @@ const render = async (ctx: StepContext): Promise<StepOutcome> => {
   if (early) return early;
   const started = ctx.state.renderStartedAt ? Date.parse(ctx.state.renderStartedAt) : ctx.now();
   if (ctx.now() - started > MAX_RENDER_MS) throw new AutopilotFatalError("Render has not finished in 24 h");
-  const left = ctx.deadline - ctx.now() - 15_000;
-  if (left > 20_000) {
-    const [{ loadAiSettings }, { driveServerRun }] = await Promise.all([import("@/services/settings/ai-settings"), import("@/services/video-gen/server-engines")]);
-    await loadAiSettings();
-    await driveServerRun(run.executor, runId, left).catch((err) => console.warn(`[autopilot] drive ${runId}: ${asMsg(err)}`));
-    run = await read();
-    if (!run) throw new AutopilotFatalError("Run not found");
-    const after = settled(run);
-    if (after) return after;
-  }
+  const { enqueueRender } = await import("@/services/video-gen/render-dispatch");
+  await enqueueRender("run", runId);
   return { kind: "wait", note: `render ${run.status}` };
 };
 

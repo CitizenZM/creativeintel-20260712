@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { COMPLIANCE_FLAG } from "@/lib/script-pick";
 import { NextResponse, after } from "next/server";
 import { createJob, failJob, runJobItems, runningJob } from "@/services/jobs";
@@ -169,7 +170,7 @@ async function unguardedPOST(
         r.status === "rejected"
           ? {
               templateId: templates[i].id,
-              error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+              error: safePublicError(r.reason),
             }
           : null
       )
@@ -197,7 +198,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("Scripts batch failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate scripts" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

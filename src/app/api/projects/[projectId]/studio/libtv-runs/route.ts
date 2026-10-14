@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { isZhipuConfigured } from "@/services/ai/zhipu";
 /**
  * POST — compile a storyboard into a LibtvRun (status `awaiting_approval`).
@@ -97,7 +98,7 @@ async function unguardedPOST(
     }
     console.error("libtv-runs compile failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to compile LibTV run" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

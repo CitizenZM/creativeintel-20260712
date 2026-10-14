@@ -1,3 +1,4 @@
+import { remainingRequestMs } from "./request-budget";
 /**
  * Image generation across engines, in the order Settings → AI engines picks:
  * the chosen engine first, then the calling route's usual order. Strict free
@@ -15,13 +16,18 @@ import { cachedAiSettings, cachedProvider, loadAiSettings } from "@/services/set
 import { CUSTOM_PREFIX, routeOrder } from "@/services/settings/ai-settings-core";
 import { generateImagePersisted, isZhipuConfigured } from "./zhipu";
 import { logAiUsage } from "./usage";
+import { fluxSchnellCost } from "./usage-core";
 import { uploadBuffer } from "@/services/storage";
 import { assertAccountAllowance } from "@/services/ops/account-allowance";
+import { generateBachImage } from "@/services/video-gen/bach";
+import { safeFetchBuffer } from "@/lib/safe-fetch";
 
-export type ImageEngineId = "glm" | "openai" | "fal" | "pollinations" | `custom:${string}`;
+export type ImageEngineId = "glm" | "openai" | "fal" | "pollinations" | "bach" | `custom:${string}`;
 
 export interface ImageRequest {
   prompt: string;
+  /** Whole generation plus fallback/persistence budget; default 150 seconds. */
+  budgetMs?: number;
   shape: "landscape" | "square";
   openaiQuality: "low" | "medium";
   pollinations: { width: number; height: number; as: "url" | "dataUrl" };
@@ -39,9 +45,17 @@ const FAL_MAX_CONCURRENT = 9;
 let falActive = 0;
 const falWaiting: Array<() => void> = [];
 
-async function acquireFalSlot(): Promise<() => void> {
+async function acquireFalSlot(deadlineAt: number): Promise<() => void> {
   if (falActive >= FAL_MAX_CONCURRENT) {
-    await new Promise<void>((resolve) => falWaiting.push(resolve));
+    await new Promise<void>((resolve, reject) => {
+      const wake = () => { clearTimeout(timer); resolve(); };
+      const timer = setTimeout(() => {
+        const index = falWaiting.indexOf(wake);
+        if (index >= 0) falWaiting.splice(index, 1);
+        reject(new Error("Image request deadline exceeded while queued"));
+      }, remainingRequestMs(deadlineAt));
+      falWaiting.push(wake);
+    });
   }
   falActive++;
   let released = false;
@@ -53,8 +67,8 @@ async function acquireFalSlot(): Promise<() => void> {
   };
 }
 
-async function falGenerate(key: string, model: string, req: ImageRequest): Promise<string> {
-  const release = await acquireFalSlot();
+async function falGenerate(key: string, model: string, req: ImageRequest, deadlineAt: number): Promise<{ url: string; costUsd: number | null }> {
+  const release = await acquireFalSlot(deadlineAt);
   try {
     const res = await fetch(`https://fal.run/${model}`, {
       method: "POST",
@@ -66,7 +80,7 @@ async function falGenerate(key: string, model: string, req: ImageRequest): Promi
         num_images: 1,
         enable_safety_checker: false,
       }),
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(remainingRequestMs(deadlineAt, 25_000)),
     });
     if (!res.ok) {
       const err = await res.text().catch(() => "");
@@ -75,13 +89,14 @@ async function falGenerate(key: string, model: string, req: ImageRequest): Promi
     const data = await res.json();
     const url = data?.images?.[0]?.url;
     if (!url) throw new Error("fal.ai returned no image URL");
-    return url;
+    const image = data.images[0];
+    return { url, costUsd: model === "fal-ai/flux/schnell" ? fluxSchnellCost(image.width, image.height) : null };
   } finally {
     release();
   }
 }
 
-async function openaiImage(client: OpenAI, model: string, req: ImageRequest, withQuality: boolean): Promise<string> {
+async function openaiImage(client: OpenAI, model: string, req: ImageRequest, withQuality: boolean, deadlineAt: number): Promise<string> {
   const size = req.shape === "landscape" ? "1536x1024" : "1024x1024";
   const response = await client.images.generate({
     model,
@@ -89,7 +104,7 @@ async function openaiImage(client: OpenAI, model: string, req: ImageRequest, wit
     n: 1,
     size: size as "1024x1024" | "1536x1024",
     ...(withQuality ? { quality: req.openaiQuality } : {}),
-  });
+  }, { timeout: remainingRequestMs(deadlineAt, 90_000), signal: AbortSignal.timeout(remainingRequestMs(deadlineAt)), maxRetries: 0 });
   const b64 = response.data?.[0]?.b64_json;
   if (b64) return `data:image/png;base64,${b64}`;
   const url = response.data?.[0]?.url;
@@ -97,12 +112,12 @@ async function openaiImage(client: OpenAI, model: string, req: ImageRequest, wit
   throw new Error(`${model} returned no image data`);
 }
 
-async function pollinations(req: ImageRequest): Promise<string> {
+async function pollinations(req: ImageRequest, deadlineAt: number): Promise<string> {
   const encoded = encodeURIComponent(req.prompt);
   const seed = Math.floor(Math.random() * 999999);
   const { width, height } = req.pollinations;
   const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=flux&nofeed=true`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(25000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(remainingRequestMs(deadlineAt, 25_000)) });
   if (!res.ok) throw new Error(`Pollinations error: ${res.status}`);
   if (req.pollinations.as === "url") return url;
   const b64 = Buffer.from(await res.arrayBuffer()).toString("base64");
@@ -110,30 +125,44 @@ async function pollinations(req: ImageRequest): Promise<string> {
 }
 
 /** One engine's attempt; null = not configured (skip). */
-async function runEngine(engine: ImageEngineId, req: ImageRequest): Promise<string | null> {
+async function runEngine(engine: ImageEngineId, req: ImageRequest, deadlineAt: number): Promise<string | null> {
   const aspectRatio = req.shape === "square" ? "1:1" : "16:9";
   if (engine === "glm") {
     if (!isZhipuConfigured()) return null;
-    return generateImagePersisted(req.prompt, { aspectRatio, folder: req.folder, projectId: req.projectId });
+    return generateImagePersisted(req.prompt, { aspectRatio, folder: req.folder, projectId: req.projectId, deadlineAt });
   }
   if (engine === "openai") {
     const key = process.env.OPENAI_API_KEY;
     if (!key) return null;
-    const url = await openaiImage(new OpenAI({ apiKey: key }), "gpt-image-1", req, true);
+    const url = await openaiImage(new OpenAI({ apiKey: key }), "gpt-image-1", req, true, deadlineAt);
     logAiUsage({ provider: "openai", model: "gpt-image-1", capability: "image", images: 1, costUsd: null, projectId: req.projectId });
     return url;
   }
   if (engine === "fal") {
     const key = process.env.FAL_KEY;
     if (!key) return null;
-    const url = await falGenerate(key, "fal-ai/flux/schnell", req);
-    logAiUsage({ provider: "fal", model: "fal-ai/flux/schnell", capability: "image", images: 1, costUsd: null, projectId: req.projectId });
+    const { url, costUsd } = await falGenerate(key, "fal-ai/flux/schnell", req, deadlineAt);
+    logAiUsage({ provider: "fal", model: "fal-ai/flux/schnell", capability: "image", images: 1, costUsd, projectId: req.projectId });
     return url;
   }
   if (engine === "pollinations") {
-    const url = await pollinations(req);
+    const url = await pollinations(req, deadlineAt);
     logAiUsage({ provider: "pollinations", model: "flux", capability: "image", images: 1, costUsd: 0, projectId: req.projectId });
     return url;
+  }
+  if (engine === "bach") {
+    if (!process.env.BACH_ACCESS_KEY || !process.env.BACH_SECRET_KEY) return null;
+    const sourceUrl = await generateBachImage({
+      prompt: req.prompt,
+      aspectRatio: req.shape === "square" ? "1:1" : "16:9",
+      imageSize: "2K",
+      quality: req.openaiQuality === "low" ? "low" : "medium",
+    }, deadlineAt);
+    logAiUsage({ provider: "bach", model: "gpt-image2-economy", capability: "image", images: 1, costUsd: null, projectId: req.projectId });
+    const fetched = await safeFetchBuffer(sourceUrl, { timeoutMs: remainingRequestMs(deadlineAt, 25_000), maxBytes: 20 * 1024 * 1024 });
+    if (!fetched.ok || !fetched.buffer) return sourceUrl;
+    const uploaded = await uploadBuffer({ buffer: fetched.buffer, filename: `bach-${Date.now()}.jpg`, contentType: fetched.contentType || "image/jpeg", folder: req.folder, signal: AbortSignal.timeout(remainingRequestMs(deadlineAt)) });
+    return uploaded.provider === "inline" ? sourceUrl : uploaded.url;
   }
 
   // Bring-your-own provider.
@@ -151,12 +180,13 @@ async function runEngine(engine: ImageEngineId, req: ImageRequest): Promise<stri
       auth: { apiKey: p.apiKey, baseUrl: p.baseUrl },
       costUsd,
       usageProvider: engine,
+      deadlineAt,
     });
   }
   const url =
     p.type === "fal"
-      ? await falGenerate(p.apiKey, model, req)
-      : await openaiImage(new OpenAI({ apiKey: p.apiKey, baseURL: p.baseUrl ?? undefined }), model, req, false);
+      ? (await falGenerate(p.apiKey, model, req, deadlineAt)).url
+      : await openaiImage(new OpenAI({ apiKey: p.apiKey, baseURL: p.baseUrl ?? undefined }), model, req, false, deadlineAt);
   logAiUsage({ provider: engine, model, capability: "image", images: 1, costUsd, projectId: req.projectId });
   return url;
 }
@@ -177,7 +207,7 @@ export async function imageEngineOrder(defaults: ImageRequest["defaults"]): Prom
  * so listing storyboards took 14 s and every frame approval rewrote it. Store
  * the bytes and keep the URL; only fall back to the data URI with no storage.
  */
-export async function persistDataUrl(url: string, folder: string): Promise<string> {
+export async function persistDataUrl(url: string, folder: string, deadlineAt?: number): Promise<string> {
   const m = /^data:([^;,]+);base64,([\s\S]*)$/.exec(url);
   if (!m) return url;
   try {
@@ -186,6 +216,7 @@ export async function persistDataUrl(url: string, folder: string): Promise<strin
       filename: `image-${Date.now()}.${m[1].split("/")[1] || "png"}`,
       contentType: m[1],
       folder,
+      signal: deadlineAt === undefined ? undefined : AbortSignal.timeout(remainingRequestMs(deadlineAt)),
     });
     return up.provider === "inline" ? url : up.url;
   } catch (err) {
@@ -195,6 +226,8 @@ export async function persistDataUrl(url: string, folder: string): Promise<strin
 }
 
 export async function generateImageByEngine(req: ImageRequest): Promise<string> {
+  const budgetMs = Math.max(1, Math.min(150_000, req.budgetMs ?? 150_000));
+  const deadlineAt = Date.now() + budgetMs;
   // A member account past its monthly allowance gets no more paid images (no-op for the admin).
   // Estimated at the priciest engine in the fallback order (gpt-image-1) — the engine isn't known
   // yet — unless strict free mode without paid fallback makes the call free by construction.
@@ -207,9 +240,10 @@ export async function generateImageByEngine(req: ImageRequest): Promise<string> 
   const order = await imageEngineOrder(req.defaults);
   let lastErr: unknown = null;
   for (const engine of order) {
+    remainingRequestMs(deadlineAt);
     try {
-      const url = await runEngine(engine, req);
-      if (url) return persistDataUrl(url, req.folder);
+      const url = await runEngine(engine, req, deadlineAt);
+      if (url) return persistDataUrl(url, req.folder, deadlineAt);
     } catch (err) {
       lastErr = err;
       console.warn(`[image] ${engine} failed, trying the next engine:`, err instanceof Error ? err.message : err);

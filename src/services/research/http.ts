@@ -7,11 +7,7 @@
  *  - a default request timeout
  *  - a small per-host concurrency limiter
  *
- * NOTE on signals: if the caller passes their own `init.signal`, we do not
- * attempt to merge it with our timeout signal (that would need AbortSignal.any
- * or manual wiring). We simply use the caller's signal as-is in that case and
- * skip applying our own timeout. This is an accepted simplification — callers
- * that need both should compose their own signal before calling in.
+ * Caller cancellation and the per-attempt timeout are composed together.
  */
 
 const DEFAULT_RETRIES = 3;
@@ -133,9 +129,9 @@ export async function fetchWithRetry(
     let result: Response | undefined;
     try {
       const requestInit: RequestInit = { ...init };
-      if (!requestInit.signal) {
-        requestInit.signal = timeoutSignal(timeoutMs);
-      }
+      requestInit.signal = requestInit.signal
+        ? AbortSignal.any([requestInit.signal, timeoutSignal(timeoutMs)])
+        : timeoutSignal(timeoutMs);
 
       const response = await fetch(url, requestInit);
 

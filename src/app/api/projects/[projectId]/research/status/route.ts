@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import {
@@ -63,9 +64,13 @@ async function unguardedGET(
 
   const rawSteps = (job.steps as unknown as JobStep[] | null) ?? [];
   const sources = collectSources(rawSteps);
-  const workerCounts = await getTaskStatusCounts(projectId, "ad_library_fetch").catch(
-    () => ({}) as Record<string, number>
-  );
+  const [workerCounts, browserCounts, continuation] = await Promise.all([
+    getTaskStatusCounts(projectId, "ad_library_fetch"),
+    getTaskStatusCounts(projectId, "browser_fetch"),
+    prisma.researchContinuation.findUnique({ where: { jobId: job.id }, select: { status: true } }),
+  ]);
+  const queueDepth = (workerCounts.queued ?? 0) + (browserCounts.queued ?? 0);
+  const runningWorkers = (workerCounts.claimed ?? 0) + (workerCounts.running ?? 0) + (browserCounts.claimed ?? 0) + (browserCounts.running ?? 0);
 
   return NextResponse.json({
     etaSeconds: await estimateResearchEta(projectId, job),
@@ -73,10 +78,13 @@ async function unguardedGET(
     status: job.status,
     progress: job.progress,
     currentStep: job.currentStep,
-    steps: nestSteps(rawSteps),
+    steps: nestSteps(rawSteps.map((step) => step.status === "error" ? { ...step, message: safePublicError(step.message) } : step)),
     sources,
     workerTasks: workerCounts,
-    error: job.error,
+    queueDepth,
+    runningWorkers,
+    waitingForWorkers: continuation?.status === "waiting",
+    error: job.error ? safePublicError(job.error) : null,
     startedAt: job.startedAt,
     completedAt: job.completedAt,
   });

@@ -1,3 +1,4 @@
+import { enqueueRender } from "@/services/video-gen/render-dispatch";
 import { NextResponse } from "next/server";
 import { allowanceRefusalBody, assertAccountAllowance } from "@/services/ops/account-allowance";
 import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
@@ -5,6 +6,7 @@ import { loadAiSettings } from "@/services/settings/ai-settings";
 import { prisma } from "@/lib/db";
 import { getVideoModel, VIDEO_MODELS } from "@/services/video-gen/models";
 import { withAccess } from "@/lib/auth/route-guard";
+import { bachConfigured, submitBachVideo } from "@/services/video-gen/bach";
 
 export const maxDuration = 60;
 
@@ -20,7 +22,7 @@ async function unguardedPOST(
   const body = await request.json().catch(() => ({}));
   const {
     prompt,
-    model = "grok-imagine-video",
+    model = process.env.BACH_ACCESS_KEY && process.env.BACH_SECRET_KEY ? "bach-chrome" : "grok-imagine-video",
     aspectRatio = "9:16",
     resolution = "720p",
     duration = 5,
@@ -51,6 +53,28 @@ async function unguardedPOST(
   }
   const falModel = modelDef?.provider === "fal" ? modelDef : undefined;
 
+  if (modelDef?.provider === "bach") {
+    if (!bachConfigured()) return NextResponse.json({ error: "Bach API is not configured" }, { status: 503 });
+    const taskId = await submitBachVideo({ prompt, duration: Number(duration) || 5, aspectRatio, resolution });
+    const job = await prisma.falVideoJob.create({
+      data: {
+        projectId,
+        falRequestId: taskId,
+        model,
+        prompt,
+        aspectRatio,
+        resolution,
+        duration,
+        scriptId,
+        shotIndex,
+        costUsd: (modelDef.costPerSecond ?? 0.5) * (Number(duration) || 5),
+        status: "generating",
+      },
+    });
+    await enqueueRender("video", job.id).catch((error) => console.error("Bach render dispatch failed", error));
+    return NextResponse.json({ jobId: job.id, operationId: taskId, model, engine: "bach", status: "queued" });
+  }
+
   // Use fal.ai if key present and model known
   if (falKey && falModel) {
     try {
@@ -69,6 +93,7 @@ async function unguardedPOST(
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(30_000),
       });
 
       if (!res.ok) {
@@ -100,6 +125,7 @@ async function unguardedPOST(
         },
       });
 
+      await enqueueRender("video", job.id).catch((error) => console.error("Render dispatch failed", error));
       return NextResponse.json({
         jobId: job.id,
         falRequestId,
@@ -127,6 +153,7 @@ async function unguardedPOST(
     `https://generativelanguage.googleapis.com/v1beta/models/${veoModelId}:predictLongRunning`,
     {
       method: "POST",
+      signal: AbortSignal.timeout(30_000),
       headers: { "x-goog-api-key": googleKey, "Content-Type": "application/json" },
       body: JSON.stringify({
         instances: [{ prompt }],
@@ -150,7 +177,7 @@ async function unguardedPOST(
     // and `model` to store the veo model key (e.g. "veo-3.1-fast") so status
     // lookups can resolve provider/endpoint via the shared registry.
     try {
-      await prisma.falVideoJob.create({
+      const persistedJob = await prisma.falVideoJob.create({
         data: {
           projectId,
           falRequestId: operationId,
@@ -165,6 +192,7 @@ async function unguardedPOST(
           status: "generating",
         },
       });
+      await enqueueRender("video", persistedJob.id);
     } catch (err) {
       // Non-fatal: if persistence fails (e.g. duplicate operationId), still
       // return the operationId to the client so polling can proceed.

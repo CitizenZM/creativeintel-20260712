@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * POST { platforms? } — build the run's export pack: every rendered video with a thumbnail, per-platform
  * ad copy, Meta + TikTok bulk CSVs, README and manifest, uploaded; returns the manifest with file URLs.
@@ -22,7 +23,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
     const { buildExportPack } = await import("@/services/delivery/export-pack");
     return NextResponse.json({ ok: true, ...(await buildExportPack(run.id, { platforms: parsed.data.platforms })) });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: 409 });
   }
 }
 

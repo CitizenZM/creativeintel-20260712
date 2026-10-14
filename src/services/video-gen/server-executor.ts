@@ -681,7 +681,7 @@ export async function advanceActiveRuns(
   const runs = await prisma.libtvRun.findMany({
     where: { executor: adapter.engine, status: { in: ["approved", "claimed", "running", "assembling"] } },
     select: { id: true, status: true, jobs: { select: { status: true } } },
-    take: 5,
+    take: 100,
   });
   if (!runs.length) return 0;
   const deadline = Date.now() + budgetMs;

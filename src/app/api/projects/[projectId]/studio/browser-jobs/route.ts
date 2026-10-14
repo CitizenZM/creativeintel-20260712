@@ -1,3 +1,4 @@
+import { safePublicError, redactPublicErrors } from "@/lib/public-error";
 /**
  * Enqueue / list BrowserGenJob rows for a project.
  *
@@ -82,7 +83,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("browser-jobs POST failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Unknown error creating browser job(s)" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }
@@ -313,11 +314,11 @@ async function unguardedGET(
     }
 
     const { jobs, statusCounts } = await getJobsWithStatusCounts(scriptId);
-    return NextResponse.json({ jobs, statusCounts });
+    return NextResponse.json({ jobs: redactPublicErrors(jobs), statusCounts });
   } catch (err) {
     console.error("browser-jobs GET failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Unknown error listing browser jobs" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

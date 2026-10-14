@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse, after } from "next/server";
 import { createJob, failJob, runJobItems, runningJob } from "@/services/jobs";
 import { prisma } from "@/lib/db";
@@ -90,7 +91,7 @@ async function unguardedPOST(
           ? {
               scriptId: scripts[i].id,
               scriptTitle: scripts[i].title,
-              error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+              error: safePublicError(r.reason),
             }
           : null
       )
@@ -113,7 +114,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("Storyboards batch failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate storyboards" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

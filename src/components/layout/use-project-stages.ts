@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { createContext, createElement, useCallback, useContext, useEffect, useSyncExternalStore } from "react";
 import type { ProjectStage, ProjectStages } from "@/services/project-stages";
 import { STAGES_FRESH, STAGES_STALE, shareFreshStages } from "@/lib/stage-events";
 
@@ -39,7 +38,7 @@ type Store = {
   lastFetch: number;
 };
 const stores = new Map<string, Store>();
-const POLL_MS = 20000;
+const POLL_MS = 60000;
 const MIN_GAP_MS = 1500;
 
 function storeFor(projectId: string): Store {
@@ -81,10 +80,12 @@ function ensureGlobalListeners() {
   if (globalListeners || typeof window === "undefined") return;
   globalListeners = true;
   const refetchAll = (force: boolean) => {
+    if (document.visibilityState !== "visible") return;
     for (const [id, s] of stores) if (s.listeners.size) void fetchStages(id, force);
   };
   window.addEventListener(STAGES_STALE, () => refetchAll(true));
-  window.addEventListener("focus", () => refetchAll(false));
+  window.addEventListener("focus", () => { if (document.visibilityState === "visible") refetchAll(false); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refetchAll(false); });
   window.addEventListener(STAGES_FRESH, (e: Event) => {
     const d = (e as CustomEvent<ProjectStages>).detail;
     if (d?.projectId) publish(d.projectId, d);
@@ -93,29 +94,46 @@ function ensureGlobalListeners() {
 
 /**
  * Live pipeline stages for a project. Refetches when anything marks the stages
- * stale (a save, a finished job), on navigation, on window focus and every 20s
+ * stale (a save, a finished job), on window focus and every 60s
  * as a fallback — the header, tabs and step frames all read one shared store,
  * so they never disagree or go stale after an edit.
  */
+const InitialStages = createContext<ProjectStages | null>(null);
+export function ProjectStagesProvider({ stages, children }: { stages: ProjectStages | null; children: React.ReactNode }) {
+  return createElement(InitialStages.Provider, { value: stages }, children);
+}
+
 export function useProjectStages(projectId: string, initial?: ProjectStages | null) {
-  const pathname = usePathname();
-  const [data, setData] = useState<ProjectStages | null>(() => storeFor(projectId).data ?? initial ?? null);
+  const supplied = useContext(InitialStages);
+  const seed = initial ?? (supplied?.projectId === projectId ? supplied : null);
+  const subscribe = useCallback((notify: () => void) => {
+    const s = storeFor(projectId);
+    s.listeners.add(notify);
+    return () => {
+      s.listeners.delete(notify);
+      if (!s.listeners.size && s.timer) { clearInterval(s.timer); s.timer = null; }
+    };
+  }, [projectId]);
+  const data = useSyncExternalStore(subscribe, () => storeFor(projectId).data ?? seed ?? null, () => seed ?? null);
 
   useEffect(() => {
     ensureGlobalListeners();
     const s = storeFor(projectId);
-    const listener = (d: ProjectStages) => setData(d);
-    s.listeners.add(listener);
-    if (!s.timer) s.timer = setInterval(() => void fetchStages(projectId), POLL_MS);
-    void fetchStages(projectId);
+    if (seed) {
+      s.lastFetch = Date.now();
+      publish(projectId, seed);
+    }
+    if (!s.timer) s.timer = setInterval(() => {
+      if (document.visibilityState === "visible") void fetchStages(projectId);
+    }, POLL_MS);
+    if (!s.data && document.visibilityState === "visible") void fetchStages(projectId);
     return () => {
-      s.listeners.delete(listener);
       if (s.listeners.size === 0 && s.timer) {
         clearInterval(s.timer);
         s.timer = null;
       }
     };
-  }, [projectId, pathname]);
+  }, [projectId, seed]);
 
   /** Fetch now (bypassing de-duplication) and share it with every listener. */
   const refresh = useCallback(async () => {

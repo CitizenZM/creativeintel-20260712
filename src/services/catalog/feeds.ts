@@ -102,13 +102,13 @@ export function parseCsv(text: string, delimiter = ","): string[][] {
     const c = src[i];
     if (quoted) {
       if (c === '"') {
-        if (src[i + 1] === '"') (field += '"'), i++;
+        if (src[i + 1] === '"') { field += '"'; i++; }
         else quoted = false;
       } else field += c;
       continue;
     }
     if (c === '"' && field === "") quoted = true;
-    else if (c === delimiter) row.push(field), (field = "");
+    else if (c === delimiter) { row.push(field); field = ""; }
     else if (c === "\n" || c === "\r") {
       if (c === "\r" && src[i + 1] === "\n") i++;
       row.push(field);
@@ -117,7 +117,7 @@ export function parseCsv(text: string, delimiter = ","): string[][] {
       field = "";
     } else field += c;
   }
-  if (field !== "" || row.length) row.push(field), rows.push(row);
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
   return rows.filter((r) => r.some((f) => f.trim() !== ""));
 }
 
@@ -172,7 +172,7 @@ class Builder {
     const s = parsePrice(r.salePrice);
     let price = p.amount;
     let salePrice = s.amount;
-    if (price == null && salePrice != null) (price = salePrice), (salePrice = null);
+    if (price == null && salePrice != null) { price = salePrice; salePrice = null; }
     if (price != null && salePrice != null && salePrice >= price) {
       if (salePrice > price) this.warnings.push(`${id}: sale price ${salePrice} ≥ price ${price} — sale price dropped`);
       salePrice = null;

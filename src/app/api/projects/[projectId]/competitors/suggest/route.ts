@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { suggestCompetitors } from "@/services/competitor-suggest";
@@ -23,7 +24,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
     return NextResponse.json({ added });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Could not suggest competitors" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

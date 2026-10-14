@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { brandAssetMetaSchema } from "@/lib/validations";
@@ -115,7 +116,7 @@ async function unguardedPOST(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Upload failed" },
+      { error: safePublicError(err) },
       { status: 502 }
     );
   }

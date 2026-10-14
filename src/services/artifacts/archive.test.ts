@@ -9,10 +9,12 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/safe-fetch", () => ({ assertSafeUrl: async (u: string) => new URL(u) }));
+vi.mock("@/services/storage/durable", () => ({ uploadArchive: async () => "https://store.private.blob.vercel-storage.com/archive/verified" }));
 
 vi.mock("@/lib/db", () => {
   let seq = 0;
   const projectArtifact = {
+    async findUnique({ where }: { where: { id: string } }) { return state.artifacts.find((a) => a.id === where.id) ?? null; },
     async findMany({ where }: { where: { projectId: string; sourceKey: { in: string[] } } }) {
       if (state.failReads) throw new Error("db down");
       return state.artifacts.filter((a) => a.projectId === where.projectId && where.sourceKey.in.includes(a.sourceKey as string)).map((a) => ({ ...a, blob: state.blobs.has(a.id as string) ? { artifactId: a.id } : null }));
@@ -45,6 +47,7 @@ const M2 = "https://store.public.blob.vercel-storage.com/m2.mp4";
 
 beforeEach(() => {
   vi.stubEnv("ARTIFACT_ARCHIVE", "on");
+  vi.stubEnv("ARCHIVE_BLOB_READ_WRITE_TOKEN", "test-private-store");
   vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "video/mp4" } })));
   state.run = { id: "r1", projectId: "p1", storyboardId: null, status: "completed", masterMp4Url: M1, qcReport: null, createdAt: new Date(), completedAt: new Date() };
   state.artifacts = [];
