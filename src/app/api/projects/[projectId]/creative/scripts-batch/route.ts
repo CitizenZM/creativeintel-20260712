@@ -20,6 +20,7 @@ import {
 import { withAccess } from "@/lib/auth/route-guard";
 import { writeBatchScript } from "@/services/creative/batch-workers";
 import { enqueueCreativeBatch } from "@/services/creative/batch-dispatch";
+import { currentSpendScope } from "@/services/ops/spend-scope";
 
 export const maxDuration = 300;
 
@@ -91,7 +92,7 @@ async function unguardedPOST(
         projectId,
         "scripts",
         templates.map((t) => ({ key: t.id, label: t.name })),
-        { templateIds: templates.map((t) => t.id), angles, videoType: overrideType, totalDurationSec, customBrief: body.customBrief ?? null }
+        { templateIds: templates.map((t) => t.id), angles, videoType: overrideType, totalDurationSec, customBrief: body.customBrief ?? null, actorId: currentSpendScope()?.actorId ?? null }
       );
       await enqueueCreativeBatch(job.id);
       const payload = { jobId: job.id, requested: templates.length };

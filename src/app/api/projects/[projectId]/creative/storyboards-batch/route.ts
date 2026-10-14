@@ -9,6 +9,7 @@ import { pMapSettled } from "@/lib/parallel";
 import { LIVE, createStoryboardVersion } from "@/services/creative-library";
 import { writeBatchStoryboard } from "@/services/creative/batch-workers";
 import { enqueueCreativeBatch } from "@/services/creative/batch-dispatch";
+import { currentSpendScope } from "@/services/ops/spend-scope";
 import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
@@ -68,7 +69,7 @@ async function unguardedPOST(
       const running = await runningJob(projectId, "storyboards");
       if (running) return NextResponse.json({ jobId: running.id, reused: true }, { status: 202 });
       const describe = (s: (typeof scripts)[number]) => ({ key: s.id, label: s.title });
-      const job = await createJob(projectId, "storyboards", scripts.map(describe), { scriptIds, visualDirection });
+      const job = await createJob(projectId, "storyboards", scripts.map(describe), { scriptIds, visualDirection, actorId: currentSpendScope()?.actorId ?? null });
       await enqueueCreativeBatch(job.id);
       const payload = { jobId: job.id, requested: scripts.length };
       await idem.commit?.(payload, 202);
