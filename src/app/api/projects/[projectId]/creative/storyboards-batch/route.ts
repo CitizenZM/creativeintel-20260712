@@ -1,13 +1,14 @@
 import { safePublicError } from "@/lib/public-error";
-import { NextResponse, after } from "next/server";
-import { createJob, failJob, runJobItems, runningJob } from "@/services/jobs";
+import { NextResponse } from "next/server";
+import { createJob, runningJob } from "@/services/jobs";
 import { prisma } from "@/lib/db";
-import { buildStoryboardCreateData } from "@/services/ai/storyboard-generator";
 import { getBrandTruthForPrompts } from "@/services/brand-kit";
 import { renderVisualDirection } from "@/lib/visual-direction";
 import { withIdempotency } from "@/lib/idempotency";
 import { pMapSettled } from "@/lib/parallel";
 import { LIVE, createStoryboardVersion } from "@/services/creative-library";
+import { writeBatchStoryboard } from "@/services/creative/batch-workers";
+import { enqueueCreativeBatch } from "@/services/creative/batch-dispatch";
 import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
@@ -60,8 +61,7 @@ async function unguardedPOST(
     };
 
     const boardOne = async (script: (typeof scripts)[number]) => {
-      const data = await buildStoryboardCreateData(projectId, script, project, campaignSel, extras);
-      return createStoryboardVersion(data);
+      return writeBatchStoryboard(projectId, script, project, campaignSel, extras);
     };
 
     if (background) {
@@ -69,11 +69,7 @@ async function unguardedPOST(
       if (running) return NextResponse.json({ jobId: running.id, reused: true }, { status: 202 });
       const describe = (s: (typeof scripts)[number]) => ({ key: s.id, label: s.title });
       const job = await createJob(projectId, "storyboards", scripts.map(describe), { scriptIds, visualDirection });
-      after(() =>
-        runJobItems(job.id, scripts, describe, boardOne, { concurrency: CONCURRENCY }).catch((err) =>
-          failJob(job.id, err)
-        )
-      );
+      await enqueueCreativeBatch(job.id);
       const payload = { jobId: job.id, requested: scripts.length };
       await idem.commit?.(payload, 202);
       return NextResponse.json(payload, { status: 202 });

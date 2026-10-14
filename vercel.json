@@ -40,6 +40,14 @@
           "topic": "creativeintel-research"
         }
       ]
+    },
+    "src/app/api/queues/creative-batch/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "creativeintel-creative-batch"
+        }
+      ]
     }
   }
 }

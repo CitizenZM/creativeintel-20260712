@@ -1,6 +1,7 @@
 import { recoverResearchQueue } from "@/services/research/dispatch";
 import { NextResponse } from "next/server";
 import { recoverRenderQueue } from "@/services/video-gen/render-dispatch";
+import { recoverCreativeBatchQueue } from "@/services/creative/batch-dispatch";
 import { cronHeartbeat } from "@/services/ops/heartbeat";
 
 // Long enough to assemble a finished server-rendered run (see ASSEMBLY_RESERVE_MS).
@@ -27,6 +28,6 @@ export async function GET(request: Request) {
   }
 
   await cronHeartbeat("poll-video-jobs");
-  const [render, research] = await Promise.all([recoverRenderQueue(), recoverResearchQueue()]);
-  return NextResponse.json({ ...render, research });
+  const [render, research, creativeBatches] = await Promise.all([recoverRenderQueue(), recoverResearchQueue(), recoverCreativeBatchQueue()]);
+  return NextResponse.json({ ...render, research, creativeBatches });
 }
