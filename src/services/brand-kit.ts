@@ -6,6 +6,7 @@
 import { SERVICE_CATEGORIES } from "@/lib/validations";
 import { prisma } from "@/lib/db";
 import { archiveBrandAssets, archiveInBackground } from "@/services/artifacts/archive";
+import type { BrandAsset, BrandKit, Project } from "@/generated/prisma/client";
 
 export interface BrandColor {
   name?: string;
@@ -165,7 +166,7 @@ export async function getBrandTruthForPrompts(projectId: string): Promise<string
   const [kit, project] = await Promise.all([
     prisma.brandKit.findUnique({
       where: { projectId },
-      include: { assets: { select: { kind: true, variant: true, url: true } } },
+      include: { assets: { select: { kind: true, variant: true } } },
     }),
     prisma.project.findUnique({
       where: { id: projectId },
@@ -173,6 +174,14 @@ export async function getBrandTruthForPrompts(projectId: string): Promise<string
     }),
   ]);
 
+  return renderBrandTruthForPrompts(kit, project);
+}
+
+/** Reuse rows already loaded by a caller; asset URLs are never needed in prompt text. */
+export function renderBrandTruthForPrompts(
+  kit: (BrandKit & { assets?: Pick<BrandAsset, "kind" | "variant">[] }) | null,
+  project: Pick<Project, "brandName" | "productName" | "productPageTitle" | "productUrl"> | null
+): string {
   if (!project) return "";
 
   const lines: string[] = [];

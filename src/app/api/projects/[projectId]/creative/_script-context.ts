@@ -4,7 +4,7 @@ import { renderLearningBlock } from "@/services/performance/learn";
 import { timingEvidence, type ReferenceAd, type TeardownTiming, type TimingEvidence } from "@/lib/attention-blueprint";
 import { prisma } from "@/lib/db";
 import { archiveInBackground, archiveScript } from "@/services/artifacts/archive";
-import { getBrandTruthForPrompts, type BrandCtaOption } from "@/services/brand-kit";
+import { renderBrandTruthForPrompts, type BrandCtaOption } from "@/services/brand-kit";
 import type {
   ScriptInput,
   DeepAnalysisBlocks,
@@ -110,7 +110,7 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) return null;
 
-  const [sellingPoints, campaignSel, deepAnal, audienceData, brandKit, brandTruth] =
+  const [sellingPoints, campaignSel, deepAnal, audienceData, brandKit] =
     await Promise.all([
       // Points the user sent to script context lead; the strongest others fill
       // the remaining slots.
@@ -122,9 +122,12 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
       prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null),
       prisma.deepAnalysis.findUnique({ where: { projectId } }).catch(() => null),
       prisma.audienceProfile.findUnique({ where: { projectId } }).catch(() => null),
-      prisma.brandKit.findUnique({ where: { projectId } }).catch(() => null),
-      getBrandTruthForPrompts(projectId).catch(() => ""),
+      prisma.brandKit.findUnique({
+        where: { projectId },
+        include: { assets: { select: { kind: true, variant: true } } },
+      }).catch(() => null),
     ]);
+  const brandTruth = renderBrandTruthForPrompts(brandKit, project);
 
   const platformId = (campaignSel?.platform as string | null) || undefined;
 
