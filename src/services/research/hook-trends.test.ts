@@ -229,6 +229,8 @@ describe("hookTrendReport", () => {
     expect(r.ourPlan?.hookIds).toEqual(["H16", "H10"]);
     expect(r.recommendations.some((x) => /plan/i.test(x) && /H16/.test(x))).toBe(true);
     expect(r.coverage.llmCalls).toBe(0);
+    expect(r.coverage.latestEvidenceAt).not.toBeNull();
+    expect(new Date(r.coverage.latestEvidenceAt!).getTime()).toBeLessThanOrEqual(NOW.getTime());
   });
 
   it("all platforms: one slice per platform plus the overall one", async () => {
@@ -241,6 +243,7 @@ describe("hookTrendReport", () => {
   it("no ads: an empty report that says to run research", () => {
     const r = buildHookTrendReport([], { projectId: "p", category: "electronics", platform: "all", now: NOW, unclassified: 0, llmCalls: 0 });
     expect(r.rising).toEqual([]);
+    expect(r.coverage.latestEvidenceAt).toBeNull();
     expect(r.recommendations[0]).toMatch(/research/i);
   });
 

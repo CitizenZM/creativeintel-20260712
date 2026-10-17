@@ -27,6 +27,7 @@ import { isShotType } from "./consistency/thresholds";
 import { finishDirectedMotion, finishDirectedStill } from "./shot-director";
 import { guardJobCall, guardQc, releaseJobReservations, settleClipOnPoll, type RunRef } from "@/services/ops/spend";
 import { isBudgetExceeded } from "@/services/ops/budget-guard";
+import { currentAiTrace, withAiTrace } from "@/services/ai/usage-context";
 
 export type TickResult = "idle" | "running" | "done" | "failed";
 
@@ -238,7 +239,7 @@ async function applyTaskResult(run: RunRef, job: LibtvJob, result: TaskResult, c
   }
 }
 
-export async function tickRun(
+async function tickRunInner(
   adapter: EngineAdapter,
   runId: string,
   opts: { remainingMs?: number; reserveMs?: number } = {}
@@ -595,6 +596,14 @@ export async function tickRun(
     await runFailed(runId, `Assembly failed: ${errorText(err)}`);
     return "failed";
   }
+}
+
+export function tickRun(
+  adapter: EngineAdapter,
+  runId: string,
+  opts: { remainingMs?: number; reserveMs?: number } = {}
+): Promise<TickResult> {
+  return withAiTrace({ traceId: currentAiTrace()?.traceId ?? runId, runId, stage: "render" }, () => tickRunInner(adapter, runId, opts));
 }
 
 /**

@@ -6,6 +6,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { monthStartUtc, summarizeUsage, type UsageGroup, type UsageSummary } from "./usage-core";
+import { currentAiTrace } from "./usage-context";
 
 export interface AiUsageEntry {
   provider: string;
@@ -20,6 +21,9 @@ export interface AiUsageEntry {
   /** null/undefined = price not known. Free engines log 0. */
   costUsd?: number | null;
   projectId?: string | null;
+  traceId?: string;
+  stage?: string;
+  runId?: string;
 }
 
 let _warned = false;
@@ -32,25 +36,37 @@ export function captureAiUsage<T>(entries: AiUsageEntry[], fn: () => Promise<T>)
 }
 
 export async function logAiUsage(entry: AiUsageEntry): Promise<void> {
-  _sink.getStore()?.push(entry);
+  const trace = currentAiTrace();
+  const traced = { ...trace, ...entry };
+  _sink.getStore()?.push(traced);
   if (process.env.VITEST) return;
   try {
     const { prisma } = await import("@/lib/db");
-    await prisma.aiUsage.create({
-        data: {
-          provider: entry.provider.slice(0, 80),
-          model: entry.model.slice(0, 120),
-          capability: entry.capability,
-          requestId: entry.requestId?.slice(0, 160) ?? null,
-          latencyMs: entry.latencyMs == null ? null : Math.max(0, Math.round(entry.latencyMs)),
-          inputTokens: Math.max(0, Math.round(entry.inputTokens ?? 0)),
-          outputTokens: Math.max(0, Math.round(entry.outputTokens ?? 0)),
-          images: Math.max(0, Math.round(entry.images ?? 0)),
-          videoSeconds: Math.max(0, entry.videoSeconds ?? 0),
-          costUsd: entry.costUsd ?? null,
-          projectId: entry.projectId ?? null,
-        },
-      });
+    const legacyData = {
+      provider: traced.provider.slice(0, 80),
+      model: traced.model.slice(0, 120),
+      capability: traced.capability,
+      requestId: traced.requestId?.slice(0, 160) ?? null,
+      latencyMs: traced.latencyMs == null ? null : Math.max(0, Math.round(traced.latencyMs)),
+      inputTokens: Math.max(0, Math.round(traced.inputTokens ?? 0)),
+      outputTokens: Math.max(0, Math.round(traced.outputTokens ?? 0)),
+      images: Math.max(0, Math.round(traced.images ?? 0)),
+      videoSeconds: Math.max(0, traced.videoSeconds ?? 0),
+      costUsd: traced.costUsd ?? null,
+      projectId: traced.projectId ?? null,
+    };
+    try {
+      await prisma.aiUsage.create({ data: {
+        ...legacyData,
+        traceId: traced.traceId?.slice(0, 120) ?? null,
+        stage: traced.stage?.slice(0, 80) ?? null,
+        runId: traced.runId?.slice(0, 120) ?? null,
+      }, select: { id: true } });
+    } catch (err) {
+      // Preview deployments can run before the additive trace migration.
+      if ((err as { code?: string }).code !== "P2022") throw err;
+      await prisma.aiUsage.create({ data: legacyData, select: { id: true } });
+    }
   } catch (err) {
     if (_warned) return;
     _warned = true;

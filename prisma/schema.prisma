@@ -1187,10 +1187,15 @@ model AiUsage {
   videoSeconds Float    @default(0)
   costUsd      Float?
   projectId    String?
+  traceId      String?
+  stage        String?
+  runId        String?
   createdAt    DateTime @default(now())
 
   @@index([createdAt])
   @@index([projectId, createdAt])
+  @@index([traceId, createdAt])
+  @@index([runId, createdAt])
 }
 
 /// Real results of ads we made (Meta / TikTok exports or API), matched to our

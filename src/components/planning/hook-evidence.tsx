@@ -10,7 +10,7 @@ type Evidence = {
   generatedAt: string;
   window: { from: string; to: string; days: number };
   platform: TrendPlatform;
-  coverage: { ads: number; classified: number; platformAds: number; byMethod: { rules: number; llm: number; fallback: number } };
+  coverage: { ads: number; classified: number; platformAds: number; latestEvidenceAt: string | null; byMethod: { rules: number; llm: number; fallback: number } };
   rising: ReportHook[];
   saturated: ReportHook[];
   longevityLeaders: ReportHook[];
@@ -56,6 +56,9 @@ export function HookEvidence({ projectId, platform, onPin }: { projectId: string
   }
 
   const current = source === loadedPlatform ? evidence : null;
+  const evidenceAgeDays = current?.coverage.latestEvidenceAt
+    ? Math.max(0, Math.floor((new Date(current.generatedAt).getTime() - new Date(current.coverage.latestEvidenceAt).getTime()) / 86_400_000))
+    : null;
   const sourceLink = source ? SOURCE_LINKS[source] : null;
   return (
     <section className="mt-4 rounded-lg border p-3 text-xs" aria-label="Research-backed hook selector">
@@ -72,8 +75,9 @@ export function HookEvidence({ projectId, platform, onPin }: { projectId: string
       {current && (
         <div className="mt-3 space-y-3">
           <p className="text-muted-foreground">
-            {current.coverage.platformAds} {source} ads in this window · {current.coverage.classified} classified across the category · {current.window.days}-day window · refreshed {new Date(current.generatedAt).toLocaleString()}
+            {current.coverage.platformAds} {source} ads in this window · {current.coverage.classified} classified across the category · {current.window.days}-day window · latest saved ad observed {current.coverage.latestEvidenceAt ? new Date(current.coverage.latestEvidenceAt).toLocaleDateString() : "unknown"} · analysis run {new Date(current.generatedAt).toLocaleString()}
           </p>
+          {evidenceAgeDays !== null && evidenceAgeDays > 14 && <p className="rounded-md bg-amber-500/10 p-2">The newest saved {source} ad was observed {evidenceAgeDays} days before this analysis. Review current ads before treating these hooks as recent.</p>}
           {current.coverage.platformAds < 6 && <p className="rounded-md bg-amber-500/10 p-2">Small platform sample. Use these as ideas to test, not proof of performance. Add current ads from the platform source below.</p>}
           {current.rising.length === 0 && <p className="text-muted-foreground">No rising pattern detected in this window. Use the library above and test the first frame against the same body.</p>}
           {current.rising.length > 0 && <div><p className="mb-1 font-medium">Candidates to test</p><div className="grid gap-2 md:grid-cols-2">{current.rising.map((hook) => (

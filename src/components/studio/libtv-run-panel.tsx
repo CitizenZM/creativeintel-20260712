@@ -27,6 +27,7 @@ import type {
 } from "./types";
 import { isPlayable, isRunActive } from "./types";
 import { LibtvBalance } from "./libtv-balance";
+import { RunTracePanel } from "./run-trace-panel";
 
 const POLL_MS = 5000;
 
@@ -700,6 +701,8 @@ export function LibtvRunPanel({
               </ul>
             </div>
           )}
+
+          {activeRun.status === "completed" && <RunTracePanel key={activeRun.id} projectId={projectId} runId={activeRun.id} />}
 
           <div className="flex flex-wrap gap-2">
             {activeRun.canvasUuid && (

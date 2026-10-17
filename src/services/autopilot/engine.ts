@@ -27,6 +27,7 @@ import {
   type StepFn,
   type StepOutcome,
 } from "./types";
+import { withAiTrace } from "@/services/ai/usage-context";
 
 export const MAX_STEP_ATTEMPTS = 3;
 /** Serverless tick: Vercel functions here run up to 300 s. */
@@ -194,7 +195,7 @@ export async function tickAutopilot(id: string, deps: TickDeps): Promise<Autopil
 
       let out: StepOutcome;
       try {
-        out = await fn(ctx);
+        out = await withAiTrace({ traceId: id, stage: step }, () => fn(ctx));
       } catch (err) {
         const attempts = { ...(state.attempts ?? {}), [step]: (state.attempts?.[step] ?? 0) + 1 };
         const fatal = err instanceof AutopilotFatalError;
