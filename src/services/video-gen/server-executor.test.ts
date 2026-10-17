@@ -507,6 +507,14 @@ describe("consistency gate (keyframes edited from references)", () => {
     expect(settingsOf("k1").consistency).toMatchObject({ score: 0.62, pass: false, bestOf: true, attempts: 3, tries: [{ score: 0.4 }, { score: 0.62 }, { score: 0.5 }] });
   });
 
+  it("marks a keyframe as unreviewed when vision is unavailable", async () => {
+    seedGated();
+    consistency.scoreFrame.mockResolvedValueOnce({ ...verdict(0.5, true), reviewed: false, reasons: ["vision review unavailable"] });
+    await tickRun(countingAdapter(), "run1");
+    expect(statusOf("k1")).toBe("completed");
+    expect(settingsOf("k1")).toMatchObject({ qcOk: null, qcIssues: ["vision review unavailable"], consistency: { reviewed: false } });
+  });
+
   it("repairs a best attempt that still has a major product defect from the packshot", async () => {
     seedGated();
     const box = [0.2, 0.5, 0.55, 0.8];

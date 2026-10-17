@@ -362,8 +362,8 @@ export async function tickRun(
       data: {
         settings: {
           ...rest,
-          qcOk: d.chosen.pass || (repaired && repair!.pass),
-          qcIssues: d.chosen.defects.slice(0, 5),
+          qcOk: result.reviewed ? d.chosen.pass || (repaired && repair!.pass) : null,
+          qcIssues: result.reviewed ? d.chosen.defects.slice(0, 5) : result.reasons.slice(0, 5),
           consistency: consistencyRecord(result, d, attempts, repair ? { method: repair.method, reason: repair.reason, score: repair.score, pass: repair.pass, url: repair.url } : null),
           ...(repair ? { repair } : {}),
         } as never,
