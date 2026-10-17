@@ -227,10 +227,9 @@ describe("writeCampaignScripts", () => {
 
   it("retains planned copy when every selling point has matched evidence", () => {
     const verified = structuredClone(brief);
-    verified.sellingPoints = verified.sellingPoints.map((point) => ({
-      ...point,
-      sourceEvidence: [{ type: "page_copy", quote: "Verified product fact", verified: true }],
-    }));
+    for (const point of verified.sellingPoints) {
+      point.sourceEvidence = [{ type: "page_copy", quote: "Verified product fact", verified: true }];
+    }
     const raw = JSON.parse(campaignCopyPrompts(scaffold, verified, { goal: "promo", promo, runDate: BF }).user);
     expect(raw.hooks[0].text).toBe(scaffold.hookVariants[0].openingText);
     expect(raw.beats[0].vo).toBe(scaffold.beats[0].vo);
