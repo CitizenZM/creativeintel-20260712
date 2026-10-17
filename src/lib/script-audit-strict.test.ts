@@ -25,6 +25,12 @@ describe("claims audit strictness", () => {
     expect(auditScriptText("12 oz serving", { sourceText: "mix with 12–16 oz water" }).ok).toBe(true);
   });
 
+  it("ignores digits in names and coupon codes without treating them as evidence", () => {
+    expect(auditScriptText("Use SAVE20 on NXTPAPER14 or Veo3", {}).ok).toBe(true);
+    expect(auditScriptText("20 verified reviews", { sourceText: "Code SAVE20" }).ok).toBe(false);
+    expect(auditScriptText("25g protein", { sourceText: "25g protein" }).ok).toBe(true);
+  });
+
   it("lets bold wording through by default but still catches brand-forbidden phrases and invented numbers", () => {
     const a = auditScriptText(text, { claimsForbidden: ["brightest"], sourceText: "Black Friday 15% off" });
     const reasons = a.violations.map((v) => v.reason).join(" | ");

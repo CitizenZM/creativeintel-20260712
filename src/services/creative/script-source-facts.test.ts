@@ -27,6 +27,7 @@ describe("scriptSourceFacts", () => {
     expect(facts).not.toContain("98");
     expect(facts).not.toContain("99");
     expect(facts).not.toContain("7 days");
+    expect(facts).not.toContain("SAVE20");
     expect(auditScriptText("98% effective", { sourceText: facts }).ok).toBe(false);
     expect(auditScriptText("20% off", { sourceText: facts }).ok).toBe(true);
   });

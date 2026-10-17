@@ -7,7 +7,7 @@ export function scriptSourceFacts(brief: ProductBrief | null | undefined, promo:
     (point.sourceEvidence ?? []).filter((evidence) => evidence.verified === true).map((evidence) => evidence.quote)
   );
   if (promo) {
-    for (const value of [promo.price, promo.comparePrice, promo.code, promo.deadline]) {
+    for (const value of [promo.price, promo.comparePrice, promo.deadline]) {
       if (value != null && String(value).trim()) facts.push(String(value));
     }
     if (promo.pct != null) facts.push(`${promo.pct}%`);

@@ -484,6 +484,8 @@ export function extractNumericClaims(text: string): NumericClaim[] {
     const suffix = text.slice(end);
     const unit = suffix.match(/^\s?(kg|mg|g|oz|ml|l)\b/i)?.[0] ?? "";
     const rangeUnit = unit ? "" : suffix.match(/^\s*[–-]\s*\d[\d,]*(?:\.\d+)?\s?(kg|mg|g|oz|ml|l)\b/i)?.[1] ?? "";
+    // Coupon codes and model identifiers are names, not numeric assertions.
+    if (/\p{L}/u.test(text[start - 1] ?? "") || (!unit && !rangeUnit && /\p{L}/u.test(text[end] ?? ""))) continue;
     claim(start, end + unit.length, m[0] + (unit || rangeUnit), parseNumericLiteral(m[0]));
   }
 
