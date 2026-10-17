@@ -389,7 +389,7 @@ function parseNumericLiteral(raw: string): number {
  */
 const DASH_CLASS = "\\s\\-\\u2010-\\u2015"; // ascii space/hyphen + unicode hyphen..horizontal-bar (incl. en/em dash)
 const STRUCTURAL_UNIT_AFTER = new RegExp(
-  `^[${DASH_CLASS}]*(?:\\d[\\d,]*(?:\\.\\d+)?[${DASH_CLASS}]*)?(seconds?|secs?|s|mm|cm|ml|oz|fps|year[-\\s]?olds?|years?\\s+old|yo)\\b`,
+  `^[${DASH_CLASS}]*(?:\\d[\\d,]*(?:\\.\\d+)?[${DASH_CLASS}]*)?(seconds?|secs?|s|mm|cm|fps|year[-\\s]?olds?|years?\\s+old|yo)\\b`,
   "i"
 );
 const STRUCTURAL_DAY_AFTER = new RegExp(`^[${DASH_CLASS}]*days?\\b`, "i");
@@ -481,7 +481,10 @@ export function extractNumericClaims(text: string): NumericClaim[] {
     const end = start + m[0].length;
     if (overlaps(start, end)) continue;
     if (isStructuralNumber(text, start, end)) continue;
-    claim(start, end, m[0], parseNumericLiteral(m[0]));
+    const suffix = text.slice(end);
+    const unit = suffix.match(/^\s?(kg|mg|g|oz|ml|l)\b/i)?.[0] ?? "";
+    const rangeUnit = unit ? "" : suffix.match(/^\s*[–-]\s*\d[\d,]*(?:\.\d+)?\s?(kg|mg|g|oz|ml|l)\b/i)?.[1] ?? "";
+    claim(start, end + unit.length, m[0] + (unit || rangeUnit), parseNumericLiteral(m[0]));
   }
 
   return claims;
@@ -491,10 +494,13 @@ export function extractNumericClaims(text: string): NumericClaim[] {
 function numberOccursIn(claim: NumericClaim, sourceText: string): boolean {
   if (!sourceText) return false;
   const isPercent = /%|percent\b/i.test(claim.raw);
+  const measureUnit = claim.raw.match(/(?:kg|mg|g|oz|ml|l)\b$/i)?.[0].toLowerCase();
   if (extractNumericClaims(sourceText).some((source) =>
-    source.value === claim.value && (!isPercent || /%|percent\b/i.test(source.raw))
+    source.value === claim.value
+    && (!isPercent || /%|percent\b/i.test(source.raw))
+    && (!measureUnit || source.raw.match(/(?:kg|mg|g|oz|ml|l)\b$/i)?.[0].toLowerCase() === measureUnit)
   )) return true;
-  if (isPercent) return false;
+  if (isPercent || measureUnit) return false;
   const spelled = Object.entries(NUMBER_WORDS).find(([, n]) => n === claim.value)?.[0];
   return spelled ? new RegExp(`\\b${spelled}\\b`, "i").test(sourceText) : false;
 }

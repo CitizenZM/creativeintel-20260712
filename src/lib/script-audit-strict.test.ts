@@ -19,6 +19,12 @@ describe("claims audit strictness", () => {
     expect(auditScriptText("20% off", { sourceText: "Save twenty percent" }).ok).toBe(true);
   });
 
+  it("requires the same product measure and unit in the approved source", () => {
+    expect(auditScriptText("12 oz serving", { sourceText: "12 ml sample" }).ok).toBe(false);
+    expect(auditScriptText("25g protein", { sourceText: "25mg caffeine" }).ok).toBe(false);
+    expect(auditScriptText("12 oz serving", { sourceText: "mix with 12–16 oz water" }).ok).toBe(true);
+  });
+
   it("lets bold wording through by default but still catches brand-forbidden phrases and invented numbers", () => {
     const a = auditScriptText(text, { claimsForbidden: ["brightest"], sourceText: "Black Friday 15% off" });
     const reasons = a.violations.map((v) => v.reason).join(" | ");
