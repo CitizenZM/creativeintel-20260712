@@ -138,7 +138,7 @@ ${hookFormulaNamesBlock}
 
 STRUCTURAL RULES (non-negotiable):
 - The script has exactly three labelled sections: hook{}, body[] and cta{}.
-- EVERY body beat must name ONE selling point (sellingPoint), state HOW that selling point is expressed on screen (howExpressed — one of: ${HOW_EXPRESSED_MODES.join(" / ")}), and specify the shot that carries it (shot: shot size + lens + camera movement).
+- EVERY body beat must name ONE verified selling point when supplied; otherwise name a visible product action in sellingPoint without inventing a claim. State HOW it appears on screen (howExpressed — one of: ${HOW_EXPRESSED_MODES.join(" / ")}), and specify its shot (shot size + lens + camera movement).
 - A beat that only asserts a benefit in voiceover without a visual mechanism is invalid. If howExpressed is "VO claim + evidence" the beat must still carry the evidence in the proof field.
 - Body beats must move through the template's named beats, in order.
 - The hook must apply the template's hook style AND the platform playbook's opening-frame requirements, and must name one platform hook formula.
@@ -167,7 +167,7 @@ OUTPUT JSON (no markdown, no extra keys):
   "body": [
     {
       "beat": "the template beat this covers",
-      "sellingPoint": "ONE selling point, verbatim from the list supplied",
+      "sellingPoint": "one verified selling point, or a visible product action when none is supplied",
       "howExpressed": "${HOW_EXPRESSED_MODES.join("|")}",
       "shot": "shot size + focal length + camera movement",
       "startSec": number,
@@ -249,7 +249,7 @@ OUTPUT JSON (no markdown, no extra keys):
 - cta.urgency must be an empty string unless the approved offer text itself states a deadline — never add urgency on your own initiative.`
       : "";
 
-  const numericClaimsBlock = `\nNUMERIC CLAIMS (hard constraint, applies even when no claims/CTA data is supplied above): any number, percentage, count, "X in Y" / "X out of Y" ratio, review count, or star rating you write anywhere (hook, body, proof, CTA) MUST appear verbatim — or as the exact same number — in BRAND TRUTH, the PROJECT BRIEF, the ALLOWED CLAIMS list, the CREATIVE BRIEF FROM RESEARCH (its selling points, facts and campaign plan), or the approved offer text below. Never invent, round, estimate, or infer a statistic from category knowledge or "common sense" ("most women notice X by 40" is not license to say "84%"). If no sourced stat exists for a beat that calls for one, write a qualitative hook instead (e.g. "Most women over forty notice lip lines first" rather than "Eighty-four percent of women over forty…") and set hook.hookFormula to note "no sourced stat available".`;
+  const numericClaimsBlock = `\nNUMERIC CLAIMS: Spoken or on-screen numbers, percentages, product quantities, ratings and counts need the same value and unit in BRAND TRUTH, PROJECT BRIEF, ALLOWED CLAIMS, a verified product quote in the creative brief, or the approved offer. Draft campaign-plan copy is not evidence. If no such source exists, use a qualitative product description. Coupon codes and model identifiers are names, not statistics.`;
 
   const ctaBlock =
     input.ctaPool?.length || input.offer || input.landingUrl
@@ -348,8 +348,7 @@ ${brandTruthBlock}
 ${complianceBlock}
 ${numericClaimsBlock}
 
-KEY SELLING POINTS (each body beat must name exactly one of these, verbatim):
-${input.sellingPoints.map((p, i) => `${i + 1}. ${p}`).join("\n")}
+${input.sellingPoints.length ? `VERIFIED SELLING POINTS (use one per relevant body beat):\n${input.sellingPoints.map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "NO VERIFIED SELLING POINTS: describe visible product actions; do not invent product claims."}
 ${ctaBlock}
 ${deepBlocks}
 ${teardownBlock}
