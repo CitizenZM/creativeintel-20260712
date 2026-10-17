@@ -55,10 +55,10 @@ export function briefBlock(brief: ProductBrief, maxPoints = 3, opts: BlockOption
   const strict = !!opts.strictCompliance;
   const pts = brief.sellingPoints.slice(0, maxPoints);
   const point = (p: (typeof pts)[number], i: number) => {
-    const base = `${i + 1}. ${clip(p.claim, 90)} → ${clip(p.benefit, 90)} | proof shot: ${clip(p.proofVisual.shot, 140)}${p.proofVisual.overlayText ? ` | overlay "${clip(p.proofVisual.overlayText, 40)}"` : ""}`;
-    if (strict) return `${base}${p.compliance?.safeWording ? ` | safe wording: ${clip(p.compliance.safeWording, 100)}` : ""}${p.compliance?.requiredDisclosure ? ` | disclosure: ${clip(p.compliance.requiredDisclosure, 100)}` : ""}`;
     const fact = p.sourceEvidence?.find((source) => source.verified === true)?.quote;
-    return `${base}${fact ? ` | fact: "${clip(fact, 90)}"` : ""}`;
+    const base = `${i + 1}. ${clip(p.claim, 90)} → ${clip(p.benefit, 90)} | proof shot: ${clip(p.proofVisual.shot, 140)}${p.proofVisual.overlayText ? ` | overlay "${clip(p.proofVisual.overlayText, 40)}"` : ""}`;
+    if (strict) return `${base}${p.compliance?.safeWording ? ` | safe wording: ${clip(p.compliance.safeWording, 100)}` : ""}${p.compliance?.requiredDisclosure ? ` | disclosure: ${clip(p.compliance.requiredDisclosure, 100)}` : ""}${fact ? "" : " | UNVERIFIED: shot concept only; do not state as product fact"}`;
+    return `${base}${fact ? ` | fact: "${clip(fact, 90)}"` : " | UNVERIFIED: shot concept only; do not state as product fact"}`;
   };
   const lines = [
     `BIG IDEA: ${clip(brief.bigIdea.proposition, 120)}${brief.bigIdea.alternates.length ? ` (alternates: ${brief.bigIdea.alternates.slice(0, 3).map((a) => clip(a, 80)).join(" | ")})` : ""}`,

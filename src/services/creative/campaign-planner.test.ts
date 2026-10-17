@@ -219,7 +219,8 @@ describe("writeCampaignScripts", () => {
 
   it("does not pass unverified legacy quotes as evidence to campaign copy", () => {
     const raw = JSON.parse(campaignCopyPrompts(scaffold, brief, { goal: "promo", promo, runDate: BF }).user);
-    expect(raw.facts.every((fact: { evidence: string[] }) => fact.evidence.length === 0)).toBe(true);
+    expect(raw.verifiedFacts).toEqual([]);
+    expect(raw.facts).toBeUndefined();
   });
 });
 

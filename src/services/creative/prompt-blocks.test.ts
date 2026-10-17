@@ -51,7 +51,9 @@ describe("prompt blocks", () => {
   it("does not pass legacy unverified source quotes to the script writer as facts", () => {
     const legacy = structuredClone(brief);
     legacy.sellingPoints[0].sourceEvidence[0].verified = undefined;
-    expect(briefBlock(legacy)).not.toContain('fact: "up to 3,000 nits"');
+    const block = briefBlock(legacy);
+    expect(block).not.toContain('fact: "up to 3,000 nits"');
+    expect(block).toContain("UNVERIFIED: shot concept only");
   });
 
   it("still gives platform rules without a brief", () => {

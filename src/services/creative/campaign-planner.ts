@@ -531,14 +531,14 @@ RULES
 - Keep every beat's index, timing and purpose. VO fits its words budget (2.5 words per second); lines read as one script in order. The CTA beat is the last second: offer + action, matching the button.
 - ${opts.goal === "promo" ? `First 3 s = the sale pitch: each hook opening asks the occasion/need question, the pitch beat lands the offer ("${offerLine(facts)}"). Example: "Want a New Year gift?" → "20% OFF this Black Friday".` : "The hook states the value proposition by the platform hook second."}
 - Write a distinct, concrete opening for EVERY hook variant, following its recipe; the body is shared. No greetings or filler. The first visual must show the supplied product or a specific outcome.
-- ${strict ? "Stay inside each claim's safe wording and keep required disclosures." : "Sell hard: the boldest, most persuasive wording the FACTS support — superlatives, urgency and direct comparisons are welcome when a fact carries them."} Only numbers that appear in FACTS or OFFER.
+- ${strict ? "Stay inside each verified claim's safe wording and keep required disclosures." : "Sell hard: the boldest, most persuasive wording VERIFIED FACTS support — superlatives, urgency and direct comparisons are welcome when a verified fact carries them."} Only product claims supported by VERIFIED FACTS; only numbers that appear in VERIFIED FACTS or OFFER. Unverified angles are shot ideas, not copy claims.
 - Visuals keep the product in frame; every zoom lands on the product. On-screen text never repeats the VO word for word.
 ${playbookSlice({ category: brief.category, platform: scaffold.platform, goal: opts.goal, maxWords: 180 })}`;
   const user = JSON.stringify({
     product: brief.product,
     bigIdea: brief.bigIdea?.proposition,
     audience: brief.audience?.primary,
-    facts: brief.sellingPoints.slice(0, 6).map((p) => ({ id: p.id, claim: p.claim, benefit: p.benefit, evidence: p.sourceEvidence?.filter((e) => e.verified === true).slice(0, 1).map((e) => clip(e.quote, 100)) })),
+    verifiedFacts: brief.sellingPoints.slice(0, 6).filter((p) => p.sourceEvidence?.some((e) => e.verified === true)).map((p) => ({ id: p.id, claim: p.claim, benefit: p.benefit, evidence: p.sourceEvidence?.filter((e) => e.verified === true).slice(0, 1).map((e) => clip(e.quote, 100)) })),
     objection: brief.objections?.[0],
     offer: { ...facts, line: offerLine(facts), endCard: scaffold.endCard },
     platform: { id: scaffold.platform, durationSec: scaffold.durationSec, voice: scaffold.voice, captions: scaffold.captionStyle, pacing: scaffold.pacing },
