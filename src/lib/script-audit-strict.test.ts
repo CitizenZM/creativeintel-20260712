@@ -14,6 +14,11 @@ describe("claims audit strictness", () => {
     );
   });
 
+  it("does not treat a price or a code number as evidence for a percentage", () => {
+    expect(auditScriptText("20% off", { sourceText: "$20; code SAVE20" }).ok).toBe(false);
+    expect(auditScriptText("20% off", { sourceText: "Save twenty percent" }).ok).toBe(true);
+  });
+
   it("lets bold wording through by default but still catches brand-forbidden phrases and invented numbers", () => {
     const a = auditScriptText(text, { claimsForbidden: ["brightest"], sourceText: "Black Friday 15% off" });
     const reasons = a.violations.map((v) => v.reason).join(" | ");

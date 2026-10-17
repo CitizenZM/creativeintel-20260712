@@ -354,6 +354,11 @@ const NUMBER_WORDS: Record<string, number> = {
   sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
   twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
 };
+const NUMBER_WORD_PATTERN = Object.keys(NUMBER_WORDS).join("|");
+const SPELLED_CLAIM_REGEX = new RegExp(
+  `\\b((?:${NUMBER_WORD_PATTERN})(?:[\\s-](?:one|two|three|four|five|six|seven|eight|nine))?)\\s+(?:percent\\b|%(?!\\w)|in\\b|out of\\b)`,
+  "gi"
+);
 
 /** "eighty-four" -> 84, "twelve" -> 12. Only covers one..ninety-nine. */
 function spelledToNumber(phrase: string): number | null {
@@ -462,7 +467,7 @@ export function extractNumericClaims(text: string): NumericClaim[] {
   }
 
   // Spelled-out numbers followed by percent/%/in/out of
-  for (const m of text.matchAll(/\b([a-z]+(?:[\s-][a-z]+)?)\s+(percent|%|in|out of)\b/gi)) {
+  for (const m of text.matchAll(SPELLED_CLAIM_REGEX)) {
     const start = m.index ?? 0;
     const end = start + m[0].length;
     if (overlaps(start, end)) continue;
@@ -482,11 +487,15 @@ export function extractNumericClaims(text: string): NumericClaim[] {
   return claims;
 }
 
-/** Does `value` occur anywhere in `sourceText`, as a number (digits or spelled-out)? */
-function numberOccursIn(value: number, sourceText: string): boolean {
+/** A percentage must be supported by a percentage, not an unrelated price or product count. */
+function numberOccursIn(claim: NumericClaim, sourceText: string): boolean {
   if (!sourceText) return false;
-  if (extractNumericClaims(sourceText).some((c) => c.value === value)) return true;
-  const spelled = Object.entries(NUMBER_WORDS).find(([, n]) => n === value)?.[0];
+  const isPercent = /%|percent\b/i.test(claim.raw);
+  if (extractNumericClaims(sourceText).some((source) =>
+    source.value === claim.value && (!isPercent || /%|percent\b/i.test(source.raw))
+  )) return true;
+  if (isPercent) return false;
+  const spelled = Object.entries(NUMBER_WORDS).find(([, n]) => n === claim.value)?.[0];
   return spelled ? new RegExp(`\\b${spelled}\\b`, "i").test(sourceText) : false;
 }
 
@@ -515,7 +524,7 @@ export function auditScriptText(text: string, opts: ScriptClaimsAuditInput): Scr
     violations.push({ path: "body", text: hit, reason: `absolute/curative claim: "${hit}"` });
   }
   for (const nc of extractNumericClaims(text)) {
-    if (!numberOccursIn(nc.value, sourceText)) {
+    if (!numberOccursIn(nc, sourceText)) {
       violations.push({
         path: "body",
         text: nc.raw,
@@ -568,7 +577,7 @@ export function auditScriptClaims(script: ScriptV2, opts: ScriptClaimsAuditInput
     // on-screen fields where they would actually be a claim.
     if (field.path !== "body (rendered)") {
       for (const nc of extractNumericClaims(field.text)) {
-        if (!numberOccursIn(nc.value, sourceText)) {
+        if (!numberOccursIn(nc, sourceText)) {
           violations.push({
             path: field.path,
             text: nc.raw,

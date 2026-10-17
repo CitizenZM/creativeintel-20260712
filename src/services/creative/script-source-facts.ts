@@ -7,11 +7,12 @@ export function scriptSourceFacts(brief: ProductBrief | null | undefined, promo:
     (point.sourceEvidence ?? []).filter((evidence) => evidence.verified === true).map((evidence) => evidence.quote)
   );
   if (promo) {
-    for (const value of [promo.pct, promo.price, promo.comparePrice, promo.code, promo.deadline]) {
+    for (const value of [promo.price, promo.comparePrice, promo.code, promo.deadline]) {
       if (value != null && String(value).trim()) facts.push(String(value));
     }
+    if (promo.pct != null) facts.push(`${promo.pct}%`);
     if (!promo.pct && promo.price && promo.comparePrice && promo.comparePrice > promo.price) {
-      facts.push(String(Math.round((1 - promo.price / promo.comparePrice) * 100)));
+      facts.push(`${Math.round((1 - promo.price / promo.comparePrice) * 100)}%`);
     }
   }
   return facts.filter((fact) => fact.trim()).join("\n").slice(0, 6000);
