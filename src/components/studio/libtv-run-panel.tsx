@@ -28,6 +28,8 @@ import type {
 import { isPlayable, isRunActive } from "./types";
 import { LibtvBalance } from "./libtv-balance";
 import { RunTracePanel } from "./run-trace-panel";
+import { clipEta } from "./run-eta";
+import { manualReviewJobs } from "@/services/video-gen/manual-review";
 
 const POLL_MS = 5000;
 
@@ -93,8 +95,10 @@ export function LibtvRunPanel({
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState<string[]>([]);
   const [reviewedMasterUrl, setReviewedMasterUrl] = useState<string | null>(null);
+  const [reviewedJobIds, setReviewedJobIds] = useState<Set<string>>(new Set());
 
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const refreshInFlight = useRef(false);
 
   // Start from the engine picked in Settings → AI engines, once, when the
   // catalogue arrives; after that the user's own pick wins.
@@ -197,10 +201,15 @@ export function LibtvRunPanel({
     }
     if (pollTimer.current) return;
     const runId = activeRun.id;
-    pollTimer.current = setInterval(() => {
-      refreshRun(runId).catch(() => null);
-    }, POLL_MS);
+    const poll = () => {
+      if (document.visibilityState !== "visible" || refreshInFlight.current) return;
+      refreshInFlight.current = true;
+      refreshRun(runId).catch(() => null).finally(() => { refreshInFlight.current = false; });
+    };
+    pollTimer.current = setInterval(poll, POLL_MS);
+    document.addEventListener("visibilitychange", poll);
     return () => {
+      document.removeEventListener("visibilitychange", poll);
       if (pollTimer.current) {
         clearInterval(pollTimer.current);
         pollTimer.current = null;
@@ -302,12 +311,17 @@ export function LibtvRunPanel({
       setError("Review the final video and confirm its brand and packaging before delivery.");
       return;
     }
+    if (!activeRun.isFinal && manualReviewJobs(activeRun.jobs).some((job) => !reviewedJobIds.has(job.id))) {
+      setError("Review each flagged keyframe and clip before delivery.");
+      return;
+    }
     setBusy("final");
     setError(null);
     try {
       const data = await post(`/api/projects/${projectId}/studio/libtv-runs/${activeRun.id}/final`, {
         final: !activeRun.isFinal,
         brandApproved: !activeRun.isFinal && reviewedMasterUrl === activeRun.masterMp4Url,
+        reviewedJobIds: [...reviewedJobIds],
       });
       onRunsChanged(data.run as LibtvRunView);
     } catch (err) {
@@ -343,12 +357,11 @@ export function LibtvRunPanel({
   const videoJobs = (activeRun?.jobs ?? []).filter((job) => job.kind === "video");
   const previewClips = videoJobs.filter((job) => job.status === "completed" && isPlayable(job.resultUrl))
     .sort((a, b) => a.shotIndex - b.shotIndex);
-  const productFramesNeedingReview = (activeRun?.jobs ?? []).filter((job) =>
-    job.kind === "image" && job.status === "completed" &&
-    (job.settings?.consistency || job.settings?.qcIssues) && job.settings?.qcOk !== true
-  );
+  const jobsNeedingReview = manualReviewJobs(activeRun?.jobs ?? []);
+  const allJobsReviewed = jobsNeedingReview.every((job) => reviewedJobIds.has(job.id));
   const done = (activeRun?.jobs ?? []).filter((j) => j.status === "completed" || j.status === "skipped").length;
   const total = activeRun?.jobs.length ?? 0;
+  const eta = activeRun && activeRun.executor === "libtv" ? clipEta(activeRun) : null;
 
   return (
     <div className="space-y-4 rounded-lg border border-border bg-card p-4">
@@ -613,6 +626,13 @@ export function LibtvRunPanel({
             </div>
           </div>
 
+          {eta && (
+            <p className="text-[11px] text-muted-foreground" role="status">
+              Roughly {eta.minMinutes}–{eta.maxMinutes} min for the remaining clips and assembly,
+              based on {eta.sampleSize} completed clips in this run. Provider queues may change the finish time.
+            </p>
+          )}
+
           {activeRun.status === "awaiting_approval" && (
             <div className="flex flex-wrap items-end gap-2">
               <label className="block">
@@ -773,13 +793,28 @@ export function LibtvRunPanel({
             )}
             {activeRun.status === "completed" && activeRun.masterMp4Url && (
               <div className="flex flex-col gap-2">
-              {productFramesNeedingReview.length > 0 && !activeRun.isFinal && (
+              {jobsNeedingReview.length > 0 && !activeRun.isFinal && (
                 <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-950" role="alert">
-                  <p className="font-semibold">{productFramesNeedingReview.length} product keyframe{productFramesNeedingReview.length === 1 ? " needs" : "s need"} manual review</p>
-                  <p>Automatic product-detail verification failed or was unavailable. Check these frames against the official product images and inspect the final video before approval.</p>
-                  <ul className="mt-1 list-disc pl-4">
-                    {productFramesNeedingReview.slice(0, 5).map((job) => (
-                      <li key={job.id}>{job.nodeName}{Array.isArray(job.settings?.qcIssues) && job.settings.qcIssues.length ? ` — ${String(job.settings.qcIssues[0])}` : ""}</li>
+                  <p className="font-semibold">{jobsNeedingReview.length} output{jobsNeedingReview.length === 1 ? " needs" : "s need"} manual review</p>
+                  <p>Compare each flagged keyframe or clip against the official product images before approving the final video.</p>
+                  <ul className="mt-1 space-y-1">
+                    {jobsNeedingReview.map((job) => (
+                      <li key={job.id}>
+                        <label className="flex items-start gap-2">
+                          <input type="checkbox" checked={reviewedJobIds.has(job.id)} onChange={(event) => {
+                            setReviewedJobIds((current) => {
+                              const next = new Set(current);
+                              if (event.target.checked) next.add(job.id); else next.delete(job.id);
+                              return next;
+                            });
+                          }} />
+                          <span>
+                            {job.kind === "video" ? "Clip" : "Keyframe"} {job.nodeName}
+                            {Array.isArray(job.settings?.qcIssues) && job.settings.qcIssues.length ? ` — ${String(job.settings.qcIssues[0])}` : ""}
+                          </span>
+                        </label>
+                        {isPlayable(job.resultUrl) && <a href={job.resultUrl} target="_blank" rel="noreferrer" className="ml-6 underline underline-offset-2">Open output</a>}
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -797,7 +832,7 @@ export function LibtvRunPanel({
               )}
               <Button
                 onClick={toggleFinal}
-                disabled={busy === "final" || (!activeRun.isFinal && reviewedMasterUrl !== activeRun.masterMp4Url)}
+                disabled={busy === "final" || (!activeRun.isFinal && (reviewedMasterUrl !== activeRun.masterMp4Url || !allJobsReviewed))}
                 size="sm"
                 variant={activeRun.isFinal ? "default" : "outline"}
                 className="h-8 rounded-md text-xs"

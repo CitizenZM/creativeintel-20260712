@@ -14,7 +14,7 @@ describe("final video review", () => {
     setRunFinal.mockResolvedValue({ ok: true });
     const response = await POST(request({ final: true, brandApproved: true }), context);
     expect(response.status).toBe(200);
-    expect(setRunFinal).toHaveBeenCalledWith("r", true, true);
+    expect(setRunFinal).toHaveBeenCalledWith("r", true, true, []);
   });
 
   it("does not infer approval from a final request", async () => {
@@ -22,6 +22,13 @@ describe("final video review", () => {
     setRunFinal.mockResolvedValue({ ok: false, status: 400, error: "Brand review required" });
     const response = await POST(request({ final: true }), context);
     expect(response.status).toBe(400);
-    expect(setRunFinal).toHaveBeenCalledWith("r", true, false);
+    expect(setRunFinal).toHaveBeenCalledWith("r", true, false, []);
+  });
+
+  it("passes only bounded string review ids", async () => {
+    getRunWithJobs.mockResolvedValue({ id: "r", projectId: "p" });
+    setRunFinal.mockResolvedValue({ ok: true });
+    await POST(request({ final: true, brandApproved: true, reviewedJobIds: ["k1", 2, "v1"] }), context);
+    expect(setRunFinal).toHaveBeenCalledWith("r", true, true, ["k1", "v1"]);
   });
 });
