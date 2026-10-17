@@ -204,6 +204,11 @@ export async function imageEngineOrder(defaults: ImageRequest["defaults"]): Prom
   }) as ImageEngineId[];
 }
 
+/** Only Bach currently sends reference photos to its image endpoint. */
+export function imageOrderForRequest(order: ImageEngineId[], referenceImageUrls?: string[]): ImageEngineId[] {
+  return referenceImageUrls?.some((url) => url.trim()) ? order.filter((engine) => engine === "bach") : order;
+}
+
 /**
  * gpt-image-1 and Pollinations can hand back base64. Kept as-is, a ~4 MB data
  * URI lands in the storyboard's frames JSON — one Ramp storyboard grew to 12 MB,
@@ -240,7 +245,10 @@ export async function generateImageByEngine(req: ImageRequest): Promise<string> 
     kind: "image",
     model: "image-engine",
   });
-  const order = await imageEngineOrder(req.defaults);
+  const order = imageOrderForRequest(await imageEngineOrder(req.defaults), req.referenceImageUrls);
+  if (!order.length && req.referenceImageUrls?.some((url) => url.trim())) {
+    throw new Error("No reference-capable image engine is available; cannot generate a product keyframe without its reference photo");
+  }
   let lastErr: unknown = null;
   for (const engine of order) {
     remainingRequestMs(deadlineAt);

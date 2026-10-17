@@ -97,12 +97,12 @@ const TERMINAL_JOB = new Set(["completed", "skipped", "failed"]);
 
 /**
  * Image and video models invent lettering — garbled signs ("Obalzarus"), fake
- * brand names on the product. Captions and the real packshot carry all text, so
- * every generated frame is told to have none. Prepended so a model that
+ * brand names on the product. Generated frames may retain text printed on the
+ * approved packshot; added captions and unrelated lettering stay out. Prepended so a model that
  * truncates long prompts (CogVideoX: 500 chars) still sees it.
  */
-export const NO_TEXT_IMAGE = "No invented text, labels, logos, signage or watermarks. Preserve the exact printed label and logo on any supplied product reference.";
-export const NO_TEXT_VIDEO = "No invented text, labels, logos or signage. Preserve the exact printed label and logo on the referenced product.";
+export const NO_TEXT_IMAGE = "Preserve the exact printed brand, label and logo on the supplied product reference. Add no new lettering, logos, signage or watermarks.";
+export const NO_TEXT_VIDEO = "Keep the exact printed brand, label and logo on the referenced product throughout motion. Add no new lettering, logos or signage.";
 
 /**
  * Engines whose image-to-video warps faces (the free CogVideoX, small local
