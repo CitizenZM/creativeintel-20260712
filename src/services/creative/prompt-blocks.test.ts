@@ -53,7 +53,9 @@ describe("prompt blocks", () => {
     legacy.sellingPoints[0].sourceEvidence[0].verified = undefined;
     const block = briefBlock(legacy);
     expect(block).not.toContain('fact: "up to 3,000 nits"');
-    expect(block).toContain("UNVERIFIED: shot concept only");
+    expect(block).not.toContain("3,000 nits peak");
+    expect(block).not.toContain("3,000 NITS");
+    expect(block).toContain("UNVERIFIED SHOT IDEA");
   });
 
   it("still gives platform rules without a brief", () => {

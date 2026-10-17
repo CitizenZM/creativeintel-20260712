@@ -525,6 +525,7 @@ export interface WriteOptions {
 export function campaignCopyPrompts(scaffold: PlatformPlan, brief: ProductBrief, opts: WriteOptions): { system: string; user: string } {
   const strict = !!opts.strictCompliance;
   const facts = offerFacts(opts.promo, opts.runDate ?? new Date().toISOString());
+  const hasUnverified = !brief.sellingPoints.length || brief.sellingPoints.some((point) => !point.sourceEvidence?.some((evidence) => evidence.verified === true));
   const system = `You are CreativeIntel's campaign copywriter. You receive one platform's timed ad plan and write its copy. Output JSON only:
 {"beats":[{"i":beatIndex,"vo":"spoken line","onScreenText":"≤ 6 words","visual":"optional sharper shot description"}],"hooks":[{"hookId":"H..","openingVisual":"frame 1 + move","openingText":"≤ 6 words","openingVO":"spoken opener"}]}
 RULES
@@ -542,8 +543,8 @@ ${playbookSlice({ category: brief.category, platform: scaffold.platform, goal: o
     objection: brief.objections?.[0],
     offer: { ...facts, line: offerLine(facts), endCard: scaffold.endCard },
     platform: { id: scaffold.platform, durationSec: scaffold.durationSec, voice: scaffold.voice, captions: scaffold.captionStyle, pacing: scaffold.pacing },
-    hooks: scaffold.hookVariants.map((h) => ({ hookId: h.hookId, name: h.name, family: h.family, recipe: clip(h.openingVisual, 200), text: h.openingText, vo: h.openingVO })),
-    beats: scaffold.beats.map((b, i) => ({ i, t: `${b.t0}-${b.t1}`, purpose: b.purpose, sellingPointId: b.sellingPointId, visual: clip(b.visual, 180), vo: b.vo, onScreenText: b.onScreenText, words: voBudget(b.t1 - b.t0) })),
+    hooks: scaffold.hookVariants.map((h) => ({ hookId: h.hookId, name: h.name, family: h.family, recipe: clip(h.openingVisual, 200), ...(!hasUnverified ? { text: h.openingText, vo: h.openingVO } : {}) })),
+    beats: scaffold.beats.map((b, i) => ({ i, t: `${b.t0}-${b.t1}`, purpose: b.purpose, sellingPointId: b.sellingPointId, visual: clip(b.visual, 180), ...(!hasUnverified ? { vo: b.vo, onScreenText: b.onScreenText } : {}), words: voBudget(b.t1 - b.t0) })),
   });
   return { system, user };
 }

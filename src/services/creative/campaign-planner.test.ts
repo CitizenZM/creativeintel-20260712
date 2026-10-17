@@ -221,6 +221,19 @@ describe("writeCampaignScripts", () => {
     const raw = JSON.parse(campaignCopyPrompts(scaffold, brief, { goal: "promo", promo, runDate: BF }).user);
     expect(raw.verifiedFacts).toEqual([]);
     expect(raw.facts).toBeUndefined();
+    expect(raw.hooks[0].text).toBeUndefined();
+    expect(raw.beats[0].vo).toBeUndefined();
+  });
+
+  it("retains planned copy when every selling point has matched evidence", () => {
+    const verified = structuredClone(brief);
+    verified.sellingPoints = verified.sellingPoints.map((point) => ({
+      ...point,
+      sourceEvidence: [{ type: "page_copy", quote: "Verified product fact", verified: true }],
+    }));
+    const raw = JSON.parse(campaignCopyPrompts(scaffold, verified, { goal: "promo", promo, runDate: BF }).user);
+    expect(raw.hooks[0].text).toBe(scaffold.hookVariants[0].openingText);
+    expect(raw.beats[0].vo).toBe(scaffold.beats[0].vo);
   });
 });
 
@@ -253,8 +266,8 @@ describe("plan → script writer", () => {
     const b1 = planBlock(plan, 1, { brief });
     expect(b0).toContain(`HOOK (0–1.5 s) = ${plan.hookVariants[0].hookId}`);
     expect(b1).toContain(`= ${plan.hookVariants[1].hookId}`);
-    expect(b0).toMatch(/PITCH: .*20% OFF THIS BLACK FRIDAY/);
-    expect(b0).toContain(`selling point: "${brief.sellingPoints[0].claim.slice(0, 40)}`);
+    expect(b0).not.toContain(`selling point: "${brief.sellingPoints[0].claim.slice(0, 40)}`);
+    expect(b0).toContain("draft hook copy withheld");
     const scaled = planBlock(plan, 0, { brief, targetSec: 30 });
     expect(scaled).toMatch(/30 s \(plan was 21 s; times rescaled\)/);
     expect(scaled).toMatch(/29–30 s CTA/);

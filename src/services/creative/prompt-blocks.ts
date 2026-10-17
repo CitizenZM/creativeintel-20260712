@@ -56,9 +56,10 @@ export function briefBlock(brief: ProductBrief, maxPoints = 3, opts: BlockOption
   const pts = brief.sellingPoints.slice(0, maxPoints);
   const point = (p: (typeof pts)[number], i: number) => {
     const fact = p.sourceEvidence?.find((source) => source.verified === true)?.quote;
+    if (!fact) return `${i + 1}. UNVERIFIED SHOT IDEA: ${clip(p.proofVisual.shot, 140)} | visual concept only; do not state a product claim`;
     const base = `${i + 1}. ${clip(p.claim, 90)} → ${clip(p.benefit, 90)} | proof shot: ${clip(p.proofVisual.shot, 140)}${p.proofVisual.overlayText ? ` | overlay "${clip(p.proofVisual.overlayText, 40)}"` : ""}`;
-    if (strict) return `${base}${p.compliance?.safeWording ? ` | safe wording: ${clip(p.compliance.safeWording, 100)}` : ""}${p.compliance?.requiredDisclosure ? ` | disclosure: ${clip(p.compliance.requiredDisclosure, 100)}` : ""}${fact ? "" : " | UNVERIFIED: shot concept only; do not state as product fact"}`;
-    return `${base}${fact ? ` | fact: "${clip(fact, 90)}"` : " | UNVERIFIED: shot concept only; do not state as product fact"}`;
+    if (strict) return `${base}${p.compliance?.safeWording ? ` | safe wording: ${clip(p.compliance.safeWording, 100)}` : ""}${p.compliance?.requiredDisclosure ? ` | disclosure: ${clip(p.compliance.requiredDisclosure, 100)}` : ""}`;
+    return `${base} | fact: "${clip(fact, 90)}"`;
   };
   const lines = [
     `BIG IDEA: ${clip(brief.bigIdea.proposition, 120)}${brief.bigIdea.alternates.length ? ` (alternates: ${brief.bigIdea.alternates.slice(0, 3).map((a) => clip(a, 80)).join(" | ")})` : ""}`,
@@ -106,16 +107,20 @@ export function planBlock(plan: PlatformPlan, hookIndex = 0, opts: { brief?: Pro
   const T = opts.targetSec && opts.targetSec > 0 ? opts.targetSec : D;
   const k = (T - 1) / Math.max(0.1, D - 1);
   const at = (t: number) => (t >= D - 1 ? Math.round((T - (D - t)) * 10) / 10 : Math.round(t * k * 10) / 10);
+  const hasUnverified = !opts.brief?.sellingPoints.length || opts.brief.sellingPoints.some((point) => !point.sourceEvidence?.some((evidence) => evidence.verified === true));
   const spText = (id?: string) => {
     const p = id ? opts.brief?.sellingPoints.find((x) => x.id === id) : undefined;
-    return p ? ` [selling point: "${clip(p.claim, 70)} → ${clip(p.benefit, 70)}"]` : "";
+    if (!p) return "";
+    return p.sourceEvidence?.some((evidence) => evidence.verified === true)
+      ? ` [selling point: "${clip(p.claim, 70)} → ${clip(p.benefit, 70)}"]`
+      : " [unverified shot idea: do not state a product claim]";
   };
   const hookEnd = v ? at(v.durationSec) : 0;
   const lines = [
     `CAMPAIGN PLAN — ${plan.label}, ${T} s${T !== D ? ` (plan was ${D} s; times rescaled)` : ""}. FOLLOW THIS BEAT MAP: hook, body beats and CTA in this order and at these times; write the script's hook from the chosen variant and the body beats from the plan beats.`,
-    v ? `HOOK (0–${hookEnd} s) = ${v.hookId} ${v.name}: frame 1 ${clip(v.openingVisual, 200)} | text "${clip(v.openingText, 50)}" | VO "${clip(v.openingVO, 90)}"` : "",
-    ...plan.beats.map((b) => `${at(b.t0)}–${at(b.t1)} s ${b.purpose.toUpperCase()}${spText(b.sellingPointId)}: ${clip(b.visual, 150)}${b.vo ? ` | VO "${clip(b.vo, 90)}"` : ""}${b.onScreenText ? ` | text "${clip(b.onScreenText, 40)}"` : ""}`),
-    `END CARD: ${plan.endCard.id} ${plan.endCard.name}${plan.endCard.headline ? ` — "${plan.endCard.headline}"` : ""}; button "${plan.endCard.button}". Last second: logo + bouncing button. Voice: ${clip(plan.voice, 80)}. Captions: ${clip(plan.captionStyle, 80)}.`,
+    v ? `HOOK (0–${hookEnd} s) = ${v.hookId} ${v.name}: frame 1 ${clip(v.openingVisual, 200)}${hasUnverified ? " | draft hook copy withheld; write from verified facts" : ` | text "${clip(v.openingText, 50)}" | VO "${clip(v.openingVO, 90)}"`}` : "",
+    ...plan.beats.map((b) => `${at(b.t0)}–${at(b.t1)} s ${b.purpose.toUpperCase()}${spText(b.sellingPointId)}: ${clip(b.visual, 150)}${!hasUnverified && b.vo ? ` | VO "${clip(b.vo, 90)}"` : ""}${!hasUnverified && b.onScreenText ? ` | text "${clip(b.onScreenText, 40)}"` : ""}`),
+    `END CARD: ${plan.endCard.id} ${plan.endCard.name}${!hasUnverified && plan.endCard.headline ? ` — "${plan.endCard.headline}"` : ""}; button "${plan.endCard.button}". Last second: logo + bouncing button. Voice: ${clip(plan.voice, 80)}. Captions: ${clip(plan.captionStyle, 80)}.`,
   ];
   return lines.filter(Boolean).join("\n");
 }
