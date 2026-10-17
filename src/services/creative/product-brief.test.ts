@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CATEGORY_PACKS } from "./category-packs.data";
-import { buildBriefPrompts, classifyProduct, finalizeBrief, rankSellingPoints, stratifyReviews, stripComplianceTraps, TO_CREATIVE_CATEGORY } from "./product-brief";
+import { buildBriefPrompts, classifyProduct, finalizeBrief, rankSellingPoints, stratifyReviews, stripComplianceTraps, TO_CREATIVE_CATEGORY, verifyBriefFacts } from "./product-brief";
 
 const sp = (id: string, over: Record<string, unknown> = {}) => ({
   id,
@@ -83,6 +83,27 @@ describe("finalizeBrief", () => {
     const bare = finalizeBrief({ category: "tv", sellingPoints: [{ id: "x", claim: "3,000 nits", benefit: "bright at noon", proofVisual: { shot: "sun-glare split" } }] });
     expect(bare.sellingPoints).toHaveLength(1);
     expect(bare.complianceNotes).toEqual([]);
+  });
+});
+
+describe("product brief fact gate", () => {
+  it("withholds invented numbers from selling points and downstream video beats without another AI call", () => {
+    const brief = finalizeBrief({
+      bigIdea: { proposition: "20% more hydration", alternates: ["12 oz on the go", "20 oz on the go"] },
+      sellingPoints: [
+        sp("real", { claim: "12 oz can", benefit: "portable" }),
+        sp("invented", { claim: "20 oz can", benefit: "more to share", sourceEvidence: [{ type: "page_copy", quote: "20 oz" }] }),
+      ],
+      beatMap: { durationSec: 15, beats: [
+        { t: "0-3", purpose: "hook", sellingPointId: "real", visual: "show 12 oz can" },
+        { t: "3-6", purpose: "proof", sellingPointId: "invented", visual: "show 20 oz can" },
+      ] },
+    });
+    const verified = verifyBriefFacts(brief, { title: "Moneta drink", description: "12 oz can", price: 20 });
+    expect(verified.sellingPoints.map((point) => point.id)).toEqual(["real"]);
+    expect(verified.beatMap.beats.map((beat) => beat.sellingPointId)).toEqual(["real"]);
+    expect(verified.bigIdea).toEqual({ proposition: "", alternates: ["12 oz on the go"] });
+    expect(verified.gaps).toEqual(expect.arrayContaining([expect.stringContaining("invented"), expect.stringContaining("Big idea withheld")]));
   });
 });
 

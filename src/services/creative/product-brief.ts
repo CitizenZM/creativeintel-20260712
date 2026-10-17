@@ -262,10 +262,66 @@ export function finalizeBrief(raw: unknown, guessedCategory: SpCategory = "other
   return { ...parsed, category, sellingPoints, beatMap: { ...parsed.beatMap, beats }, gaps };
 }
 
+const NUMERIC_LITERAL = /\d[\d,]*(?:\.\d+)?/g;
+const numbersIn = (text: string) => new Set([...text.matchAll(NUMERIC_LITERAL)].map(([raw]) => Number(raw.replaceAll(",", ""))));
+const UNIT_LITERAL = /(\d[\d,]*(?:\.\d+)?)\s*[- ]?\s*(%|percent\b|fl\s?oz\b|ounces?\b|oz\b|ml\b|kg\b|mg\b|grams?\b|g\b|lbs?\b|mah\b|watts?\b|w\b|stars?\b)/gi;
+function unitFacts(text: string) {
+  const units = new Set<string>();
+  for (const [, amount, rawUnit] of text.matchAll(UNIT_LITERAL)) {
+    const unit = rawUnit.toLowerCase().replace(/\s/g, "");
+    const canonical = /^(?:ounces?|floz|oz)$/.test(unit) ? "oz"
+      : /^(?:grams?|g)$/.test(unit) ? "g"
+      : /^(?:watts?|w)$/.test(unit) ? "w"
+      : /^(?:percent|%)$/.test(unit) ? "%"
+      : /^(?:stars?|star)$/.test(unit) ? "star"
+      : unit;
+    units.add(`${Number(amount.replaceAll(",", ""))}:${canonical}`);
+  }
+  return units;
+}
+
+/** Discard unsourced numeric product claims before they reach script and video prompts. */
+export function verifyBriefFacts(brief: ProductBrief & { sellingPoints: BriefSellingPoint[] }, input: ProductPageInput) {
+  const source = JSON.stringify({
+    title: input.title, brand: input.brand, bullets: input.bullets, description: input.description,
+    specs: input.specs, price: input.price, listPrice: input.listPrice, rating: input.rating,
+    reviewCount: input.reviewCount, reviews: input.reviews, qa: input.qa,
+  });
+  const facts = numbersIn(source);
+  const factsWithUnits = unitFacts(source);
+  const unsupported = (value: string) => {
+    const missingNumbers = [...numbersIn(value)].filter((number) => !facts.has(number));
+    const missingUnits = [...unitFacts(value)].filter((fact) => !factsWithUnits.has(fact) && !missingNumbers.includes(Number(fact.split(":")[0])));
+    return [...missingNumbers.map(String), ...missingUnits];
+  };
+  const gaps = [...brief.gaps];
+  const sellingPoints = brief.sellingPoints.filter((point) => {
+    const missing = unsupported([point.claim, point.benefit, point.proofVisual.overlayText ?? ""].join(" "));
+    if (!missing.length) return true;
+    gaps.push(`Selling point ${point.id} withheld: numeric claim ${missing.join(", ")} is not in the supplied product facts`);
+    return false;
+  }).map((point, index) => ({ ...point, priority: index + 1 }));
+  if (!sellingPoints.length && brief.sellingPoints.length) gaps.push("No verified filmable selling points remain; add product facts before planning a proof-led video");
+  const keep = new Set(sellingPoints.map((point) => point.id));
+  const proposition = unsupported(brief.bigIdea.proposition).length ? "" : brief.bigIdea.proposition;
+  if (!proposition && brief.bigIdea.proposition) gaps.push("Big idea withheld: numeric claim is not in the supplied product facts");
+  const alternates = brief.bigIdea.alternates.filter((angle) => !unsupported(angle).length);
+  const categoryEntryPoints = brief.categoryEntryPoints.filter((item) => !unsupported([item.w, item.hookIdea].join(" ")).length);
+  const objections = brief.objections.filter((item) => !unsupported([item.objection, item.answer, item.bustingVisual].join(" ")).length);
+  const beats = brief.beatMap.beats.filter((beat) => {
+    if (beat.sellingPointId && !keep.has(beat.sellingPointId)) return false;
+    const missing = unsupported([beat.visual, beat.overlayText ?? "", beat.vo ?? ""].join(" "));
+    if (!missing.length) return true;
+    gaps.push(`Beat ${beat.t} withheld: numeric claim ${missing.join(", ")} is not in the supplied product facts`);
+    return false;
+  });
+  return { ...brief, sellingPoints, bigIdea: { ...brief.bigIdea, proposition, alternates }, categoryEntryPoints, objections, beatMap: { ...brief.beatMap, beats }, gaps };
+}
+
 /** One structured LLM call (deep tier) → ranked brief. */
 export async function extractProductBrief(input: ProductPageInput, opts: BriefOptions = {}) {
   const { analyzeWithClaude } = await import("@/services/ai/claude-client");
   const { system, user, guessedCategory } = buildBriefPrompts(input, opts);
   const raw = await analyzeWithClaude({ systemPrompt: system, userPrompt: user, responseSchema: z.unknown(), maxTokens: 7000, tier: "deep" });
-  return finalizeBrief(raw, guessedCategory, opts);
+  return verifyBriefFacts(finalizeBrief(raw, guessedCategory, opts), input);
 }

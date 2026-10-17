@@ -184,7 +184,7 @@ function OpsHealthSection({ ops }: { ops: OpsHealth }) {
 export default async function StatusPage() {
   const comfyPromise = comfyStatus();
   const opsPromise = opsHealth();
-  const [recentJobs, lastAdTask, lastFetchTask, queued, failedTasks, freshRows, recentFailedRows, beatRows] = await Promise.all([
+  const [recentJobs, lastAdTask, lastFetchTask, queueRows, failedTasks, freshRows, recentFailedRows, beatRows] = await Promise.all([
     prisma.researchJob.findMany({
       where: { status: "complete" },
       orderBy: { createdAt: "desc" },
@@ -201,7 +201,13 @@ export default async function StatusPage() {
       orderBy: { completedAt: "desc" },
       select: { completedAt: true },
     }),
-    prisma.workerTask.count({ where: { status: { in: ["queued", "claimed", "running"] } } }),
+    prisma.$queryRaw<{ active: bigint; waiting: bigint; oldestQueuedSec: number | null }[]>`
+      SELECT
+        count(*) FILTER (WHERE status IN ('queued', 'claimed', 'running')) AS active,
+        count(*) FILTER (WHERE status = 'queued') AS waiting,
+        (max(extract(epoch FROM now() - "createdAt")) FILTER (WHERE status = 'queued'))::float AS "oldestQueuedSec"
+      FROM "WorkerTask"
+    `,
     prisma.workerTask.count({ where: { status: "failed" } }),
     // Freshness is decided by the database's clock — reading the process clock
     // during render is impure and the app's lint rules reject it.
@@ -220,6 +226,9 @@ export default async function StatusPage() {
       FROM "WorkerHeartbeat"
     `,
   ]);
+  const queued = Number(queueRows[0]?.active ?? 0);
+  const waiting = Number(queueRows[0]?.waiting ?? 0);
+  const oldestQueuedSec = queueRows[0]?.oldestQueuedSec ?? null;
   const recentFailed = Number(recentFailedRows[0]?.failed ?? 0);
   const comfy = await comfyPromise;
   const ops = await opsPromise;
@@ -297,7 +306,8 @@ export default async function StatusPage() {
                 Task queue
               </span>
               <span className="text-xs text-muted-foreground">
-                {queued} waiting · {failedTasks} failed all attempts
+                {waiting} waiting · {queued - waiting} in progress · {failedTasks} failed all attempts
+                {oldestQueuedSec !== null && ` · oldest wait ${Math.max(0, Math.round(oldestQueuedSec / 60))} min${oldestQueuedSec > 900 ? " (over 15 min target)" : ""}`}
               </span>
             </div>
             <div className="flex items-center justify-between gap-3 px-3 py-2.5">

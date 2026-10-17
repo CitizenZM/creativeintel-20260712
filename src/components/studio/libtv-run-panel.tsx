@@ -340,6 +340,9 @@ export function LibtvRunPanel({
   const needsLogin = !!activeRun?.error?.startsWith("needs libtv login");
   const unplayableMaster = !!activeRun?.masterMp4Url && !isPlayable(activeRun.masterMp4Url);
   const failedJobs = (activeRun?.jobs ?? []).filter((j) => j.status === "failed" && j.error);
+  const videoJobs = (activeRun?.jobs ?? []).filter((job) => job.kind === "video");
+  const previewClips = videoJobs.filter((job) => job.status === "completed" && isPlayable(job.resultUrl))
+    .sort((a, b) => a.shotIndex - b.shotIndex);
   const productFramesNeedingReview = (activeRun?.jobs ?? []).filter((job) =>
     job.kind === "image" && job.status === "completed" &&
     (job.settings?.consistency || job.settings?.qcIssues) && job.settings?.qcOk !== true
@@ -700,6 +703,20 @@ export function LibtvRunPanel({
                 ))}
               </ul>
             </div>
+          )}
+
+          {isRunActive(activeRun.status) && previewClips.length > 0 && (
+            <details className="w-full rounded-md border border-border p-2 text-xs">
+              <summary className="cursor-pointer font-medium">Watch completed clips ({previewClips.length}/{videoJobs.length}) while the master finishes</summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {previewClips.slice(0, 9).map((job) => (
+                  <div key={job.id} className="space-y-1">
+                    <p className="font-mono text-muted-foreground">{job.nodeName}</p>
+                    <video src={job.resultUrl!} controls playsInline preload="none" className="w-full rounded-md bg-black" aria-label={`Preview ${job.nodeName}`} />
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
 
           {activeRun.status === "completed" && <RunTracePanel key={activeRun.id} projectId={projectId} runId={activeRun.id} />}

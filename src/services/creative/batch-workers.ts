@@ -1,5 +1,5 @@
 import { COMPLIANCE_FLAG } from "@/lib/script-pick";
-import { auditScriptClaims, repairScriptCta, scriptV2Schema, type ScriptV2 } from "@/lib/script-schema";
+import { auditScriptClaims, repairScriptCta, scriptV2Schema, type ScriptClaimsViolation, type ScriptV2 } from "@/lib/script-schema";
 import { analyzeWithClaude } from "@/services/ai/claude-client";
 import { buildScriptWritingPrompt } from "@/services/ai/prompts/script-writing";
 import type { ScriptTemplate, VideoType } from "@/services/ai/prompts/script-templates";
@@ -12,6 +12,17 @@ import {
   type ScriptAngle,
   type ScriptContext,
 } from "@/app/api/projects/[projectId]/creative/_script-context";
+
+/** Repair the actual first draft; a retry without it is another full generation attempt. */
+export function scriptRepairRequest(userPrompt: string, draft: ScriptV2, violations: ScriptClaimsViolation[]) {
+  const draftJson = JSON.stringify(draft);
+  // The response has the same JSON shape as the draft. Reserve room for a few longer safe rewrites.
+  const maxTokens = Math.min(8000, Math.max(2500, Math.ceil(Buffer.byteLength(draftJson, "utf8") / 3) + 600));
+  return {
+    userPrompt: `${userPrompt}\n\nREPAIR THE EXISTING DRAFT BELOW. Return the complete corrected JSON with the same structure and creative angle. Change only the fields needed to resolve the listed violations; preserve all other approved copy, beats, scene timing and product details. Do not introduce new claims, statistics, offer terms or CTA text.\n\nDRAFT JSON:\n${draftJson}\n\nVIOLATIONS TO FIX:\n${formatComplianceViolations(violations)}`,
+    maxTokens,
+  };
+}
 
 export async function writeBatchScript(
   projectId: string,
@@ -43,11 +54,12 @@ export async function writeBatchScript(
   generated = repairScriptCta(generated, claimsAudit);
   let audit = auditScriptClaims(generated, claimsAudit);
   if (!audit.ok) {
+    const repair = scriptRepairRequest(prompt.user, generated, audit.violations);
     generated = await analyzeWithClaude({
       systemPrompt: prompt.system,
-      userPrompt: `${prompt.user}\n\nCOMPLIANCE FAILURE — the previous draft violated brand rules. Fix these lines:\n${formatComplianceViolations(audit.violations)}`,
+      userPrompt: repair.userPrompt,
       responseSchema: scriptV2Schema,
-      maxTokens: 8000,
+      maxTokens: repair.maxTokens,
     });
     generated = repairScriptCta(generated, claimsAudit);
     audit = auditScriptClaims(generated, claimsAudit);

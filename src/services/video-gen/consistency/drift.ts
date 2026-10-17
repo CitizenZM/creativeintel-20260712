@@ -1,6 +1,7 @@
 /**
- * Clip drift check: sample a generated clip at 0 %, 50 % and 100 % (ffmpeg,
- * locally, from the clip the engine already downloaded), score each sample
+ * Clip drift check: sample a generated clip at five points (ffmpeg,
+ * locally, from the clip the engine already downloaded), score the ends and
+ * the most suspicious interior sample
  * against the cast and product references, and check the clip's ends against
  * its start / end keyframes. A mid-clip sample that falls below the shot's
  * threshold — or well below the ends — flags the clip (`driftFlag`).
@@ -105,8 +106,26 @@ export async function checkClipDrift(clip: Buffer | string, refs: DriftRefs, opt
   const sim = deps.similarity ?? frameSimilarity;
   // 0.97, not 1: generated clips often dissolve or fade on their very last frames (a live talking-head clip's
   // tablet ghosted out in its last 0.1 s), which read as "product / cast missing" at the true last frame.
-  const samples = await (deps.sample ?? sampleClipFrames)(clip, [0, 0.5, 0.97]);
-  const [first, mid, last] = samples;
+  const localSamples = await (deps.sample ?? sampleClipFrames)(clip, [0, 0.25, 0.5, 0.75, 0.97]);
+  const first = localSamples[0];
+  const last = localSamples[localSamples.length - 1];
+  const interiors = localSamples.slice(1, -1);
+  if (!first || !last || !interiors.length) throw new Error("clip drift check needs at least three frames");
+  const candidates = await Promise.all(interiors.map(async (sample) => {
+    const [vsStart, vsEnd] = await Promise.all([
+      refs.start ? sim(sample.image, refs.start).catch(() => null) : Promise.resolve(null),
+      refs.end ? sim(sample.image, refs.end).catch(() => null) : Promise.resolve(null),
+    ]);
+    return { sample, vsStart, vsEnd, similarity: Math.max(vsStart ?? -1, vsEnd ?? -1) };
+  }));
+  // If no anchor comparison works, use the true midpoint. Otherwise inspect the
+  // interior frame least like either approved keyframe, at the same vision-call cost.
+  const comparable = candidates.filter((item) => item.similarity >= 0);
+  const chosen = comparable.length
+    ? comparable.sort((a, b) => a.similarity - b.similarity)[0]
+    : candidates[Math.floor(candidates.length / 2)];
+  const mid = chosen.sample;
+  const samples = [first, mid, last];
   const reasons: string[] = [];
 
   const scores: (ConsistencyScore | null)[] =
@@ -123,8 +142,8 @@ export async function checkClipDrift(clip: Buffer | string, refs: DriftRefs, opt
     end: refs.end ? await sim(last.image, refs.end).catch(() => null) : null,
   };
   const midSim = {
-    vsStart: refs.start ? await sim(mid.image, refs.start).catch(() => null) : null,
-    vsEnd: refs.end ? await sim(mid.image, refs.end).catch(() => null) : null,
+    vsStart: chosen.vsStart,
+    vsEnd: chosen.vsEnd,
   };
 
   let drift = false;
@@ -136,21 +155,21 @@ export async function checkClipDrift(clip: Buffer | string, refs: DriftRefs, opt
     const drop = ends.length ? Math.min(...ends) - m.score : 0;
     if (m.score < threshold) {
       drift = true;
-      reasons.push(`mid-clip score ${m.score} < ${Math.round(threshold * 1000) / 1000} (${type})`);
+      reasons.push(`mid-clip score at ${mid.t}s ${m.score} < ${Math.round(threshold * 1000) / 1000} (${type})`);
     }
     if (drop > (opts.dropMargin ?? 0.15)) {
       drift = true;
-      reasons.push(`mid-clip score drops ${Math.round(drop * 1000) / 1000} below the clip's ends`);
+      reasons.push(`mid-clip score at ${mid.t}s drops ${Math.round(drop * 1000) / 1000} below the clip's ends`);
     }
     if (drift && m.defects.length) reasons.push(`mid-clip defects: ${m.defects.slice(0, 4).join("; ")}`);
     if (m.majorDefects && !drift) {
       drift = true;
-      reasons.push(`mid-clip major defect: ${m.defects.slice(0, 3).join("; ")}`);
+      reasons.push(`mid-clip major defect at ${mid.t}s: ${m.defects.slice(0, 3).join("; ")}`);
     }
   } else if (midSim.vsStart !== null && midSim.vsEnd !== null && Math.max(midSim.vsStart, midSim.vsEnd) < 0.2) {
     // Pixel-only fallback: the middle of an anchored clip resembles neither anchor.
     drift = true;
-    reasons.push(`mid-clip frame resembles neither keyframe (similarity ${midSim.vsStart} / ${midSim.vsEnd})`);
+    reasons.push(`mid-clip frame at ${mid.t}s resembles neither keyframe (similarity ${midSim.vsStart} / ${midSim.vsEnd})`);
   }
   if (boundary.start !== null && boundary.start < (opts.boundaryMin ?? 0.55)) reasons.push(`clip start departs from its start keyframe (similarity ${boundary.start})`);
 
