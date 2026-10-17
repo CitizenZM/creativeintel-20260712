@@ -100,7 +100,7 @@ const sellingPointSchema = z.object({
     overlayText: z.string().optional().catch(undefined),
     durationSec: z.coerce.number().catch(3),
   }),
-  sourceEvidence: z.array(z.object({ type: z.string().catch("page_copy"), quote: z.string(), location: z.string().optional().catch(undefined) })).catch([]),
+  sourceEvidence: z.array(z.object({ type: z.string().catch("page_copy"), quote: z.string(), location: z.string().optional().catch(undefined), verified: z.boolean().optional(), sourceUrl: z.string().optional() })).catch([]),
   evidenceStrength: z.enum(["certified", "measured_spec", "review_consensus", "claimed"]).catch("claimed"),
   driver: z.string().catch(""),
   awarenessStage: z.string().catch("product_aware"),

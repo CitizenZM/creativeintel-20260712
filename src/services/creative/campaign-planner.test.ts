@@ -183,6 +183,18 @@ describe("writeCampaignScripts", () => {
     expect(res.plan.hookVariants[0].openingVisual).toBe(scaffold.hookVariants[0].openingVisual);
   });
 
+  it("restores distinct hook recipes when one copy call repeats the same opening", async () => {
+    const llm = vi.fn(async () => ({ hooks: scaffold.hookVariants.map((hook) => ({
+      hookId: hook.hookId, openingText: "See the product differently", openingVO: "See the product differently",
+    })) }));
+    const res = await writeCampaignScripts(scaffold, brief, { goal: "promo", promo, runDate: BF, llm });
+    expect(llm).toHaveBeenCalledTimes(1);
+    expect(res.plan.hookVariants[0].openingText).toBe("See the product differently");
+    expect(res.plan.hookVariants.slice(1).map((hook) => hook.openingText)).toEqual(scaffold.hookVariants.slice(1).map((hook) => hook.openingText));
+    expect(res.plan.notes?.filter((note) => note.includes("duplicate model hook"))).toHaveLength(2);
+    expect(res.plan.scripts[1].beats[0].vo).toBe(scaffold.hookVariants[1].openingVO);
+  });
+
   it("falls back to the scaffold copy when the model fails or returns nothing", async () => {
     const boom = await writeCampaignScripts(scaffold, brief, { goal: "promo", promo, runDate: BF, llm: async () => { throw new Error("429 rate limited"); } });
     expect(boom.source).toBe("fallback");
@@ -203,6 +215,11 @@ describe("writeCampaignScripts", () => {
     const strict = campaignCopyPrompts(scaffold, brief, { goal: "promo", promo, runDate: BF, strictCompliance: true });
     expect(strict.system).toMatch(/safe wording/);
     expect(JSON.parse(open.user).beats).toHaveLength(scaffold.beats.length);
+  });
+
+  it("does not pass unverified legacy quotes as evidence to campaign copy", () => {
+    const raw = JSON.parse(campaignCopyPrompts(scaffold, brief, { goal: "promo", promo, runDate: BF }).user);
+    expect(raw.facts.every((fact: { evidence: string[] }) => fact.evidence.length === 0)).toBe(true);
   });
 });
 

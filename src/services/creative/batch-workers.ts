@@ -45,6 +45,9 @@ export async function writeBatchScript(
     angle,
     totalDurationSec: options.totalDurationSec,
     customBrief: options.customBrief?.trim() || undefined,
+    // Stable across queue redelivery: completed items are skipped, so a mutable
+    // cursor would assign a different (often duplicate) campaign hook on resume.
+    planHookIndex: index,
   }));
 
   let generated: ScriptV2 = await analyzeWithClaude({

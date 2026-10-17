@@ -206,7 +206,7 @@ export function briefLite(p: CatalogProduct, opts: BriefLiteOptions = {}): Produ
       advantage: "",
       benefit: sellingHalf(pick.shot) || c.claim,
       proofVisual: { device: deviceOf(shot), shot, overlayText: overlayFor(c.claim), durationSec: 3 },
-      sourceEvidence: [{ type: fromPlaybook ? "category_norm" : numeric ? "spec" : "page_copy", quote: c.claim, location: c.location }],
+      sourceEvidence: [{ type: fromPlaybook ? "category_norm" : numeric ? "spec" : "page_copy", quote: c.claim, location: c.location, verified: !fromPlaybook, sourceUrl: p.url ?? undefined }],
       evidenceStrength: fromPlaybook ? "claimed" : numeric ? "measured_spec" : "claimed",
       driver: sellingHalf(pick.shot),
       awarenessStage: "product_aware",

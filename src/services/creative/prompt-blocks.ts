@@ -57,7 +57,7 @@ export function briefBlock(brief: ProductBrief, maxPoints = 3, opts: BlockOption
   const point = (p: (typeof pts)[number], i: number) => {
     const base = `${i + 1}. ${clip(p.claim, 90)} → ${clip(p.benefit, 90)} | proof shot: ${clip(p.proofVisual.shot, 140)}${p.proofVisual.overlayText ? ` | overlay "${clip(p.proofVisual.overlayText, 40)}"` : ""}`;
     if (strict) return `${base}${p.compliance?.safeWording ? ` | safe wording: ${clip(p.compliance.safeWording, 100)}` : ""}${p.compliance?.requiredDisclosure ? ` | disclosure: ${clip(p.compliance.requiredDisclosure, 100)}` : ""}`;
-    const fact = p.sourceEvidence?.[0]?.quote;
+    const fact = p.sourceEvidence?.find((source) => source.verified === true)?.quote;
     return `${base}${fact ? ` | fact: "${clip(fact, 90)}"` : ""}`;
   };
   const lines = [

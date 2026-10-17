@@ -538,7 +538,7 @@ ${playbookSlice({ category: brief.category, platform: scaffold.platform, goal: o
     product: brief.product,
     bigIdea: brief.bigIdea?.proposition,
     audience: brief.audience?.primary,
-    facts: brief.sellingPoints.slice(0, 6).map((p) => ({ id: p.id, claim: p.claim, benefit: p.benefit, evidence: p.sourceEvidence?.slice(0, 1).map((e) => clip(e.quote, 100)) })),
+    facts: brief.sellingPoints.slice(0, 6).map((p) => ({ id: p.id, claim: p.claim, benefit: p.benefit, evidence: p.sourceEvidence?.filter((e) => e.verified === true).slice(0, 1).map((e) => clip(e.quote, 100)) })),
     objection: brief.objections?.[0],
     offer: { ...facts, line: offerLine(facts), endCard: scaffold.endCard },
     platform: { id: scaffold.platform, durationSec: scaffold.durationSec, voice: scaffold.voice, captions: scaffold.captionStyle, pacing: scaffold.pacing },
@@ -595,7 +595,20 @@ export function mergeCampaignCopy(scaffold: PlatformPlan, raw: unknown, productN
       applied++;
     }
   }
-  const plan: PlatformPlan = { ...scaffold, beats, hookVariants: hooks, copySource: applied ? "llm" : "scaffold" };
+  const normalizedHook = (value: string) => value.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+/gu)?.join("") ?? "";
+  const seen = new Set<string>();
+  const notes = [...(scaffold.notes ?? [])];
+  for (let index = 0; index < hooks.length; index++) {
+    const signature = `${normalizedHook(hooks[index].openingText)}|${normalizedHook(hooks[index].openingVO)}`;
+    if (signature !== "|" && seen.has(signature)) {
+      // The deterministic library variants already differ by hook family and
+      // treatment. Restore one instead of spending another model call.
+      hooks[index] = { ...scaffold.hookVariants[index] };
+      notes.push(`${hooks[index].hookId}: duplicate model hook copy; scaffold opening kept`);
+    }
+    seen.add(`${normalizedHook(hooks[index].openingText)}|${normalizedHook(hooks[index].openingVO)}`);
+  }
+  const plan: PlatformPlan = { ...scaffold, beats, hookVariants: hooks, notes, copySource: applied ? "llm" : "scaffold" };
   plan.scripts = buildScripts(plan);
   return { plan, applied };
 }

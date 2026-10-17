@@ -184,7 +184,7 @@ function OpsHealthSection({ ops }: { ops: OpsHealth }) {
 export default async function StatusPage() {
   const comfyPromise = comfyStatus();
   const opsPromise = opsHealth();
-  const [recentJobs, lastAdTask, lastFetchTask, queueRows, failedTasks, freshRows, recentFailedRows, beatRows] = await Promise.all([
+  const [recentJobs, lastAdTask, lastFetchTask, queueRows, renderQueueRows, failedTasks, freshRows, recentFailedRows, beatRows] = await Promise.all([
     prisma.researchJob.findMany({
       where: { status: "complete" },
       orderBy: { createdAt: "desc" },
@@ -208,6 +208,14 @@ export default async function StatusPage() {
         (max(extract(epoch FROM now() - "createdAt")) FILTER (WHERE status = 'queued'))::float AS "oldestQueuedSec"
       FROM "WorkerTask"
     `,
+    prisma.$queryRaw<{ waiting: bigint; inProgress: bigint; oldestWaitSec: number | null }[]>`
+      SELECT
+        count(*) FILTER (WHERE status = 'approved') AS waiting,
+        count(*) FILTER (WHERE status IN ('claimed', 'running', 'assembling')) AS "inProgress",
+        (max(extract(epoch FROM now() - coalesce("approvedAt", "createdAt"))) FILTER (WHERE status = 'approved'))::float AS "oldestWaitSec"
+      FROM "LibtvRun"
+      WHERE status IN ('approved', 'claimed', 'running', 'assembling')
+    `,
     prisma.workerTask.count({ where: { status: "failed" } }),
     // Freshness is decided by the database's clock — reading the process clock
     // during render is impure and the app's lint rules reject it.
@@ -229,6 +237,9 @@ export default async function StatusPage() {
   const queued = Number(queueRows[0]?.active ?? 0);
   const waiting = Number(queueRows[0]?.waiting ?? 0);
   const oldestQueuedSec = queueRows[0]?.oldestQueuedSec ?? null;
+  const renderWaiting = Number(renderQueueRows[0]?.waiting ?? 0);
+  const renderInProgress = Number(renderQueueRows[0]?.inProgress ?? 0);
+  const oldestRenderWaitSec = renderQueueRows[0]?.oldestWaitSec ?? null;
   const recentFailed = Number(recentFailedRows[0]?.failed ?? 0);
   const comfy = await comfyPromise;
   const ops = await opsPromise;
@@ -308,6 +319,16 @@ export default async function StatusPage() {
               <span className="text-xs text-muted-foreground">
                 {waiting} waiting · {queued - waiting} in progress · {failedTasks} failed all attempts
                 {oldestQueuedSec !== null && ` · oldest wait ${Math.max(0, Math.round(oldestQueuedSec / 60))} min${oldestQueuedSec > 900 ? " (over 15 min target)" : ""}`}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+              <span className="flex items-center gap-2">
+                <Dot ok={renderWaiting === 0} warn={renderWaiting > 0} />
+                Video render queue
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {renderWaiting} waiting · {renderInProgress} in progress
+                {oldestRenderWaitSec !== null && ` · oldest wait ${Math.max(0, Math.round(oldestRenderWaitSec / 60))} min${oldestRenderWaitSec > 900 ? " (over 15 min target)" : ""}`}
               </span>
             </div>
             <div className="flex items-center justify-between gap-3 px-3 py-2.5">
