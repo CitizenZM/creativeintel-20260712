@@ -4,6 +4,16 @@ import { auditScriptClaims, auditScriptText, repairScriptCta, scriptV2Schema } f
 const text = "Guaranteed brightest picture — the #1 best-selling TV, 20% off today";
 
 describe("claims audit strictness", () => {
+  it("rejects numeric claims when no approved source facts exist", () => {
+    expect(auditScriptText("99% effective", {}).violations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ reason: expect.stringContaining("unsourced numeric claim") })])
+    );
+    const script = scriptV2Schema.parse({ title: "No source", hook: { text: "99% effective" } });
+    expect(auditScriptClaims(script, {}).violations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: "hook.text", reason: expect.stringContaining("unsourced numeric claim") })])
+    );
+  });
+
   it("lets bold wording through by default but still catches brand-forbidden phrases and invented numbers", () => {
     const a = auditScriptText(text, { claimsForbidden: ["brightest"], sourceText: "Black Friday 15% off" });
     const reasons = a.violations.map((v) => v.reason).join(" | ");

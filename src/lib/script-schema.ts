@@ -514,15 +514,13 @@ export function auditScriptText(text: string, opts: ScriptClaimsAuditInput): Scr
   for (const hit of opts.strictCompliance ? findAbsoluteMatches(text) : []) {
     violations.push({ path: "body", text: hit, reason: `absolute/curative claim: "${hit}"` });
   }
-  if (sourceText) {
-    for (const nc of extractNumericClaims(text)) {
-      if (!numberOccursIn(nc.value, sourceText)) {
-        violations.push({
-          path: "body",
-          text: nc.raw,
-          reason: `unsourced numeric claim: "${nc.raw}" does not appear in brand truth / briefing / claimsAllowed / offer text`,
-        });
-      }
+  for (const nc of extractNumericClaims(text)) {
+    if (!numberOccursIn(nc.value, sourceText)) {
+      violations.push({
+        path: "body",
+        text: nc.raw,
+        reason: `unsourced numeric claim: "${nc.raw}" does not appear in brand truth / briefing / claimsAllowed / offer text`,
+      });
     }
   }
   return { ok: violations.length === 0, violations };
@@ -568,7 +566,7 @@ export function auditScriptClaims(script: ScriptV2, opts: ScriptClaimsAuditInput
     // The rendered body repeats every field above plus structural timing
     // ("[BODY beat 1 …] 3–4.2s"), so numbers are only audited on the spoken /
     // on-screen fields where they would actually be a claim.
-    if (sourceText && field.path !== "body (rendered)") {
+    if (field.path !== "body (rendered)") {
       for (const nc of extractNumericClaims(field.text)) {
         if (!numberOccursIn(nc.value, sourceText)) {
           violations.push({

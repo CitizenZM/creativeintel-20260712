@@ -24,6 +24,7 @@ import { creativeDirectionLine, sanitizeStyleCategories } from "@/lib/style-cate
 import type { CampaignPlan, PlatformPlan } from "@/services/creative/campaign-plan.types";
 import { campaignToPlatform, creativeBlock as creativeBlockFn, type CreativeBlockInput } from "@/services/creative/prompt-blocks";
 import type { ProductBrief } from "@/services/creative/product-brief";
+import { scriptSourceFacts } from "@/services/creative/script-source-facts";
 
 const VALID_NARRATIVE_TYPES: NarrativeType[] = [
   "PROBLEM_SOLUTION",
@@ -244,7 +245,7 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     creativeInput,
     campaignPlan: platformPlan,
     planHookCursor: 0,
-    briefFacts: briefFacts(brief, platformPlan) || undefined,
+    briefFacts: scriptSourceFacts(brief, storedPlan?.promo) || undefined,
     strictCompliance,
     totalDurationSec,
     selectedEnvironment: (campaignSel?.selectedEnvironment as string | null) || undefined,
@@ -298,21 +299,6 @@ export function pickPlatformPlan(
   if (!platformId) return plan.platforms[0];
   const want = toPlatform(platformId);
   return plan.platforms.find((p) => p.platform === want || p.platform === platformId) ?? null;
-}
-
-/** The brief's and plan's own facts (claims, evidence, offer copy) — sourced text for the claims audit. */
-export function briefFacts(brief: ProductBrief | null | undefined, plan: PlatformPlan | null | undefined): string {
-  const parts: string[] = [];
-  for (const p of brief?.sellingPoints ?? []) {
-    parts.push(p.claim, p.benefit, p.proofVisual?.overlayText ?? "", ...(p.sourceEvidence ?? []).map((e) => e.quote));
-  }
-  if (brief?.product?.price) parts.push(String(brief.product.price));
-  if (plan) {
-    parts.push(plan.endCard.headline ?? "", plan.endCard.button, ...Object.values(plan.endCard.data ?? {}).map(String));
-    for (const b of plan.beats) parts.push(b.onScreenText ?? "", b.vo ?? "");
-    for (const h of plan.hookVariants) parts.push(h.openingText, h.openingVO);
-  }
-  return parts.filter((s) => s && s.trim()).join("\n").slice(0, 6000);
 }
 
 /** The most-viewed competitor ad with a beat-level teardown — the structure to emulate. */
