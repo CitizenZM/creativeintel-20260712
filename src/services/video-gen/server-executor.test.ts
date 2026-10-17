@@ -556,9 +556,8 @@ describe("clip drift results", () => {
     await tickRun(adapter, "run1");
     adapter.videoTasks.set("task-V1", { status: "SUCCESS", url: "https://cdn/V1-a.mp4", creditsSpent: 20, settingsPatch: { drift, driftFlag: true }, regenerate: true });
     await tickRun(adapter, "run1");
-    expect(statusOf("v1")).toBe("queued");
+    expect(statusOf("v1")).toBe("running"); // the freed slot is reused in the same tick
     expect(store.jobs.find((j) => j.id === "v1")!.settings).toMatchObject({ driftRegens: 1, driftRejectedUrl: "https://cdn/V1-a.mp4", priorCreditsSpent: 20, driftFlag: true });
-    await tickRun(adapter, "run1"); // the re-queued clip is submitted on the next tick
     const submits = (adapter.submitVideo as ReturnType<typeof vi.fn>).mock.calls;
     expect(submits).toHaveLength(2);
     expect(submits[0][0].seed).toBe(1000);

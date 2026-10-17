@@ -100,8 +100,8 @@ const TERMINAL_JOB = new Set(["completed", "skipped", "failed"]);
  * every generated frame is told to have none. Prepended so a model that
  * truncates long prompts (CogVideoX: 500 chars) still sees it.
  */
-export const NO_TEXT_IMAGE = "No text, letters, words, numbers, logos, signage or watermarks anywhere in the image.";
-export const NO_TEXT_VIDEO = "No text, letters, logos or signage appear.";
+export const NO_TEXT_IMAGE = "No invented text, labels, logos, signage or watermarks. Preserve the exact printed label and logo on any supplied product reference.";
+export const NO_TEXT_VIDEO = "No invented text, labels, logos or signage. Preserve the exact printed label and logo on the referenced product.";
 
 /**
  * Engines whose image-to-video warps faces (the free CogVideoX, small local
@@ -511,10 +511,12 @@ export async function tickRun(
       console.warn(`[${adapter.engine}] poll ${j.nodeName} failed:`, errorText(err));
     }
   }
-  const byNameFresh = new Map(fresh.map((j) => [j.nodeName, j]));
-  let inFlight = videos.filter((x) => x.status === "running").length;
+  // Polling may have completed a clip and freed a slot in this same tick.
+  const afterPoll = await prisma.libtvJob.findMany({ where: { runId } });
+  const byNameFresh = new Map(afterPoll.map((j) => [j.nodeName, j]));
+  let inFlight = afterPoll.filter((x) => x.kind === "video" && x.status === "running").length;
   // A keyframe-review run holds its clips until "release-videos".
-  for (const j of videos.filter((x) => x.status === "queued" && !(x.settings as { hold?: number } | null)?.hold)) {
+  for (const j of afterPoll.filter((x) => x.kind === "video" && x.status === "queued" && !(x.settings as { hold?: number } | null)?.hold)) {
     if (inFlight >= adapter.maxVideosInFlight) break;
     const ref = byNameFresh.get(refName(((j.leftRefs as string[] | null) ?? [])[0] ?? ""));
     if (ref && !TERMINAL_JOB.has(ref.status)) continue; // keyframe not ready yet

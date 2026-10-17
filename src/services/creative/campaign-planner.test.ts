@@ -178,8 +178,9 @@ describe("writeCampaignScripts", () => {
   });
 
   it("rejects a rewritten visual that drops the product", async () => {
-    const res = await writeCampaignScripts(scaffold, brief, { goal: "promo", promo, runDate: BF, llm: async () => ({ beats: [{ i: 1, visual: "an empty beach at dusk", vo: "ok" }] }) });
+    const res = await writeCampaignScripts(scaffold, brief, { goal: "promo", promo, runDate: BF, llm: async () => ({ beats: [{ i: 1, visual: "an empty beach at dusk", vo: "ok" }], hooks: [{ hookId: scaffold.hookVariants[0].hookId, openingVisual: "an empty beach at dusk" }] }) });
     expect(res.plan.beats[1].visual).toBe(scaffold.beats[1].visual);
+    expect(res.plan.hookVariants[0].openingVisual).toBe(scaffold.hookVariants[0].openingVisual);
   });
 
   it("falls back to the scaffold copy when the model fails or returns nothing", async () => {

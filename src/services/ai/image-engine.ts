@@ -26,6 +26,8 @@ export type ImageEngineId = "glm" | "openai" | "fal" | "pollinations" | "bach" |
 
 export interface ImageRequest {
   prompt: string;
+  /** Source packshots for engines that support image-guided editing. */
+  referenceImageUrls?: string[];
   /** Whole generation plus fallback/persistence budget; default 150 seconds. */
   budgetMs?: number;
   shape: "landscape" | "square" | "portrait";
@@ -157,6 +159,7 @@ async function runEngine(engine: ImageEngineId, req: ImageRequest, deadlineAt: n
       aspectRatio,
       imageSize: "2K",
       quality: req.openaiQuality === "low" ? "low" : "medium",
+      referenceImageUrls: req.referenceImageUrls?.slice(0, 4),
     }, deadlineAt);
     await logAiUsage({ provider: "bach", model: "gpt-image2-economy", capability: "image", images: 1, costUsd: null, projectId: req.projectId });
     const fetched = await safeFetchBuffer(sourceUrl, { timeoutMs: remainingRequestMs(deadlineAt, 25_000), maxBytes: 20 * 1024 * 1024 });

@@ -20,6 +20,7 @@ export const bachAdapter: EngineAdapter = {
   async generateImage(prompt, ctx) {
     const url = await generateImageByEngine({
       prompt: applyCorrections(prompt, Array.isArray(ctx.settings?.qcCorrections) ? ctx.settings.qcCorrections as string[] : undefined),
+      referenceImageUrls: ctx.referenceUrls,
       shape: ctx.aspectRatio === "1:1" ? "square" : ctx.aspectRatio === "9:16" ? "portrait" : "landscape",
       openaiQuality: "medium",
       pollinations: ctx.aspectRatio === "9:16" ? { width: 576, height: 1024, as: "url" } : { width: 1024, height: 576, as: "url" },

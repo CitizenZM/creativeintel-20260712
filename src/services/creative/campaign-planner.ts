@@ -257,7 +257,7 @@ function hookCopy(h: HookDef, c: CopyCtx, k: number): { text: string; vo: string
   if (h.id === "H26" && doubt) return { text: `"${clipWords(stripEnd(doubt), 8)}?"`, vo: `${stripEnd(doubt)}? Watch this.` };
   if (h.id === "H13") return { text: `3 REASONS TO SWITCH`, vo: `Three reasons people are switching to ${c.product}.` };
   if (h.id === "H14" || h.id === "H30" || h.id === "H09") return { text: painQuestion.toUpperCase(), vo: painQuestion };
-  if (h.family === "native") return { text: `POV: ${clipWords(lowerFirst(stripEnd(squash(top?.benefit)) || `you found the ${c.product}`), 7)}`, vo: `Okay, I need to talk about the ${c.product}.` };
+  if (h.family === "native") return { text: `POV: ${clipWords(lowerFirst(stripEnd(squash(top?.benefit)) || `you found the ${c.product}`), 7)}`, vo: `${c.product}: ${clipWords(stripEnd(squash(top?.benefit)) || big, 9)}.` };
   if (h.family === "reveal") return { text: c.product.toUpperCase(), vo: `${c.product}. ${clipWords(big, 8)}.` };
   if (h.family === "claim") return { text: numbered ? keyword(numbered.claim) : keyword(big), vo: fitVO([`${stripEnd(squash(numbered?.claim))}.`, `${big}.`], 8) };
   return { text: keyword(big), vo: fitVO([`${big}.`], 8) };
@@ -530,20 +530,20 @@ export function campaignCopyPrompts(scaffold: PlatformPlan, brief: ProductBrief,
 RULES
 - Keep every beat's index, timing and purpose. VO fits its words budget (2.5 words per second); lines read as one script in order. The CTA beat is the last second: offer + action, matching the button.
 - ${opts.goal === "promo" ? `First 3 s = the sale pitch: each hook opening asks the occasion/need question, the pitch beat lands the offer ("${offerLine(facts)}"). Example: "Want a New Year gift?" → "20% OFF this Black Friday".` : "The hook states the value proposition by the platform hook second."}
-- Write a distinct opening for EVERY hook variant, following its recipe; the body is shared.
+- Write a distinct, concrete opening for EVERY hook variant, following its recipe; the body is shared. No greetings or filler. The first visual must show the supplied product or a specific outcome.
 - ${strict ? "Stay inside each claim's safe wording and keep required disclosures." : "Sell hard: the boldest, most persuasive wording the FACTS support — superlatives, urgency and direct comparisons are welcome when a fact carries them."} Only numbers that appear in FACTS or OFFER.
 - Visuals keep the product in frame; every zoom lands on the product. On-screen text never repeats the VO word for word.
-${playbookSlice({ category: brief.category, platform: scaffold.platform, goal: opts.goal, maxWords: 300 })}`;
+${playbookSlice({ category: brief.category, platform: scaffold.platform, goal: opts.goal, maxWords: 180 })}`;
   const user = JSON.stringify({
     product: brief.product,
     bigIdea: brief.bigIdea?.proposition,
     audience: brief.audience?.primary,
-    facts: brief.sellingPoints.slice(0, 6).map((p) => ({ id: p.id, claim: p.claim, benefit: p.benefit, evidence: p.sourceEvidence?.slice(0, 2).map((e) => clip(e.quote, 140)) })),
+    facts: brief.sellingPoints.slice(0, 6).map((p) => ({ id: p.id, claim: p.claim, benefit: p.benefit, evidence: p.sourceEvidence?.slice(0, 1).map((e) => clip(e.quote, 100)) })),
     objection: brief.objections?.[0],
     offer: { ...facts, line: offerLine(facts), endCard: scaffold.endCard },
     platform: { id: scaffold.platform, durationSec: scaffold.durationSec, voice: scaffold.voice, captions: scaffold.captionStyle, pacing: scaffold.pacing },
-    hooks: scaffold.hookVariants.map((h) => ({ hookId: h.hookId, name: h.name, family: h.family, recipe: clip(h.openingVisual, 260), text: h.openingText, vo: h.openingVO })),
-    beats: scaffold.beats.map((b, i) => ({ i, t: `${b.t0}-${b.t1}`, purpose: b.purpose, sellingPointId: b.sellingPointId, visual: clip(b.visual, 240), vo: b.vo, onScreenText: b.onScreenText, words: voBudget(b.t1 - b.t0) })),
+    hooks: scaffold.hookVariants.map((h) => ({ hookId: h.hookId, name: h.name, family: h.family, recipe: clip(h.openingVisual, 200), text: h.openingText, vo: h.openingVO })),
+    beats: scaffold.beats.map((b, i) => ({ i, t: `${b.t0}-${b.t1}`, purpose: b.purpose, sellingPointId: b.sellingPointId, visual: clip(b.visual, 180), vo: b.vo, onScreenText: b.onScreenText, words: voBudget(b.t1 - b.t0) })),
   });
   return { system, user };
 }
@@ -582,7 +582,7 @@ export function mergeCampaignCopy(scaffold: PlatformPlan, raw: unknown, productN
     const r = hookCopySchema.safeParse(item);
     const h = r.success ? hooks.find((x) => x.hookId === r.data.hookId) : undefined;
     if (!r.success || !h) continue;
-    if (r.data.openingVisual?.trim()) {
+    if (r.data.openingVisual?.trim() && (!product || r.data.openingVisual.toLowerCase().includes(product))) {
       h.openingVisual = clip(r.data.openingVisual, 420);
       applied++;
     }

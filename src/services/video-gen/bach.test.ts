@@ -41,7 +41,8 @@ describe("Bach API adapter", () => {
       if (typeof callback === "function") callback();
       return 0 as unknown as ReturnType<typeof setTimeout>;
     }) as unknown as typeof setTimeout);
-    await expect(generateBachImage({ prompt: "a product", aspectRatio: "16:9" }, Date.now() + 10_000)).resolves.toBe("https://example.com/image.png");
+    await expect(generateBachImage({ prompt: "a product", aspectRatio: "16:9", referenceImageUrls: ["https://example.com/official-packshot.png"] }, Date.now() + 10_000)).resolves.toBe("https://example.com/image.png");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).reference_image_urls).toEqual(["https://example.com/official-packshot.png"]);
     await expect(pollBachVideo("video-1")).resolves.toMatchObject({ status: "completed", videoUrl: "https://example.com/video.mp4" });
   });
 
