@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   count: vi.fn(),
   analyze: vi.fn(),
   audit: vi.fn(),
-  buildInput: vi.fn(() => ({})),
+  buildInput: vi.fn((..._args: unknown[]) => ({})),
   persist: vi.fn(async (_projectId: string, script: unknown) => script),
 }));
 
