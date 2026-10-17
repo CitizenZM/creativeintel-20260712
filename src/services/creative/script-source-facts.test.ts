@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { auditScriptText } from "@/lib/script-schema";
 import type { ProductBrief } from "./product-brief";
 import type { PromoInput } from "./campaign-planner";
-import { scriptSourceFacts } from "./script-source-facts";
+import { scriptSourceFacts, verifiedBriefSellingPoints } from "./script-source-facts";
 
 describe("scriptSourceFacts", () => {
   it("accepts only verified product evidence and user-supplied offer numbers", () => {
@@ -30,5 +30,14 @@ describe("scriptSourceFacts", () => {
     expect(facts).not.toContain("SAVE20");
     expect(auditScriptText("98% effective", { sourceText: facts }).ok).toBe(false);
     expect(auditScriptText("20% off", { sourceText: facts }).ok).toBe(true);
+    expect(verifiedBriefSellingPoints(brief)).toEqual([]);
+  });
+
+  it("passes only selling points backed by matched product quotes", () => {
+    const brief = { sellingPoints: [
+      { claim: "25g protein", benefit: "daily protein", sourceEvidence: [{ quote: "25g protein", verified: true }] },
+      { claim: "Clinically proven", benefit: "better health", sourceEvidence: [{ quote: "Clinically proven", verified: false }] },
+    ] } as unknown as ProductBrief;
+    expect(verifiedBriefSellingPoints(brief)).toEqual(["25g protein → daily protein"]);
   });
 });

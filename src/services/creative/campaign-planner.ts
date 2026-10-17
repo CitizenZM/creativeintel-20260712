@@ -19,6 +19,7 @@ import type { CampaignPlan, EndCardPlan, HookVariant, PlanBeat, PlanOverrides, P
 import { END_CARDS, endCardById, hookById, inGiftingWindow, platformProfile, selectCreative } from "./library";
 import { playbookSlice } from "./playbooks";
 import { TO_CREATIVE_CATEGORY, type ProductBrief, type SpCategory } from "./product-brief";
+import { isSupportedBriefPoint } from "./script-source-facts";
 import { campaignToPlatform, goalFromText } from "./prompt-blocks";
 import type { CampaignGoal, CreativeInputs, EndCardDef, EndCardId, HookDef, PlatformId } from "./types";
 import { PLATFORM_PROFILES } from "./platforms.data";
@@ -525,7 +526,7 @@ export interface WriteOptions {
 export function campaignCopyPrompts(scaffold: PlatformPlan, brief: ProductBrief, opts: WriteOptions): { system: string; user: string } {
   const strict = !!opts.strictCompliance;
   const facts = offerFacts(opts.promo, opts.runDate ?? new Date().toISOString());
-  const hasUnverified = !brief.sellingPoints.length || brief.sellingPoints.some((point) => !point.sourceEvidence?.some((evidence) => evidence.verified === true));
+  const hasUnverified = !brief.sellingPoints.length || brief.sellingPoints.some((point) => !isSupportedBriefPoint(point));
   const system = `You are CreativeIntel's campaign copywriter. You receive one platform's timed ad plan and write its copy. Output JSON only:
 {"beats":[{"i":beatIndex,"vo":"spoken line","onScreenText":"≤ 6 words","visual":"optional sharper shot description"}],"hooks":[{"hookId":"H..","openingVisual":"frame 1 + move","openingText":"≤ 6 words","openingVO":"spoken opener"}]}
 RULES
@@ -539,7 +540,7 @@ ${playbookSlice({ category: brief.category, platform: scaffold.platform, goal: o
     product: brief.product,
     bigIdea: brief.bigIdea?.proposition,
     audience: brief.audience?.primary,
-    verifiedFacts: brief.sellingPoints.slice(0, 6).filter((p) => p.sourceEvidence?.some((e) => e.verified === true)).map((p) => ({ id: p.id, claim: p.claim, benefit: p.benefit, evidence: p.sourceEvidence?.filter((e) => e.verified === true).slice(0, 1).map((e) => clip(e.quote, 100)) })),
+    verifiedFacts: brief.sellingPoints.slice(0, 6).filter(isSupportedBriefPoint).map((p) => ({ id: p.id, claim: p.claim, benefit: p.benefit, evidence: p.sourceEvidence?.filter((e) => e.verified === true).slice(0, 1).map((e) => clip(e.quote, 100)) })),
     objection: brief.objections?.[0],
     offer: { ...facts, line: offerLine(facts), endCard: scaffold.endCard },
     platform: { id: scaffold.platform, durationSec: scaffold.durationSec, voice: scaffold.voice, captions: scaffold.captionStyle, pacing: scaffold.pacing },

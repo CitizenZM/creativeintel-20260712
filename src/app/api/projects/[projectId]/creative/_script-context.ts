@@ -24,7 +24,7 @@ import { creativeDirectionLine, sanitizeStyleCategories } from "@/lib/style-cate
 import type { CampaignPlan, PlatformPlan } from "@/services/creative/campaign-plan.types";
 import { campaignToPlatform, creativeBlock as creativeBlockFn, type CreativeBlockInput } from "@/services/creative/prompt-blocks";
 import type { ProductBrief } from "@/services/creative/product-brief";
-import { scriptSourceFacts } from "@/services/creative/script-source-facts";
+import { scriptSourceFacts, verifiedBriefSellingPoints } from "@/services/creative/script-source-facts";
 
 const VALID_NARRATIVE_TYPES: NarrativeType[] = [
   "PROBLEM_SOLUTION",
@@ -239,7 +239,7 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     goalType: project.goalType,
     styleCategories: sanitizeStyleCategories(campaignSel?.styleCategories),
     // The ranked, filmable brief wins over legacy mined points when it exists.
-    sellingPoints: brief?.sellingPoints?.length ? brief.sellingPoints.slice(0, 6).map((sp) => `${sp.claim} → ${sp.benefit}`) : sellingPoints.map((sp) => sp.point),
+    sellingPoints: brief?.sellingPoints ? verifiedBriefSellingPoints(brief) : sellingPoints.map((sp) => sp.point),
     platformId,
     creativeBlock: creative.text,
     creativeInput,

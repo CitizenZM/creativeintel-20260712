@@ -12,6 +12,7 @@ import type { PlatformPlan } from "./campaign-plan.types";
 import { platformBrief, selectCreative } from "./library";
 import { playbookSlice } from "./playbooks";
 import { classifyProduct, TO_CREATIVE_CATEGORY, type ProductBrief, type SpCategory } from "./product-brief";
+import { isSupportedBriefPoint } from "./script-source-facts";
 import type { CampaignGoal, CreativeChoice, CreativeInputs, PlatformId } from "./types";
 
 /** Campaign platform ids (CAMPAIGN_PLATFORMS: tiktok|instagram|youtube|tvc|amazon + free text) → profile id. */
@@ -56,7 +57,7 @@ export function briefBlock(brief: ProductBrief, maxPoints = 3, opts: BlockOption
   const pts = brief.sellingPoints.slice(0, maxPoints);
   const point = (p: (typeof pts)[number], i: number) => {
     const fact = p.sourceEvidence?.find((source) => source.verified === true)?.quote;
-    if (!fact) return `${i + 1}. UNVERIFIED SHOT IDEA: ${clip(p.proofVisual.shot, 140)} | visual concept only; do not state a product claim`;
+    if (!fact || !isSupportedBriefPoint(p)) return `${i + 1}. UNVERIFIED SHOT IDEA: ${clip(p.proofVisual.shot, 140)} | visual concept only; do not state a product claim`;
     const base = `${i + 1}. ${clip(p.claim, 90)} → ${clip(p.benefit, 90)} | proof shot: ${clip(p.proofVisual.shot, 140)}${p.proofVisual.overlayText ? ` | overlay "${clip(p.proofVisual.overlayText, 40)}"` : ""}`;
     if (strict) return `${base}${p.compliance?.safeWording ? ` | safe wording: ${clip(p.compliance.safeWording, 100)}` : ""}${p.compliance?.requiredDisclosure ? ` | disclosure: ${clip(p.compliance.requiredDisclosure, 100)}` : ""}`;
     return `${base} | fact: "${clip(fact, 90)}"`;
@@ -107,11 +108,11 @@ export function planBlock(plan: PlatformPlan, hookIndex = 0, opts: { brief?: Pro
   const T = opts.targetSec && opts.targetSec > 0 ? opts.targetSec : D;
   const k = (T - 1) / Math.max(0.1, D - 1);
   const at = (t: number) => (t >= D - 1 ? Math.round((T - (D - t)) * 10) / 10 : Math.round(t * k * 10) / 10);
-  const hasUnverified = !opts.brief?.sellingPoints.length || opts.brief.sellingPoints.some((point) => !point.sourceEvidence?.some((evidence) => evidence.verified === true));
+  const hasUnverified = !opts.brief?.sellingPoints.length || opts.brief.sellingPoints.some((point) => !isSupportedBriefPoint(point));
   const spText = (id?: string) => {
     const p = id ? opts.brief?.sellingPoints.find((x) => x.id === id) : undefined;
     if (!p) return "";
-    return p.sourceEvidence?.some((evidence) => evidence.verified === true)
+    return isSupportedBriefPoint(p)
       ? ` [selling point: "${clip(p.claim, 70)} → ${clip(p.benefit, 70)}"]`
       : " [unverified shot idea: do not state a product claim]";
   };
