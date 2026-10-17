@@ -1,3 +1,4 @@
+import { startResearch } from "@/services/research/dispatch";
 import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db";
@@ -7,7 +8,7 @@ import {
   createJob,
   getActiveJobForProject,
 } from "@/services/research/job-progress";
-import { runResearch, STEP_NAMES } from "@/services/research/runner";
+import { STEP_NAMES } from "@/services/research/runner";
 import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 300;
@@ -57,7 +58,7 @@ async function unguardedPOST(
   const jobId = await createJob(projectId, [...STEP_NAMES]);
 
   // Background execution — function may return before runResearch resolves.
-  waitUntil(runResearch(projectId, jobId));
+  await startResearch(projectId, jobId);
 
   const body = { jobId, status: "running" as const };
   await idem.commit?.(body, 202);

@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * POST /api/projects/[projectId]/brand-kit/suggest
  *
@@ -159,7 +160,7 @@ async function unguardedPOST(
     } catch (err) {
       // Degrade gracefully — still apply the landingUrl fallback below and
       // report the AI miss instead of failing the whole request.
-      aiError = err instanceof Error ? err.message.slice(0, 300) : String(err);
+      aiError = safePublicError(err);
       console.warn("brand-kit suggest: AI call failed", err);
     }
   }

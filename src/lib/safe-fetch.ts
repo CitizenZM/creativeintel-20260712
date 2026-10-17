@@ -192,7 +192,7 @@ export async function safeFetchText(
 /** Guarded binary fetch — for pulling a remote asset into storage. */
 export async function safeFetchBuffer(
   url: string,
-  opts?: { timeoutMs?: number; maxBytes?: number }
+  opts?: { timeoutMs?: number; maxBytes?: number; signal?: AbortSignal }
 ): Promise<{ ok: boolean; status: number; buffer: Buffer | null; contentType: string; error?: string }> {
   try {
     await assertSafeUrl(url);
@@ -201,7 +201,8 @@ export async function safeFetchBuffer(
   }
 
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(opts?.timeoutMs ?? 20_000) });
+    const timeout = AbortSignal.timeout(opts?.timeoutMs ?? 20_000);
+    const res = await fetch(url, { signal: opts?.signal ? AbortSignal.any([opts.signal, timeout]) : timeout });
     if (!res.ok) return { ok: false, status: res.status, buffer: null, contentType: "", error: `HTTP ${res.status}` };
     const arr = await res.arrayBuffer();
     const maxBytes = opts?.maxBytes ?? 15 * 1024 * 1024;

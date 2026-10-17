@@ -1,3 +1,4 @@
+import { deferWorkerTask, ignoredWorkerPayload, isWorkerDeferring } from "./worker-await";
 /**
  * Fetch a URL through the operator's local browser when this server's own
  * fetch is refused.
@@ -8,8 +9,8 @@
  * research worker already runs there driving ego-browser, so the page is
  * fetched there and read back through the existing WorkerTask queue.
  *
- * This blocks the caller, so only use it from background work (the research
- * runner) — never from a request a person is waiting on.
+ * Durable research enqueues immediately and suspends at its phase barrier.
+ * Other background callers may wait briefly for a result; avoid user-facing requests.
  */
 import { prisma } from "@/lib/db";
 import {
@@ -62,8 +63,11 @@ export async function fetchViaWorker(
     if (hit && accept(hit)) return hit;
   }
 
-  // Nobody would claim the task — waiting would only burn the caller's time.
-  if (!(await isWorkerOnline())) return null;
+  if (ignoredWorkerPayload(hash)) return null;
+
+  // Durable research can wait for an offline worker without holding a function.
+  // Ordinary callers skip the wait when no worker is online.
+  if (!isWorkerDeferring() && !(await isWorkerOnline())) return null;
 
   const { taskId } = await enqueueWorkerTask({
     projectId: opts.projectId ?? null,
@@ -73,6 +77,7 @@ export async function fetchViaWorker(
     priority: 10,
   });
   if (!taskId) return null;
+  if (deferWorkerTask(taskId)) return null;
 
   const deadline = Date.now() + (opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   while (Date.now() < deadline) {

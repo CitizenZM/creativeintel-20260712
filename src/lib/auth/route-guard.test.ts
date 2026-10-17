@@ -148,11 +148,13 @@ describe("withAccess — spend scope and budget refusals", () => {
     expect((await POST(req(`/api/projects/${P}/x`, { method: "POST" }))).status).toBe(200);
   });
 
-  it("other errors still propagate", async () => {
+  it("unexpected failures return a generic 500 without internal details", async () => {
     const GET = withAccess(async (_r: Request): Promise<Response> => {
       throw new Error("boom");
     });
-    await expect(GET(req(`/api/projects/${P}`))).rejects.toThrow("boom");
+    const response = await GET(req(`/api/projects/${P}`));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Unable to complete this request. Please try again." });
   });
 });
 
@@ -167,8 +169,8 @@ describe("every user-facing API route is wrapped", () => {
     }
   };
   walk(root);
-  // Machine routes check their own tokens; /api/health is deliberately public.
-  const exempt = (r: string) => /^(worker|cron|local-files)\//.test(r) || r === "health/route.ts";
+  // Machine and queue routes check their own tokens; health and CSP reports are public.
+  const exempt = (r: string) => /^(worker|cron|local-files|queues)\//.test(r) || r === "health/route.ts" || r === "csp-report/route.ts";
 
   it("found the route files", () => expect(routes.length).toBeGreaterThan(100));
 

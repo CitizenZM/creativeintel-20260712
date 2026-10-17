@@ -1,3 +1,4 @@
+import { remainingRequestMs } from "./request-budget";
 /**
  * Zhipu BigModel (bigmodel.cn) — free image and video generation.
  *   CogView-3-Flash   text → image                    free
@@ -29,24 +30,26 @@ export function isZhipuConfigured(): boolean {
   return !!zhipuKey();
 }
 
-async function zhipu<T>(path: string, init: { method?: string; body?: unknown; auth?: ZhipuAuth } = {}): Promise<T> {
+async function zhipu<T>(path: string, init: { method?: string; body?: unknown; auth?: ZhipuAuth; deadlineAt?: number } = {}): Promise<T> {
   const key = init.auth?.apiKey ?? zhipuKey();
   if (!key) throw new Error("ZHIPU_API_KEY is not configured");
   const base = init.auth?.baseUrl || ZHIPU_BASE_URL;
   let lastErr: unknown;
   // Free models are rate-limited per account: back off on 429 instead of failing.
-  for (let attempt = 0; attempt < 5; attempt++) {
+  const deadlineAt = Math.min(init.deadlineAt ?? Infinity, Date.now() + 120_000);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (Date.now() >= deadlineAt) throw new Error("Zhipu request deadline exceeded");
     const res = await fetch(`${base.endsWith("/") ? base : `${base}/`}${path}`, {
       method: init.method ?? (init.body ? "POST" : "GET"),
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: init.body ? JSON.stringify(init.body) : undefined,
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(Math.max(1, Math.min(40_000, deadlineAt - Date.now()))),
     });
     const data = (await res.json().catch(() => ({}))) as T & { error?: { code?: string; message?: string } };
     if (res.ok) return data;
     lastErr = new Error(`Zhipu ${path} ${res.status}: ${data.error?.message ?? res.statusText}`);
     if (res.status !== 429 && res.status < 500) throw lastErr;
-    await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+    if (attempt < 2) await new Promise((r) => setTimeout(r, Math.min(2000 * 2 ** attempt, Math.max(0, deadlineAt - Date.now()))));
   }
   throw lastErr;
 }
@@ -64,12 +67,13 @@ export function cogviewSize(aspectRatio = "9:16"): string {
 
 export async function generateImage(
   prompt: string,
-  opts: { aspectRatio?: string; projectId?: string; model?: string; auth?: ZhipuAuth; costUsd?: number | null; usageProvider?: string } = {}
+  opts: { aspectRatio?: string; projectId?: string; model?: string; auth?: ZhipuAuth; costUsd?: number | null; usageProvider?: string; deadlineAt?: number } = {}
 ): Promise<string> {
   const model = opts.model ?? ZHIPU_FREE.image;
   const data = await zhipu<{ data?: { url: string }[] }>("images/generations", {
     body: { model, prompt: prompt.slice(0, 1000), size: cogviewSize(opts.aspectRatio) },
     auth: opts.auth,
+    deadlineAt: opts.deadlineAt,
   });
   const url = data.data?.[0]?.url;
   if (!url) throw new Error("CogView returned no image");
@@ -160,10 +164,10 @@ export async function getVideoTask(
 // ─── Persisting results ─────────────────────────────────────────────────────
 // Zhipu's result URLs are temporary; copy anything we keep into our storage.
 
-export async function persistResult(url: string, folder: string, filename: string): Promise<string> {
+export async function persistResult(url: string, folder: string, filename: string, deadlineAt?: number): Promise<string> {
   const { uploadFromUrl } = await import("@/services/storage");
   try {
-    const up = await uploadFromUrl(url, { folder, filename });
+    const up = await uploadFromUrl(url, { folder, filename, signal: deadlineAt === undefined ? undefined : AbortSignal.timeout(remainingRequestMs(deadlineAt)) });
     return up.provider === "inline" ? url : up.url;
   } catch {
     return url;
@@ -176,5 +180,5 @@ export async function generateImagePersisted(
   opts: Parameters<typeof generateImage>[1] & { folder?: string } = {}
 ): Promise<string> {
   const url = await generateImage(prompt, opts);
-  return persistResult(url, opts.folder ?? "glm-images", `cogview-${Date.now()}.png`);
+  return persistResult(url, opts.folder ?? "glm-images", `cogview-${Date.now()}.png`, opts.deadlineAt);
 }

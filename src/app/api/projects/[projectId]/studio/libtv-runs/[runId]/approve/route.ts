@@ -5,7 +5,7 @@
  */
 import { NextResponse, after } from "next/server";
 import { approveRun, getRunWithJobs } from "@/services/video-gen/libtv-queue";
-import { driveServerRun } from "@/services/video-gen/server-engines";
+import { enqueueRender } from "@/services/video-gen/render-dispatch";
 import { isServerEngine } from "@/services/video-gen/libtv-pricing";
 import { isStrictFree, PaidFeatureDisabledError } from "@/lib/cost-mode";
 import { loadAiSettings } from "@/services/settings/ai-settings";
@@ -92,7 +92,7 @@ async function unguardedPOST(
   }
 
   // Server-rendered runs (GLM, ComfyUI) start immediately.
-  if (isServerEngine(run.executor)) after(() => driveServerRun(run.executor, runId, 280_000).then(() => undefined));
+  if (isServerEngine(run.executor)) after(() => enqueueRender("run", runId));
 
   return NextResponse.json({ run });
 }

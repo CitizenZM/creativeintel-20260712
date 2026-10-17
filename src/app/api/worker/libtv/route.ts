@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * Worker-facing endpoint for LibtvRun. The local Mac worker drives the `libtv`
  * CLI (which needs the operator's browser login) and reports over HTTPS, so no
@@ -157,7 +158,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error("worker/libtv failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Unknown error handling worker request" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

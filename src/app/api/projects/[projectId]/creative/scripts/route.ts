@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { COMPLIANCE_FLAG } from "@/lib/script-pick";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
@@ -8,7 +9,7 @@ import {
   isVideoType,
   defaultTemplateBatch,
 } from "@/services/ai/prompts/script-templates";
-import { auditScriptClaims, scriptV2Schema, type ScriptV2 } from "@/lib/script-schema";
+import { auditScriptClaims, repairScriptCta, scriptV2Schema, type ScriptV2 } from "@/lib/script-schema";
 import { withIdempotency } from "@/lib/idempotency";
 import {
   loadScriptContext,
@@ -20,6 +21,8 @@ import {
 } from "../_script-context";
 import { LIVE, isSelectionStatus } from "@/services/creative-library";
 import { withAccess } from "@/lib/auth/route-guard";
+import { scriptRepairRequest } from "@/services/creative/script-repair";
+import { scriptOutputTokenCap } from "@/services/creative/script-token-budget";
 
 export const maxDuration = 300;
 
@@ -96,30 +99,35 @@ async function unguardedPOST(
           }
         : body.angle;
 
+    // A single-script request loads a fresh context each time, so its in-memory
+    // plan cursor would otherwise keep choosing the first hook on every call.
+    const planHookIndex = ctx.campaignPlan
+      ? await prisma.script.count({ where: { projectId, ...LIVE } })
+      : undefined;
     const prompt = buildScriptWritingPrompt(
-      buildScriptInput(ctx, { template, videoType, angle, totalDurationSec })
+      buildScriptInput(ctx, { template, videoType, angle, totalDurationSec, planHookIndex })
     );
 
     let generated: ScriptV2 = await analyzeWithClaude({
       systemPrompt: prompt.system,
       userPrompt: prompt.user,
       responseSchema: scriptV2Schema,
-      maxTokens: 8000,
+      maxTokens: scriptOutputTokenCap(totalDurationSec),
     });
 
     const claimsAudit = auditContext(ctx);
+    generated = repairScriptCta(generated, claimsAudit);
     let audit = auditScriptClaims(generated, claimsAudit);
 
     if (!audit.ok) {
-      const retryUserPrompt = `${prompt.user}\n\nCOMPLIANCE FAILURE — the previous draft violated brand rules. Fix these lines:\n${formatComplianceViolations(
-        audit.violations
-      )}`;
+      const repair = scriptRepairRequest(prompt.user, generated, formatComplianceViolations(audit.violations));
       generated = await analyzeWithClaude({
         systemPrompt: prompt.system,
-        userPrompt: retryUserPrompt,
+        userPrompt: repair.userPrompt,
         responseSchema: scriptV2Schema,
-        maxTokens: 8000,
+        maxTokens: repair.maxTokens,
       });
+      generated = repairScriptCta(generated, claimsAudit);
       audit = auditScriptClaims(generated, claimsAudit);
     }
 
@@ -146,7 +154,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("Script generation failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate script" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

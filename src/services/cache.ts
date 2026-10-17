@@ -1,3 +1,5 @@
+import { sqlTable } from "@/lib/sql-table";
+import { acquireSharedSlot } from "./shared-lease";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db";
 
@@ -72,34 +74,43 @@ export async function cached<T>(
   }
 
   const loaderPromise = (async () => {
-    const value = await loader();
+    // Cache payloads already live in Postgres; use an expiring ownership row
+    // so separate serverless instances don't launch the same scrape together.
+    const release = await acquireSharedSlot(`crawl:${key}:${schemaVersion}`, 1, 180_000, 30_000, 1000);
+    if (!release) throw new Error("Crawl already running; try again shortly");
+    try {
+      const hit = await prisma.crawlCache.findUnique({ where: { cacheKey: key } });
+      if (hit && hit.schemaVersion === schemaVersion && hit.expiresAt > new Date()) return hit.payload as T;
+      const value = await loader();
 
-    if (cacheEmpty || !isEmptyResult(value)) {
-      try {
-        const expiresAt = new Date(Date.now() + ttlSec * 1000);
-        await prisma.crawlCache.upsert({
-          where: { cacheKey: key },
-          create: {
-            cacheKey: key,
-            kind: options.kind,
-            schemaVersion,
-            payload: value as never,
-            expiresAt,
-          },
-          update: {
-            kind: options.kind,
-            schemaVersion,
-            payload: value as never,
-            fetchedAt: new Date(),
-            expiresAt,
-          },
-        });
-      } catch {
-        // cache write error is non-fatal
+      if (cacheEmpty || !isEmptyResult(value)) {
+        try {
+          const expiresAt = new Date(Date.now() + ttlSec * 1000);
+          await prisma.crawlCache.upsert({
+            where: { cacheKey: key },
+            create: {
+              cacheKey: key,
+              kind: options.kind,
+              schemaVersion,
+              payload: value as never,
+              expiresAt,
+            },
+            update: {
+              kind: options.kind,
+              schemaVersion,
+              payload: value as never,
+              fetchedAt: new Date(),
+              expiresAt,
+            },
+          });
+        } catch {
+          // cache write error is non-fatal
+        }
       }
+      return value;
+    } finally {
+      await release();
     }
-
-    return value;
   })();
 
   inFlight.set(key, loaderPromise);
@@ -118,8 +129,13 @@ export async function purgeCache(kindOrKey: string): Promise<number> {
 }
 
 export async function purgeExpired(): Promise<number> {
-  const result = await prisma.crawlCache.deleteMany({
-    where: { expiresAt: { lt: new Date() } },
+  const rows = await prisma.crawlCache.findMany({
+    where: { expiresAt: { lt: new Date() } }, select: { cacheKey: true }, take: 500,
   });
+  const result = await prisma.crawlCache.deleteMany({
+    where: { cacheKey: { in: rows.map((row) => row.cacheKey) }, expiresAt: { lt: new Date() } },
+  });
+  await prisma.$executeRaw`DELETE FROM ${sqlTable("SharedLease")} WHERE "expiresAt" < clock_timestamp() AND "key" IN
+    (SELECT "key" FROM ${sqlTable("SharedLease")} WHERE "expiresAt" < clock_timestamp() LIMIT 500)`;
   return result.count;
 }

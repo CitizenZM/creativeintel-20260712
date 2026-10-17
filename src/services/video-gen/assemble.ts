@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { isCloudinaryConfigured } from "@/services/video/cloudinary-render";
 
 export interface AssembleOptions {
-  transition?: "cut" | "crossfade";
+  transition?: "cut";
   musicUrl?: string;
 }
 
@@ -114,13 +114,8 @@ export async function assembleScriptVideo(
   //    l_video:<public_id> + fl_splice (append after current timeline) +
   //    fl_layer_apply (commit the layer before the next chain link).
   //
-  // Crossfade: Cloudinary supports `e_transition` with splice, but reliable
-  // crossfade-on-concat requires precise timing per clip pair (offsetting the
-  // splice start by the fade duration) which is fragile across arbitrary clip
-  // lengths without probing each clip's actual duration server-side first.
-  // We support the simple "cut" concatenation path here; if `transition:
-  // 'crossfade'` is requested we note it in the delivery but fall back to a
-  // hard cut rather than risk a broken chain.
+  // This endpoint supports cut concatenation. Unsupported transitions are
+  // rejected by the route instead of silently changing the requested edit.
   const [base, ...rest] = uploads;
   const transformation: Record<string, unknown>[] = [];
 
@@ -153,13 +148,6 @@ export async function assembleScriptVideo(
   });
 
   const durationSec = uploads.reduce((sum, u) => sum + u.durationSec, 0);
-
-  if (opts.transition === "crossfade") {
-    // Documented no-op: see comment above. Cut concatenation is used instead.
-    console.warn(
-      `assembleScriptVideo: crossfade transition requested for script ${scriptId} but not implemented — using hard cuts.`
-    );
-  }
 
   return {
     finalUrl,

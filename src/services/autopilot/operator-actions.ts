@@ -25,7 +25,8 @@ export type AutopilotOperatorInput =
 export async function autopilotAction(input: AutopilotOperatorInput, schedule: Schedule): Promise<Result> {
   const store = prismaAutopilotStore;
   if (input.action === "autopilot-start") {
-    const { action: _a, ...req } = input;
+    const req: AutopilotInput & { action?: string } = { ...input };
+    delete req.action;
     try {
       const rec = await startAutopilot(req, store);
       tickLater(schedule, rec.id);

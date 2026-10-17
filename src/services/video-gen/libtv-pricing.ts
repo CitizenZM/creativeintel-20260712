@@ -21,10 +21,10 @@ export interface LibtvVideoPrice {
  * Which executor renders a model: LibTV (credits, Mac worker), Zhipu GLM (free
  * cloud, server-side) or ComfyUI (self-hosted GPU, server-side, free per clip).
  */
-export type RenderEngine = "libtv" | "glm" | "comfyui" | "animatic" | "matrix" | "openrouter";
+export type RenderEngine = "libtv" | "glm" | "comfyui" | "animatic" | "matrix" | "openrouter" | "bach";
 
 /** Engines the Next.js server drives itself (server-executor.ts), never the Mac worker. */
-export const SERVER_ENGINES = ["glm", "comfyui", "animatic", "matrix", "openrouter"] as const;
+export const SERVER_ENGINES = ["glm", "comfyui", "animatic", "matrix", "openrouter", "bach"] as const;
 export type ServerEngine = (typeof SERVER_ENGINES)[number];
 
 export function isServerEngine(engine: string | null | undefined): engine is ServerEngine {
@@ -37,6 +37,7 @@ export function engineLabel(engine: string | null | undefined): string {
   if (engine === "animatic") return "Animatic (free, no key)";
   if (engine === "matrix") return "Matrix (Seedance, paid)";
   if (engine === "openrouter") return "OpenRouter (Seedream + Veo/Wan, low cost)";
+  if (engine === "bach") return "Bach.art Chrome";
   return "LibTV";
 }
 
@@ -88,6 +89,19 @@ export interface LibtvVideoModel {
 export type LibtvModel = LibtvImageModel | LibtvVideoModel;
 
 export const IMAGE_MODELS: LibtvImageModel[] = [
+  ...(process.env.BACH_ACCESS_KEY && process.env.BACH_SECRET_KEY ? [{
+    name: "Bach GPT Image2 Economy",
+    engine: "bach" as const,
+    modality: "image" as const,
+    modeType: "text2image",
+    creditsPerImage: 50,
+    quality: "2K",
+    qualityKey: "quality" as const,
+    ratios: ["1:1", "3:2", "2:3", "3:4", "4:3", "16:9", "9:16", "21:9", "9:21"],
+    settingsKeys: ["modeType", "ratio", "quality", "count"],
+    verified: false,
+    note: "Bach text-to-image API. Their guide has no price table; budget is provisionally estimated at $0.50/image until the provider rate is confirmed.",
+  }] : []),
   {
     name: "Seedream 4.0",
     modality: "image",
@@ -510,6 +524,18 @@ export const VIDEO_MODELS: LibtvVideoModel[] = [
     verified: false,
     note: "Wan 2.2 TI2V 5B image-to-video on your ComfyUI GPU node — 0 credits, no watermark. ~3–10 min per clip depending on the GPU.",
   },
+  ...(process.env.BACH_ACCESS_KEY && process.env.BACH_SECRET_KEY ? [{
+    name: "Bach Chrome (720p)",
+    engine: "bach" as const,
+    modality: "video" as const,
+    modeType: "singleImage2video",
+    prices: Array.from({ length: 11 }, (_, i) => ({ durationSec: i + 5, resolution: "720P", credits: (i + 5) * 50 })),
+    defaultDurationSec: 5,
+    defaultResolution: "720P",
+    settingsKeys: ["modeType", "duration", "resolution"],
+    verified: false,
+    note: "Bach.art Chrome async video API. Their supplied guide has no price table; budget is provisionally estimated at $0.50/second until the provider rate is confirmed. Existing image provider supplies keyframes.",
+  }] : []),
 ];
 
 export const DEFAULT_IMAGE_MODEL = "Seedream 4.0";
@@ -844,7 +870,8 @@ export function modelOptions(
     if (engine === "glm" && !glmAvailable) return false;
     if (engine === "matrix" && !process.env.MATRIX_API_KEY) return false;
     if (engine === "openrouter" && !process.env.OPENROUTER_API_KEY) return false;
-    return freeOnly ? engine === "glm" || engine === "comfyui" || engine === "animatic" : true;
+  if (engine === "bach" && !(process.env.BACH_ACCESS_KEY && process.env.BACH_SECRET_KEY)) return false;
+  return freeOnly ? engine === "glm" || engine === "comfyui" || engine === "animatic" : true;
   };
   // Matrix keyframes need the key, and spend money, so never in strict free mode.
   const images = IMAGE_MODELS.filter(
@@ -867,7 +894,7 @@ export function modelOptions(
       verified: m.verified,
       note: m.note,
       engine: m.engine ?? ("libtv" as const),
-      preferred: m.name === preferred.imageModel || undefined,
+      preferred: m.name === (preferred.imageModel ?? (bachConfiguredByEnv() ? "Bach GPT Image2 Economy" : undefined)) || undefined,
     })),
     video: videos.map((m) => {
       const price = resolveVideoPrice(m, m.defaultDurationSec, m.defaultResolution);
@@ -886,8 +913,12 @@ export function modelOptions(
         note: m.note,
         durations: Array.from(new Set(m.prices.map((p) => p.durationSec))).sort((a, b) => a - b),
         engine: m.engine ?? ("libtv" as const),
-        preferred: m.name === preferred.videoModel || undefined,
+      preferred: m.name === (preferred.videoModel ?? (bachConfiguredByEnv() ? "Bach Chrome (720p)" : undefined)) || undefined,
       };
     }),
   };
+}
+
+function bachConfiguredByEnv(): boolean {
+  return !!process.env.BACH_ACCESS_KEY && !!process.env.BACH_SECRET_KEY;
 }

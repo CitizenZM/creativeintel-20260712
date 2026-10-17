@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * POST { platform?, goal? } — pre-flight creative score of the run's master (ffmpeg + sharp measures
  * plus the render plan, scored 0–100 for the platform with fixes). No spend; kept on qcReport.preflight.
@@ -18,7 +19,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
   try {
     return NextResponse.json({ ok: true, preflight: await preflightRun(projectId, runId, { platform: parsed.data.platform, goal: parsed.data.goal }) });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof PreflightError ? err.status : 500 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: err instanceof PreflightError ? err.status : 500 });
   }
 }
 

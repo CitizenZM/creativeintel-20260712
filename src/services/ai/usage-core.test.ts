@@ -84,3 +84,20 @@ describe("list-price estimates", () => {
     expect(s.engines[0].estimatedUsd).toBeCloseTo(2.5);
   });
 });
+
+
+describe("current official prices", () => {
+  it("applies Gemini intro pricing through the UTC year boundary", async () => {
+    const { gemini38TokenPrices, LIST_PRICES } = await import("./usage-core");
+    expect(gemini38TokenPrices(new Date("2026-12-31T23:59:59Z"))).toEqual({ inPerM: 0.75, outPerM: 3.75 });
+    expect(gemini38TokenPrices(new Date("2027-01-01T00:00:00Z"))).toEqual({ inPerM: 1.5, outPerM: 7.5 });
+    expect(LIST_PRICES["claude-sonnet-5"]).toEqual({ inPerM: 2, outPerM: 10 });
+    expect(LIST_PRICES["claude-opus-5-5"]).toEqual({ inPerM: 4, outPerM: 20 });
+  });
+  it("rounds fal outputs up to whole megapixels and refuses missing dimensions", async () => {
+    const { fluxSchnellCost } = await import("./usage-core");
+    expect(fluxSchnellCost(1024, 1024)).toBe(0.006);
+    expect(fluxSchnellCost(1024, 576)).toBe(0.003);
+    expect(fluxSchnellCost(NaN, 1024)).toBeNull();
+  });
+});

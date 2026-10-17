@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -161,7 +162,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("Test matrix generation failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate test matrix" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

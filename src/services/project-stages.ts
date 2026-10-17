@@ -1,5 +1,6 @@
+import { sqlTable } from "@/lib/sql-table";
 import { prisma } from "@/lib/db";
-import { getBrandKitCompleteness } from "@/services/brand-kit";
+import { calculateBrandKitCompleteness } from "@/services/brand-kit";
 
 export type StageState = "done" | "partial" | "todo";
 
@@ -53,90 +54,63 @@ function firstGap(criteria: StageCriterion[], fallback: string): string {
   return criteria.find((c) => !c.met)?.label ?? fallback;
 }
 
+type StageSnapshot = {
+  id: string;
+  project: { productName: string | null; productUrl: string | null; productPageTitle: string | null; productConfirmedAt: string | null; campaignGoal: string | null; goalType: string | null; category: string | null; campaignSelection: { styleCategories: unknown } | null };
+  kit: Parameters<typeof calculateBrandKitCompleteness>[0];
+  competitors: number; assets: number; paidAssets: number; teardowns: number;
+  pickedPoints: number; pickedPatterns: number; pickedInsights: number; scripts: number;
+  selectedScripts: number; approvedBoards: number;
+  unresearched: { name: string }[]; runs: { status: string; masterMp4Url: string | null }[];
+};
+
+/** One SQL round trip for any number of projects; only small summary values cross the wire. */
+export async function getProjectsStages(projectIds: string[]): Promise<ProjectStages[]> {
+  if (!projectIds.length) return [];
+  const rows = await prisma.$queryRaw<StageSnapshot[]>`
+    SELECT p.id, jsonb_build_object('productName', p."productName", 'productUrl', p."productUrl", 'productPageTitle', p."productPageTitle", 'productConfirmedAt', p."productConfirmedAt", 'campaignGoal', p."campaignGoal", 'goalType', p."goalType", 'category', p.category, 'campaignSelection',
+      (SELECT jsonb_build_object('styleCategories', cs."styleCategories") FROM ${sqlTable("CampaignSelection")}  cs WHERE cs."projectId" = p.id)) AS project,
+      (SELECT jsonb_build_object('colorsHex', k."colorsHex", 'ctaOptions', k."ctaOptions", 'skuDimensionsCm', k."skuDimensionsCm",
+        'landingUrl', k."landingUrl", 'productSummary', k."productSummary", 'claimsAllowed', k."claimsAllowed", 'assets',
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('kind', ba.kind)) FROM ${sqlTable("BrandAsset")}  ba WHERE ba."brandKitId" = k.id), '[]'::jsonb))
+        FROM ${sqlTable("BrandKit")}  k WHERE k."projectId" = p.id) AS kit,
+      (SELECT count(*)::int FROM ${sqlTable("Competitor")}  c WHERE c."projectId" = p.id AND NOT c.excluded) AS competitors,
+      (SELECT count(*)::int FROM ${sqlTable("ContentAsset")}  a WHERE a."projectId" = p.id AND NOT a.excluded) AS assets,
+      (SELECT count(*)::int FROM ${sqlTable("ContentAsset")}  a WHERE a."projectId" = p.id AND NOT a.excluded AND a."isPaidMedia") AS "paidAssets",
+      (SELECT count(*)::int FROM ${sqlTable("AdTeardown")}  a WHERE a."projectId" = p.id) AS teardowns,
+      (SELECT count(*)::int FROM ${sqlTable("SellingPoint")}  a WHERE a."projectId" = p.id AND a.selected) AS "pickedPoints",
+      (SELECT count(*)::int FROM ${sqlTable("NarrativePattern")}  a WHERE a."projectId" = p.id AND a.selected) AS "pickedPatterns",
+      (SELECT count(*)::int FROM ${sqlTable("Insight")}  a WHERE a."projectId" = p.id AND a.selected) AS "pickedInsights",
+      (SELECT count(*)::int FROM ${sqlTable("Script")}  a WHERE a."projectId" = p.id AND a."deletedAt" IS NULL) AS scripts,
+      (SELECT count(*)::int FROM ${sqlTable("Script")}  a WHERE a."projectId" = p.id AND a."deletedAt" IS NULL AND a.status = 'selected') AS "selectedScripts",
+      (SELECT count(*)::int FROM ${sqlTable("Storyboard")}  b JOIN ${sqlTable("Script")}  sc ON sc.id = b."scriptId"
+        WHERE b."projectId" = p.id AND b."deletedAt" IS NULL AND b."isActive" AND sc."deletedAt" IS NULL AND sc.status = 'selected'
+        AND jsonb_typeof(b.frames) = 'array' AND b.frames <> '[]'::jsonb
+        AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(b.frames) = 'array' THEN b.frames ELSE '[]'::jsonb END) f WHERE f->'approved' IS DISTINCT FROM 'true'::jsonb)) AS "approvedBoards",
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('name', c.name)) FROM ${sqlTable("Competitor")}  c
+        WHERE c."projectId" = p.id AND NOT c.excluded AND NOT EXISTS (SELECT 1 FROM ${sqlTable("ContentAsset")}  a WHERE a."competitorId" = c.id)
+        AND c."createdAt" > COALESCE((SELECT max(r."createdAt") FROM ${sqlTable("ResearchJob")}  r WHERE r."projectId" = p.id AND r.status = 'complete'), '-infinity'::timestamp)), '[]'::jsonb) AS unresearched,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('status', r.status, 'masterMp4Url', r."masterMp4Url")) FROM
+        (SELECT status, "masterMp4Url" FROM ${sqlTable("LibtvRun")}  WHERE "projectId" = p.id ORDER BY "createdAt" DESC LIMIT 20) r), '[]'::jsonb) AS runs
+    FROM ${sqlTable("Project")}  p WHERE p.id = ANY(${projectIds}::text[])
+  `;
+  const byId = new Map(rows.map((row) => [row.id, buildStages(row)]));
+  return projectIds.flatMap((id) => byId.has(id) ? [byId.get(id)!] : []);
+}
+
 export async function getProjectStages(projectId: string): Promise<ProjectStages> {
-  const [
-    project,
-    kit,
-    competitors,
-    assets,
-    paidAssets,
-    teardowns,
-    pickedPoints,
-    pickedPatterns,
-    pickedInsights,
-    scripts,
-    selectedScripts,
-    runs,
-  ] = await Promise.all([
-    prisma.project.findUnique({
-      where: { id: projectId },
-      select: {
-        productName: true,
-        productUrl: true,
-        productPageTitle: true,
-        productConfirmedAt: true,
-        campaignGoal: true,
-        goalType: true,
-        campaignSelection: { select: { styleCategories: true } },
-      },
-    }),
-    prisma.brandKit.findUnique({ where: { projectId }, select: { completenessScore: true } }),
-    prisma.competitor.count({ where: { projectId, excluded: false } }),
-    prisma.contentAsset.count({ where: { projectId, excluded: false } }),
-    prisma.contentAsset.count({ where: { projectId, excluded: false, isPaidMedia: true } }),
-    prisma.adTeardown.count({ where: { projectId } }),
-    prisma.sellingPoint.count({ where: { projectId, selected: true } }),
-    prisma.narrativePattern.count({ where: { projectId, selected: true } }),
-    prisma.insight.count({ where: { projectId, selected: true } }),
-    prisma.script.count({ where: { projectId, deletedAt: null } }),
-    prisma.script.findMany({
-      where: { projectId, deletedAt: null, status: "selected" },
-      select: { id: true },
-    }),
-    prisma.libtvRun.findMany({
-      where: { projectId },
-      select: { status: true, masterMp4Url: true },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    }),
-  ]);
+  const [stages] = await getProjectsStages([projectId]);
+  if (!stages) throw new Error('Project not found');
+  return stages;
+}
 
-  // A competitor added after the last completed research run has never been
-  // searched — research isn't done until every competitor has been.
-  const [lastResearch, compRows] = await Promise.all([
-    prisma.researchJob.findFirst({
-      where: { projectId, status: "complete" },
-      orderBy: { createdAt: "desc" },
-      select: { createdAt: true },
-    }),
-    prisma.competitor.findMany({
-      where: { projectId, excluded: false },
-      select: { name: true, createdAt: true, _count: { select: { contentAssets: true } } },
-    }),
-  ]);
-  const unresearched = compRows.filter(
-    (c) => c._count.contentAssets === 0 && (!lastResearch || c.createdAt > lastResearch.createdAt)
-  );
-
-  // A selected script is production-ready once its active storyboard has
-  // every frame approved.
-  const boards = selectedScripts.length
-    ? await prisma.storyboard.findMany({
-        where: { projectId, deletedAt: null, isActive: true, scriptId: { in: selectedScripts.map((s) => s.id) } },
-        select: { frames: true },
-      })
-    : [];
-  const approvedBoards = boards.filter((b) => {
-    const frames = Array.isArray(b.frames) ? (b.frames as { approved?: boolean | null }[]) : [];
-    return frames.length > 0 && frames.every((f) => f.approved === true);
-  }).length;
-
-  // Setup needs every Brand Kit item scripts are held to; SKU dimensions only
-  // matter for Studio, so they don't block Setup.
-  const kitCheck = await getBrandKitCompleteness(projectId).catch(() => null);
+function buildStages(row: StageSnapshot): ProjectStages {
+  const { id: projectId, project, kit, competitors, assets, paidAssets, teardowns, pickedPoints, pickedPatterns, pickedInsights, scripts, approvedBoards, unresearched, runs } = row;
+  const selectedScripts = { length: row.selectedScripts };
+  const kitCheck = calculateBrandKitCompleteness(kit, project.category);
   const kitReady = !!kitCheck?.ready.creative;
   const kitMissing = (kitCheck?.missing ?? []).filter((m) => !/SKU dimensions/i.test(m));
-  const brandKitScore = kitCheck?.score ?? kit?.completenessScore ?? 0;
+  const brandKitScore = kitCheck.score;
   const base = `/projects/${projectId}`;
   const completedRuns = runs.filter((r) => r.status === "completed").length;
   const delivered = runs.filter((r) => !!r.masterMp4Url).length;

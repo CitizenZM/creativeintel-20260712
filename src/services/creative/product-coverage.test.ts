@@ -14,6 +14,11 @@ const f = (n: number, t0: number, t1: number, refs: CoverageFrame["locked"]["ref
 const framed = (s: string) => `${s} The ${P} from image 1 is the main subject, centered, filling at least 40% of the frame.`;
 
 describe("validateProductCoverage", () => {
+  it("counts overlapping product shots once when measuring screen time", () => {
+    const frames = [f(1, 0, 6, "product", framed(`The ${P} from image 1.`), "HOOK"), f(2, 2, 8, "product", framed(`Hero shot of the ${P} from image 1.`), "CTA")];
+    const out = validateProductCoverage(frames, { productName: P, fix: false });
+    expect(out.coverage).toBe(1);
+  });
   it("passes a storyboard that shows the product early, often and as the CTA hero", () => {
     const frames = [
       f(1, 0, 2, "cast+product", `Hands unwrap the ${P} from image 1.`, "HOOK"),

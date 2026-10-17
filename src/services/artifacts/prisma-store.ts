@@ -4,7 +4,9 @@
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { SlotConflictError, type ArtifactStore, type NewArtifactRow, type SlotState } from "./record";
+import { decodeDataUrl } from "./record";
 import type { ProjectSnapshot, RunRow } from "./collect";
+import { uploadArchive } from "@/services/storage/durable";
 
 type Db = Pick<PrismaClient, "projectArtifact" | "artifactBlob">;
 
@@ -18,13 +20,13 @@ export class PrismaArtifactStore implements ArtifactStore {
     for (let i = 0; i < sourceKeys.length; i += 500) {
       const rows = await this.db.projectArtifact.findMany({
         where: { projectId, sourceKey: { in: sourceKeys.slice(i, i + 500) } },
-        select: { id: true, sourceKey: true, version: true, fingerprint: true, sha256: true, bytes: true, createdAt: true, blob: { select: { artifactId: true } } },
+        select: { id: true, sourceKey: true, version: true, fingerprint: true, sha256: true, bytes: true, meta: true, createdAt: true, blob: { select: { artifactId: true } } },
       });
       for (const r of rows) {
         const s = out.get(r.sourceKey) ?? { maxVersion: 0, latestAt: null, byFingerprint: new Map() };
         s.maxVersion = Math.max(s.maxVersion, r.version);
         if (!s.latestAt || r.createdAt > s.latestAt) s.latestAt = r.createdAt;
-        s.byFingerprint.set(r.fingerprint, { id: r.id, version: r.version, sha256: r.sha256, bytes: r.bytes, hasBlob: !!r.blob, createdAt: r.createdAt });
+        s.byFingerprint.set(r.fingerprint, { id: r.id, version: r.version, sha256: r.sha256, bytes: r.bytes, hasBlob: !!r.blob || !!(r.meta as Record<string, unknown> | null)?.archiveBlobUrl, createdAt: r.createdAt });
         out.set(r.sourceKey, s);
       }
     }
@@ -33,14 +35,21 @@ export class PrismaArtifactStore implements ArtifactStore {
 
   async create(row: NewArtifactRow, blob: Uint8Array | null): Promise<{ id: string }> {
     const { content, meta, createdAt, ...rest } = row;
+    const inline = rest.url?.startsWith("data:") ? decodeDataUrl(rest.url) : null;
+    const bytes = blob || inline?.data;
+    const archiveBlobUrl = bytes && process.env.ARCHIVE_BLOB_READ_WRITE_TOKEN
+      ? await uploadArchive(bytes, row.contentType || inline?.contentType || "application/octet-stream") : null;
     try {
       return await this.db.projectArtifact.create({
         data: {
           ...rest,
+          ...(inline && archiveBlobUrl ? { url: null } : {}),
           ...(content !== null && content !== undefined ? { content: content as never } : {}),
-          ...(meta ? { meta: meta as never } : {}),
+          ...(meta || archiveBlobUrl ? { meta: { ...meta, ...(archiveBlobUrl ? { archiveBlobUrl } : {}) } as never } : {}),
           ...(createdAt ? { createdAt } : {}),
-          ...(blob ? { blob: { create: { data: new Uint8Array(blob) } } } : {}),
+          // Safe rollout: until the private store is configured, retain the
+          // existing DB archive rather than dropping users' only file copy.
+          ...(blob && !archiveBlobUrl ? { blob: { create: { data: new Uint8Array(blob) } } } : {}),
         },
         select: { id: true },
       });
@@ -56,8 +65,14 @@ export class PrismaArtifactStore implements ArtifactStore {
     if (patch.bytes !== undefined) data.bytes = patch.bytes;
     if (patch.contentType) data.contentType = patch.contentType;
     if (patch.meta) data.meta = patch.meta;
+    if (blob && process.env.ARCHIVE_BLOB_READ_WRITE_TOKEN) {
+      const archiveBlobUrl = await uploadArchive(blob, patch.contentType || "application/octet-stream");
+      const row = await this.db.projectArtifact.findUnique({ where: { id }, select: { meta: true } });
+      data.meta = { ...(row?.meta as Record<string, unknown> | null), ...patch.meta, archiveBlobUrl };
+    } else if (blob) {
+      await this.db.artifactBlob.upsert({ where: { artifactId: id }, create: { artifactId: id, data: new Uint8Array(blob) }, update: {} });
+    }
     if (Object.keys(data).length) await this.db.projectArtifact.update({ where: { id }, data });
-    if (blob) await this.db.artifactBlob.upsert({ where: { artifactId: id }, create: { artifactId: id, data: new Uint8Array(blob) }, update: {} });
   }
 }
 

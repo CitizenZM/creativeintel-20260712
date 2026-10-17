@@ -11,6 +11,7 @@ import { CampaignPlanView } from "./campaign-plan-view";
 import { EndCardGallery } from "./end-card-gallery";
 import { GoalPromoForm } from "./goal-promo-form";
 import { HookLibrary } from "./hook-library";
+import { HookEvidence } from "./hook-evidence";
 import { PlatformPicker } from "./platform-picker";
 import { ProductBriefCard } from "./product-brief-card";
 import {
@@ -255,6 +256,7 @@ export function PlanningWorkspace({ projectId, fixture = false }: { projectId: s
           pins={focusedPins}
           onTogglePin={(id) => focused && setPins((prev) => ({ ...prev, [focused]: togglePin(prev[focused] ?? [], id) }))}
         />
+        {!fixture && <HookEvidence key={focused ?? "none"} projectId={projectId} platform={focused} onPin={(id) => focused && setPins((prev) => ({ ...prev, [focused]: prev[focused]?.includes(id) ? prev[focused] : togglePin(prev[focused] ?? [], id) }))} />}
         {focusedChoice && focusedChoice.notes.filter((n) => /^H\d\d/.test(n)).length > 0 && (
           <details className="mt-3 text-[11px] text-muted-foreground">
             <summary className="cursor-pointer">Why some hooks were dropped for {focusedLabel}</summary>

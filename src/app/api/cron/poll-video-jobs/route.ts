@@ -1,6 +1,7 @@
+import { recoverResearchQueue } from "@/services/research/dispatch";
 import { NextResponse } from "next/server";
-import { pollAllActiveJobs } from "@/services/video-gen/poll";
-import { advanceActiveServerRuns } from "@/services/video-gen/server-engines";
+import { recoverRenderQueue } from "@/services/video-gen/render-dispatch";
+import { recoverCreativeBatchQueue } from "@/services/creative/batch-dispatch";
 import { cronHeartbeat } from "@/services/ops/heartbeat";
 
 // Long enough to assemble a finished server-rendered run (see ASSEMBLY_RESERVE_MS).
@@ -27,9 +28,6 @@ export async function GET(request: Request) {
   }
 
   await cronHeartbeat("poll-video-jobs");
-  const summary = await pollAllActiveJobs();
-  // Also advance server-rendered Studio runs — GLM and ComfyUI render from
-  // here, not on the Mac worker.
-  const server = await advanceActiveServerRuns(240_000).catch(() => ({ glm: 0, comfyui: 0, animatic: 0, matrix: 0, openrouter: 0 }));
-  return NextResponse.json({ ...summary, glmRuns: server.glm, comfyuiRuns: server.comfyui, matrixRuns: server.matrix, openrouterRuns: server.openrouter });
+  const [render, research, creativeBatches] = await Promise.all([recoverRenderQueue(), recoverResearchQueue(), recoverCreativeBatchQueue()]);
+  return NextResponse.json({ ...render, research, creativeBatches });
 }

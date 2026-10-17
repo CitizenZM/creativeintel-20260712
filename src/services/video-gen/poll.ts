@@ -2,9 +2,10 @@ import { prisma } from "@/lib/db";
 import { pMap } from "@/lib/parallel";
 import { getVideoModel } from "@/services/video-gen/models";
 import { logAiUsage } from "@/services/ai/usage";
+import { pollBachVideo } from "@/services/video-gen/bach";
 
 /** Paid video usage row, priced from the model table's costPerSecond. */
-function logPaidVideo(job: Pick<FalVideoJob, "model" | "projectId">, provider: string, seconds: number) {
+function logPaidVideo(job: Pick<FalVideoJob, "model" | "projectId" | "falRequestId">, provider: string, seconds: number) {
   const def = getVideoModel(job.model);
   logAiUsage({
     provider,
@@ -12,6 +13,7 @@ function logPaidVideo(job: Pick<FalVideoJob, "model" | "projectId">, provider: s
     capability: "video",
     videoSeconds: seconds,
     costUsd: def ? def.costPerSecond * seconds : null,
+    requestId: job.falRequestId,
     projectId: job.projectId,
   });
 }
@@ -71,6 +73,22 @@ export async function pollJob(job: FalVideoJob): Promise<PollResult> {
 
   const modelDef = getVideoModel(job.model);
 
+  if (modelDef?.provider === "bach") {
+    const result = await pollBachVideo(job.falRequestId);
+    if (result.status === "processing") return { job, status: job.status };
+    const updated = await prisma.falVideoJob.update({
+      where: { id: job.id },
+      data: {
+        status: result.status,
+        videoUrl: result.videoUrl ?? null,
+        completedAt: new Date(),
+        error: result.error ?? null,
+      },
+    });
+    if (result.videoUrl) await logPaidVideo(updated, "bach", job.durationSec ?? 5);
+    return { job: updated, status: updated.status, videoUrl: updated.videoUrl, error: updated.error };
+  }
+
   if (modelDef?.provider === "veo") {
     const veoResult = await pollVeoOperation(job.falRequestId);
     if (veoResult.done) {
@@ -100,7 +118,7 @@ export async function pollVeoOperation(operationId: string): Promise<VeoPollResu
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/${operationId}`,
-    { headers: { "x-goog-api-key": apiKey } }
+    { headers: { "x-goog-api-key": apiKey }, signal: AbortSignal.timeout(20_000) }
   );
 
   if (!res.ok) {
@@ -118,9 +136,9 @@ export async function pollVeoOperation(operationId: string): Promise<VeoPollResu
       if (videoUrl) {
         const jobs = await prisma.falVideoJob.findMany({
           where: { falRequestId: operationId, status: { notIn: ["completed", "failed"] } },
-          select: { model: true, projectId: true, durationSec: true },
+          select: { model: true, projectId: true, falRequestId: true, durationSec: true },
         });
-        for (const j of jobs) logPaidVideo(j, "veo", j.durationSec ?? 8);
+        for (const j of jobs) await logPaidVideo(j, "veo", j.durationSec ?? 8);
       }
       await prisma.falVideoJob.updateMany({
         where: { falRequestId: operationId },
@@ -166,7 +184,7 @@ async function pollFalJob(
 
   const statusRes = await fetch(
     `https://queue.fal.run/${endpoint}/requests/${job.falRequestId}/status`,
-    { headers: { Authorization: `Key ${falKey}` } }
+    { headers: { Authorization: `Key ${falKey}` }, signal: AbortSignal.timeout(20_000) }
   );
 
   if (!statusRes.ok) {
@@ -202,7 +220,7 @@ async function pollFalJob(
       }
     }
 
-    if (video?.url) logPaidVideo(job, "fal", (video?.duration as number | undefined) ?? job.durationSec ?? 5);
+    if (video?.url) await logPaidVideo(job, "fal", (video?.duration as number | undefined) ?? job.durationSec ?? 5);
     const updated = await prisma.falVideoJob.update({
       where: { id: job.id },
       data: {

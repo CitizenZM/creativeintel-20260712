@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Image from "next/image";
 import {
-  CheckCircle2, AlertCircle, Loader2, Package, MapPin,
+  CheckCircle2, AlertCircle, Loader2, MapPin,
   Users, Target, Clock, ChevronDown, ChevronUp,
   Zap, Play, Check, Film, Sparkles,
 } from "lucide-react";
@@ -568,7 +569,7 @@ export function CampaignSelection({
                     onClick={() => save({ selectedEnvironment: env.name, selectedEnvNotes: env.description, selectedEnvImage: generateEnvImageUrl(env.name, env.imagePrompt) })}
                   >
                     <div className="aspect-video overflow-hidden bg-muted relative">
-                      <img
+                      <Image unoptimized width={1024} height={1024}
                         src={generateEnvImageUrl(env.name, env.imagePrompt)}
                         alt={env.name}
                         className="w-full h-full object-cover"
@@ -624,7 +625,7 @@ export function CampaignSelection({
                   >
                     {/* Actor portrait */}
                     <div className="aspect-square overflow-hidden bg-muted relative mx-auto w-28 mt-3 rounded-lg">
-                      <img
+                      <Image unoptimized width={1024} height={1024}
                         src={generateActorImageUrl(actor.visualDescription, actor.role)}
                         alt={actor.role}
                         className="w-full h-full object-cover"

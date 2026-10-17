@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { buildStoryboardCreateData } from "@/services/ai/storyboard-generator";
@@ -60,7 +61,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("Storyboard generation failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate storyboard" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

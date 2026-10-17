@@ -19,6 +19,7 @@
  *   npx vite-node scripts/smoke.ts -- …          node --experimental-strip-types scripts/smoke.ts …   (CI: no install)
  * Env: SMOKE_BASE_URL, SMOKE_PROJECT_ID, SMOKE_STORYBOARD_ID, CI_WORKER_TOKEN (or SMOKE_WORKER_TOKEN),
  *      CF_ACCESS_CLIENT_ID + CF_ACCESS_CLIENT_SECRET (Access service token, for the Access host).
+ *      VERCEL_AUTOMATION_BYPASS_SECRET (protected Vercel preview deployments).
  * Exit 1 when any check fails. Self-contained (no imports) so CI can run it without npm ci.
  */
 
@@ -37,6 +38,7 @@ export interface SmokeOptions {
   workerToken?: string;
   accessClientId?: string;
   accessClientSecret?: string;
+  vercelBypassSecret?: string;
   strict?: boolean;
   timeoutMs?: number;
   retries?: number;
@@ -62,6 +64,7 @@ async function probe(o: SmokeOptions, fetcher: FetchLike, path: string, init: Re
     headers.set("CF-Access-Client-Id", o.accessClientId);
     headers.set("CF-Access-Client-Secret", o.accessClientSecret);
   }
+  if (o.vercelBypassSecret) headers.set("x-vercel-protection-bypass", o.vercelBypassSecret);
   const retries = o.retries ?? 2;
   const started = Date.now();
   let lastError = "";
@@ -200,6 +203,7 @@ export function parseSmokeArgs(argv: string[], env: Record<string, string | unde
     workerToken: env.SMOKE_WORKER_TOKEN || env.CI_WORKER_TOKEN || undefined,
     accessClientId: env.CF_ACCESS_CLIENT_ID || undefined,
     accessClientSecret: env.CF_ACCESS_CLIENT_SECRET || undefined,
+    vercelBypassSecret: env.VERCEL_AUTOMATION_BYPASS_SECRET || undefined,
     strict: argv.includes("--strict"),
   };
 }

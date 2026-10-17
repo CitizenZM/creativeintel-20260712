@@ -71,7 +71,14 @@ export class PrismaSpendLedger implements SpendLedger {
         const row = await tx.spendEntry.findUnique({ where: { id: entryId }, select: { projectId: true } });
         if (!row) return;
         await lockProject(tx, row.projectId);
-        await tx.spendEntry.update({ where: { id: entryId }, data: { actualUsd: round(actualUsd) } });
+        // A completed provider job can be observed by both cron and a client poll.
+        // Only the first settlement may replace the reservation; a stale callback
+        // must not overwrite the recorded cost with a different estimate.
+        const { count } = await tx.spendEntry.updateMany({
+          where: { id: entryId, actualUsd: null },
+          data: { actualUsd: round(actualUsd) },
+        });
+        if (!count) return;
         await tx.project.updateMany({ where: { id: row.projectId }, data: { spentUsd: await spentSum(tx, { projectId: row.projectId }) } });
       },
       { timeout: 20_000, maxWait: 20_000 }

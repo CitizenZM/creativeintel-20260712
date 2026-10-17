@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -152,7 +153,7 @@ Generate a complete shot-by-shot brief. 6-8 shots. Each with detailed camera wor
   } catch (err) {
     console.error("Video brief generation failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate brief" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

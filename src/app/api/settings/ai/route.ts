@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * GET — the AI engine settings page's data (choices, options, providers
  *       without keys, this month's usage, free allowance).
@@ -26,7 +27,7 @@ async function unguardedPUT(request: Request) {
   } catch (err) {
     console.error("[settings/ai] save failed:", err);
     return NextResponse.json(
-      { error: `Could not save settings: ${err instanceof Error ? err.message : String(err)}` },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

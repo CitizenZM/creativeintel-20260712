@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { markStagesStale } from "@/lib/stage-events";
-import { fieldStatus, hasValue, readStatusMap, type FieldStatus, type FieldStatusMap } from "@/lib/field-status";
+import { fieldStatus, readStatusMap, type FieldStatus, type FieldStatusMap } from "@/lib/field-status";
 import { FieldLegend, FieldShell } from "@/components/ui/field-shell";
 
 interface BrandAsset {
@@ -371,12 +371,13 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
   }, [projectId, applyResponse]);
 
   const suggest = useCallback(
-    async (auto: boolean) => {
+    async (auto: boolean, signal?: AbortSignal) => {
       setSuggesting(true);
       setError(null);
       try {
-        const res = await fetch(`/api/projects/${projectId}/brand-kit/suggest`, { method: "POST" });
+        const res = await fetch(`/api/projects/${projectId}/brand-kit/suggest`, { method: "POST", signal });
         const payload = await res.json().catch(() => ({}));
+        if (signal?.aborted) return;
         if (!res.ok) throw new Error(payload.error || "Could not generate suggestions");
         applyResponse(payload as BrandKitResponse);
         const s = (payload as BrandKitResponse).suggested;
@@ -389,7 +390,7 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
         markStagesStale();
         router.refresh();
       } catch (e) {
-        if (!auto) setError(e instanceof Error ? e.message : "Could not generate suggestions");
+        if (!auto && !signal?.aborted) setError(e instanceof Error ? e.message : "Could not generate suggestions");
       } finally {
         setSuggesting(false);
       }
@@ -412,10 +413,16 @@ export function BrandKitPanel({ projectId }: { projectId: string }) {
       logos.length === 0 ||
       packshots.length < 2;
     if (!stillEmpty) return;
-    autoSuggestTried.current = true;
-    suggest(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      autoSuggestTried.current = true;
+      void suggest(true, controller.signal);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [loading, assets, form, suggest]);
 
   async function confirmField(key: string) {
     setConfirming(key);

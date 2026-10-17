@@ -1,3 +1,4 @@
+import { safePublicError, redactPublicErrors } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { runAnalysisPipeline, ANALYSIS_STAGES, type AnalysisStage } from "@/services/ai/analysis-pipeline";
@@ -35,10 +36,10 @@ async function unguardedPOST(
         .catch(() => {});
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json(redactPublicErrors(result));
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Analysis failed", done: false, nextStage: "brand" },
+      { error: safePublicError(err), done: false, nextStage: "brand" },
       { status: 500 }
     );
   }

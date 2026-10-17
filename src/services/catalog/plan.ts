@@ -26,7 +26,7 @@ import { templateById } from "@/services/image-ads/templates";
 import type { FormatId, ImageAdCopy, ImageAdPromo, TemplateId } from "@/services/image-ads/types";
 import { DEFAULT_PRICES, directorReviewCall, estimateRunCost, llmCostUsd, type LlmCallEstimate, type PriceTable, type Range } from "@/services/ops/cost-model";
 import type { LockedFrame } from "@/services/video-gen/locked-script";
-import { briefLite, catalogCategory } from "./brief-lite";
+import { briefLite } from "./brief-lite";
 import type { CatalogMode, CatalogProduct } from "./types";
 
 export const DEFAULT_IMAGE_TEMPLATES: TemplateId[] = ["hero-product", "split-benefit", "offer-burst"];

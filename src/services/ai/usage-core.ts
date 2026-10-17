@@ -52,7 +52,25 @@ const FREE_PROVIDERS = new Set(["glm", "pollinations", "comfyui", "animatic"]);
  * per 1M tokens in / out, or per image (gpt-image-1 at medium, 1024px).
  * Sources: openai.com/api/pricing, anthropic.com/pricing, ai.google.dev/pricing.
  */
+/** Published introductory prices expire automatically at the provider's UTC boundary. */
+export function gemini38TokenPrices(now = new Date()) {
+  return now < new Date("2027-01-01T00:00:00Z")
+    ? { inPerM: 0.75, outPerM: 3.75 }
+    : { inPerM: 1.5, outPerM: 7.5 };
+}
+
+/** fal rounds each generated image up to a whole decimal megapixel. */
+export function fluxSchnellCost(width: number, height: number): number | null {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return Math.ceil(width * height / 1_000_000) * 0.003;
+}
+
 export const LIST_PRICES: Record<string, { inPerM?: number; outPerM?: number; perImage?: number }> = {
+  get "gemini-3.8-flash"() { return gemini38TokenPrices(); },
+  "claude-sonnet-5": { inPerM: 2, outPerM: 10 },
+  "claude-opus-5-5": { inPerM: 4, outPerM: 20 },
+  // Worst case for built-in fal image shapes, ≤2 billed megapixels.
+  "fal-ai/flux/schnell": { perImage: 0.006 },
   "gpt-4o": { inPerM: 2.5, outPerM: 10 },
   "gpt-4o-mini": { inPerM: 0.15, outPerM: 0.6 },
   "gpt-4.1": { inPerM: 2, outPerM: 8 },

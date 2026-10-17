@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * Generate more cast (actor role) or setting (environment) options and append
  * them to the brand's lists, so a script can be cast from more than the
@@ -92,7 +93,7 @@ async function unguardedPOST(
     return NextResponse.json({ added, all: next });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Could not generate options" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

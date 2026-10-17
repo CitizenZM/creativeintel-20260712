@@ -3,5 +3,15 @@ import path from "node:path";
 
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
-  test: { include: ["src/**/*.test.ts"], environment: "node" },
+  test: {
+    include: ["src/**/*.test.ts"],
+    // Manual operator experiments fetch real media / render local fixtures.
+    // Opt in explicitly; they are not isolated unit tests.
+    exclude: process.env.RUN_OPERATOR_TESTS === "1" ? [] : ["src/zz-ops/**"],
+    environment: "node",
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
+    // FFmpeg and audio synthesis saturate shared CI runners at four workers.
+    maxWorkers: 2,
+  },
 });

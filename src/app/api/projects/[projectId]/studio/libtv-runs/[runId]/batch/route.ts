@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * POST { dims?, design?: pairwise|full, maxVariants? } — plan a Batch Mode variant matrix (+ cost) for a
  * finished server master; kept on qcReport.batches (GET the run to read them). Planning spends nothing.
@@ -21,7 +22,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
     const batch = await planBatchForRun({ runId: run.id, dims: parsed.data.dims, design: parsed.data.design, maxVariants: parsed.data.maxVariants });
     return NextResponse.json({ ok: true, batch });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: 409 });
   }
 }
 

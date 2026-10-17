@@ -8,7 +8,7 @@
  * mp4/jpg/png from under the root, and supports Range so <video> can seek.
  */
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { stat, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -25,12 +25,16 @@ const CONTENT_TYPES: Record<string, string> = {
 const SEEKABLE = new Set([".mp4"]);
 
 function enabled(): boolean {
-  return !!process.env.LOCAL_FILES_ROOT || process.env.NODE_ENV !== "production";
+  return process.env.VERCEL !== "1" && (!!process.env.LOCAL_FILES_ROOT || process.env.NODE_ENV !== "production");
 }
 
 export function localFilesRoot(): string {
   const configured = process.env.LOCAL_FILES_ROOT;
-  return path.resolve(configured || path.join(homedir(), "Projects", "libtv-ad-studio", "runs"));
+  const root = configured || `${homedir()}/Projects/libtv-ad-studio/runs`;
+  // Resolving an unknown env path against cwd makes Next's file tracer glob
+  // the entire repository. Require an absolute local root instead.
+  if (!path.isAbsolute(root)) throw new Error("LOCAL_FILES_ROOT must be absolute");
+  return root.replace(/\/+$/, "");
 }
 
 function notFound(): Response {
@@ -60,7 +64,7 @@ function resolveSafe(segments: string[]): string | null {
   }
 
   const root = localFilesRoot();
-  const resolved = path.resolve(root, ...decoded);
+  const resolved = `${root}/${decoded.join("/")}`;
   if (resolved !== root && !resolved.startsWith(root + path.sep)) return null;
   return resolved;
 }
@@ -92,7 +96,7 @@ function parseRange(header: string | null, size: number): { start: number; end: 
 async function serve(request: Request, segments: string[], withBody: boolean): Promise<Response> {
   if (!enabled()) return notFound();
 
-  const filePath = resolveSafe(segments);
+  let filePath = resolveSafe(segments);
   if (!filePath) return notFound();
 
   const contentType = CONTENT_TYPES[path.extname(filePath).toLowerCase()];
@@ -100,7 +104,10 @@ async function serve(request: Request, segments: string[], withBody: boolean): P
 
   let size: number;
   try {
-    const info = await stat(filePath);
+    const root = await realpath(/*turbopackIgnore: true*/ localFilesRoot());
+    filePath = await realpath(/*turbopackIgnore: true*/ filePath);
+    if (!filePath.startsWith(root + path.sep)) return notFound();
+    const info = await stat(/*turbopackIgnore: true*/ filePath);
     if (!info.isFile()) return notFound();
     size = info.size;
   } catch {
@@ -127,7 +134,7 @@ async function serve(request: Request, segments: string[], withBody: boolean): P
   if (!withBody) return new Response(null, { status: range ? 206 : 200, headers });
 
   const stream = Readable.toWeb(
-    createReadStream(filePath, { start, end })
+    createReadStream(/*turbopackIgnore: true*/ filePath, { start, end })
   ) as unknown as ReadableStream<Uint8Array>;
 
   return new Response(stream, { status: range ? 206 : 200, headers });

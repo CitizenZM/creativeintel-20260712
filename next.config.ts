@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { NextConfig } from "next";
+import { scriptPolicy } from "./src/lib/csp";
 
 /**
  * Security headers on every response (pages and API). Deliberately conservative so nothing that
@@ -12,6 +13,7 @@ import type { NextConfig } from "next";
  * - HSTS adds includeSubDomains (clerk., accounts., clkmail. are all HTTPS).
  */
 export const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy-Report-Only", value: scriptPolicy() },
   {
     key: "Content-Security-Policy",
     value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; upgrade-insecure-requests",
@@ -36,6 +38,10 @@ const nextConfig: NextConfig = {
   // The GLM executor assembles masters with ffmpeg on the server; ship the
   // binary with the functions that run it.
   outputFileTracingIncludes: {
+    "/api/queues/render": [
+      "./node_modules/.pnpm/ffmpeg-static@*/node_modules/ffmpeg-static/ffmpeg",
+      "./assets/fonts/**",
+    ],
     "/api/projects/[projectId]/studio/libtv-runs/**": [
       "./node_modules/.pnpm/ffmpeg-static@*/node_modules/ffmpeg-static/ffmpeg",
       "./assets/fonts/**",
@@ -43,6 +49,27 @@ const nextConfig: NextConfig = {
     "/api/cron/**": [
       "./node_modules/.pnpm/ffmpeg-static@*/node_modules/ffmpeg-static/ffmpeg",
       "./assets/fonts/**",
+    ],
+  },
+  // local-files is disabled on Vercel. Its filesystem fallback must not pull
+  // repository docs, source files, and tooling into every function bundle.
+  outputFileTracingExcludes: {
+    // `out/` contains local render experiments and QA media (489 MB here).
+    // Server code uses runtime temp files and Blob; no route reads these
+    // repository fixtures in production.
+    "/*": ["./out/**"],
+    "/api/**": [
+      "./.git/**",
+      "./.claude/**",
+      "./docs/**",
+      "./workers/**",
+      "./scripts/**",
+      "./prisma/migrations/**",
+      "./src/**/*.ts",
+      "./src/**/*.tsx",
+      "./*.md",
+      "./*.yml",
+      "./*.yaml",
     ],
   },
   turbopack: {

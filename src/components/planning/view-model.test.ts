@@ -53,6 +53,14 @@ describe("briefView", () => {
     expect(v.points[0].scorePct).toBe(65); // .3·1 + .7·.5
     expect(v.productName).toBe("Product");
   });
+
+  it("shows only quotes that passed source matching", () => {
+    const view = briefView({ sellingPoints: [{ claim: "Bright citrus", sourceEvidence: [
+      { type: "page_copy", quote: "Bright citrus flavor", verified: true, sourceUrl: "https://example.com" },
+      { type: "review", quote: "Made-up customer praise" },
+    ] }] })!;
+    expect(view.points[0].sourceEvidence).toEqual([{ type: "page_copy", quote: "Bright citrus flavor", location: undefined, sourceUrl: "https://example.com" }]);
+  });
 });
 
 describe("groupKeywordsByPlacement", () => {

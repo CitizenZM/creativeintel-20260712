@@ -182,14 +182,14 @@ export function selectCreative(i: CreativeInputs): CreativeChoice {
     }
     let score = c.score;
     const why = c.why.filter((w) => w !== "library");
-    if (hook.frameOneProduct) (score += 3), why.push("frame 1 shows the product");
-    if (hook.sfx) (score += 2), why.push("visual + sound cue");
-    if (USP_BY_3S.has(id)) (score += 2), why.push("USP by 3 s");
-    if (i.goal === "awareness" && SURPRISE.has(id)) (score += 1), why.push("surprise opener");
-    if (i.platform === "tiktok" && hook.family === "native") (score += 1), why.push("native on TikTok");
-    if (FACE_HEAVY.has(id)) (score -= 2), why.push("generated faces on screen");
+    if (hook.frameOneProduct) { score += 3; why.push("frame 1 shows the product"); }
+    if (hook.sfx) { score += 2; why.push("visual + sound cue"); }
+    if (USP_BY_3S.has(id)) { score += 2; why.push("USP by 3 s"); }
+    if (i.goal === "awareness" && SURPRISE.has(id)) { score += 1; why.push("surprise opener"); }
+    if (i.platform === "tiktok" && hook.family === "native") { score += 1; why.push("native on TikTok"); }
+    if (FACE_HEAVY.has(id)) { score -= 2; why.push("generated faces on screen"); }
     const pb = i.bias?.[id];
-    if (pb) (score += pb), why.push(`performance ${pb > 0 ? "+" : ""}${pb}`);
+    if (pb) { score += pb; why.push(`performance ${pb > 0 ? "+" : ""}${pb}`); }
     scored.push({ hook, score, why });
   }
   scored.sort((a, b) => b.score - a.score || a.hook.id.localeCompare(b.hook.id));

@@ -160,7 +160,7 @@ export class MemorySpendLedger implements SpendLedger {
 
   async settle(entryId: string, actualUsd: number) {
     const row = this.rows.find((e) => e.id === entryId);
-    if (row) row.actualUsd = round(actualUsd);
+    if (row && row.actualUsd === null) row.actualUsd = round(actualUsd);
   }
 
   async openEntryForJob(jobId: string, kind: SpendKind) {

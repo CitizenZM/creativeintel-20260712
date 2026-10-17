@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { advanceAutoVariants } from "@/services/video-gen/variants";
 import { cronHeartbeat } from "@/services/ops/heartbeat";
@@ -24,6 +25,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ rendered: await advanceAutoVariants() });
   } catch (err) {
     console.warn("[hook-variants] render failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: 500 });
   }
 }

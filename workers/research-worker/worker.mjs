@@ -45,7 +45,7 @@ const HEARTBEAT_INTERVAL_MS = 60 * 1000;
 // Public sites get a breather between tasks so a queue burst never reads as a crawl.
 const COOLDOWN_MS = Number(process.env.TASK_COOLDOWN_MS || 15000);
 
-const WORKER_ID = `mac-research-worker-${randomUUID().slice(0, 8)}`;
+const WORKER_ID = `research-${process.env.WORKER_INSTANCE_ID || "single"}-${randomUUID().slice(0, 8)}`;
 const API_ENDPOINT = `${APP_URL}/api/worker/tasks`;
 
 const PLAYBOOKS = {
@@ -74,6 +74,7 @@ async function callWorkerApi(action, payload = {}) {
   if (VERCEL_BYPASS) headers['x-vercel-protection-bypass'] = VERCEL_BYPASS;
   const res = await fetch(API_ENDPOINT, {
     method: 'POST',
+    signal: AbortSignal.timeout(60_000),
     headers,
     body: JSON.stringify({ action, ...payload }),
   });

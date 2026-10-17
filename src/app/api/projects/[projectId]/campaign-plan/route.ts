@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * Campaign plan for a project (Studio planning panel). Auth is the app-wide Cloudflare Access gate
  * in src/proxy.ts, as for every /api/projects route.
@@ -46,7 +47,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
     return NextResponse.json({ plan, summary: summarizePlan(plan) }, { status: 201 });
   } catch (err) {
     if (err instanceof CampaignPlanError) return NextResponse.json({ error: err.message }, { status: err.status });
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: 500 });
   }
 }
 

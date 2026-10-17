@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * Creative Agent chat for a project (Studio). Auth is the app-wide Cloudflare Access gate in
  * src/proxy.ts, as for every /api/projects route.
@@ -36,7 +37,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
     if (body.action === "undo") return reply(await undoCreativeEdit(projectId));
     return reply(await creativeAgentTurn(projectId, body.message, body.storyboardId));
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: 500 });
   }
 }
 
