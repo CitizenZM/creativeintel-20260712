@@ -6,6 +6,7 @@ import type { ScriptTemplate, VideoType } from "@/services/ai/prompts/script-tem
 import { buildStoryboardCreateData } from "@/services/ai/storyboard-generator";
 import { createStoryboardVersion } from "@/services/creative-library";
 import { scriptRepairRequest } from "./script-repair";
+import { scriptOutputTokenCap } from "./script-token-budget";
 import {
   buildScriptInput,
   persistScript,
@@ -44,7 +45,7 @@ export async function writeBatchScript(
 
   let generated: ScriptV2 = await analyzeWithClaude({
     systemPrompt: prompt.system, userPrompt: prompt.user,
-    responseSchema: scriptV2Schema, maxTokens: 8000,
+    responseSchema: scriptV2Schema, maxTokens: scriptOutputTokenCap(options.totalDurationSec),
   });
   generated = repairScriptCta(generated, claimsAudit);
   let audit = auditScriptClaims(generated, claimsAudit);

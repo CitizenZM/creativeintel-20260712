@@ -48,6 +48,7 @@ describe("batch script compliance retry", () => {
     });
 
     expect(mocks.analyze).toHaveBeenCalledTimes(2);
+    expect(mocks.analyze.mock.calls[0][0]).toEqual(expect.objectContaining({ maxTokens: 6250 }));
     const retry = mocks.analyze.mock.calls[1][0] as { userPrompt: string; maxTokens: number };
     expect(retry.userPrompt).toContain("approved source facts");
     expect(retry.userPrompt).toContain(JSON.stringify(draft));

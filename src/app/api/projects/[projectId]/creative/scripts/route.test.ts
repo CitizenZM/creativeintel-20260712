@@ -60,6 +60,7 @@ describe("single script generation", () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
+    expect(mocks.analyze.mock.calls[0][0]).toEqual(expect.objectContaining({ maxTokens: 6250 }));
     expect(mocks.buildInput.mock.calls.map(([, options]) => (options as { planHookIndex: number }).planHookIndex)).toEqual([0, 1]);
     const retry = mocks.analyze.mock.calls[1][0] as { userPrompt: string; maxTokens: number };
     expect(retry.userPrompt).toContain(JSON.stringify(draft));

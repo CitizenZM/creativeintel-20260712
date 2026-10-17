@@ -22,6 +22,7 @@ import {
 import { LIVE, isSelectionStatus } from "@/services/creative-library";
 import { withAccess } from "@/lib/auth/route-guard";
 import { scriptRepairRequest } from "@/services/creative/script-repair";
+import { scriptOutputTokenCap } from "@/services/creative/script-token-budget";
 
 export const maxDuration = 300;
 
@@ -111,7 +112,7 @@ async function unguardedPOST(
       systemPrompt: prompt.system,
       userPrompt: prompt.user,
       responseSchema: scriptV2Schema,
-      maxTokens: 8000,
+      maxTokens: scriptOutputTokenCap(totalDurationSec),
     });
 
     const claimsAudit = auditContext(ctx);
