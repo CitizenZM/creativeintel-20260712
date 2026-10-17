@@ -33,7 +33,7 @@ describe("batch script compliance retry", () => {
   });
   it("reserves enough output for a long non-Latin draft", () => {
     const draft = { title: "产品细节".repeat(1500) } as never;
-    expect(scriptRepairRequest("facts", draft, []).maxTokens).toBeGreaterThan(6000);
+    expect(scriptRepairRequest("facts", draft, "").maxTokens).toBeGreaterThan(6000);
   });
 
   it("repairs the actual rejected draft and keeps the approved source context", async () => {

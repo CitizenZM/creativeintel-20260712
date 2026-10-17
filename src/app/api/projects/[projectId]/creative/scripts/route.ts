@@ -21,6 +21,7 @@ import {
 } from "../_script-context";
 import { LIVE, isSelectionStatus } from "@/services/creative-library";
 import { withAccess } from "@/lib/auth/route-guard";
+import { scriptRepairRequest } from "@/services/creative/script-repair";
 
 export const maxDuration = 300;
 
@@ -97,8 +98,13 @@ async function unguardedPOST(
           }
         : body.angle;
 
+    // A single-script request loads a fresh context each time, so its in-memory
+    // plan cursor would otherwise keep choosing the first hook on every call.
+    const planHookIndex = ctx.campaignPlan
+      ? await prisma.script.count({ where: { projectId, ...LIVE } })
+      : undefined;
     const prompt = buildScriptWritingPrompt(
-      buildScriptInput(ctx, { template, videoType, angle, totalDurationSec })
+      buildScriptInput(ctx, { template, videoType, angle, totalDurationSec, planHookIndex })
     );
 
     let generated: ScriptV2 = await analyzeWithClaude({
@@ -113,14 +119,12 @@ async function unguardedPOST(
     let audit = auditScriptClaims(generated, claimsAudit);
 
     if (!audit.ok) {
-      const retryUserPrompt = `${prompt.user}\n\nCOMPLIANCE FAILURE — the previous draft violated brand rules. Fix these lines:\n${formatComplianceViolations(
-        audit.violations
-      )}`;
+      const repair = scriptRepairRequest(prompt.user, generated, formatComplianceViolations(audit.violations));
       generated = await analyzeWithClaude({
         systemPrompt: prompt.system,
-        userPrompt: retryUserPrompt,
+        userPrompt: repair.userPrompt,
         responseSchema: scriptV2Schema,
-        maxTokens: 8000,
+        maxTokens: repair.maxTokens,
       });
       generated = repairScriptCta(generated, claimsAudit);
       audit = auditScriptClaims(generated, claimsAudit);
