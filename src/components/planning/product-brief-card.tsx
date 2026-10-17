@@ -87,6 +87,20 @@ export function ProductBriefCard({
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground sm:hidden">Claim</p>
                       <p className="text-sm font-medium">{p.claim}</p>
                       {p.evidence && <p className="mt-0.5 text-[10px] text-muted-foreground">{p.evidence.replace(/_/g, " ")}</p>}
+                      {p.sourceEvidence.length > 0 && (
+                        <details className="mt-1 text-[11px] text-muted-foreground">
+                          <summary className="cursor-pointer">Matched source quote{p.sourceEvidence.length === 1 ? "" : "s"} ({p.sourceEvidence.length})</summary>
+                          <ul className="mt-1 space-y-1 border-l-2 pl-2">
+                            {p.sourceEvidence.map((source, index) => (
+                              <li key={`${p.id}-${index}`}>
+                                <span className="font-medium">{source.type.replace(/_/g, " ")}{source.location ? ` · ${source.location}` : ""}</span>
+                                <span className="block">“{source.quote}”</span>
+                                {source.sourceUrl && /^https?:\/\//.test(source.sourceUrl) && <a className="underline underline-offset-2" href={source.sourceUrl} target="_blank" rel="noreferrer">Source page</a>}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
                     </div>
                     <div>
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground sm:hidden">Benefit</p>

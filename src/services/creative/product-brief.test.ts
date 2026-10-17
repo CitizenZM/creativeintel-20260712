@@ -105,6 +105,32 @@ describe("product brief fact gate", () => {
     expect(verified.bigIdea).toEqual({ proposition: "", alternates: ["12 oz on the go"] });
     expect(verified.gaps).toEqual(expect.arrayContaining([expect.stringContaining("invented"), expect.stringContaining("Big idea withheld")]));
   });
+
+  it("keeps only evidence quotes found in supplied product facts", () => {
+    const brief = finalizeBrief({
+      sellingPoints: [sp("taste", {
+        claim: "Citrus flavor", benefit: "Refreshing drink",
+        sourceEvidence: [
+          { type: "page_copy", quote: "Bright citrus flavor" },
+          { type: "review", quote: "Clinically tested hydration" },
+        ],
+      })],
+    });
+    const verified = verifyBriefFacts(brief, { title: "Moneta", description: "Bright citrus flavor", url: "https://example.com/product" });
+    expect(verified.sellingPoints[0].sourceEvidence).toEqual([expect.objectContaining({
+      quote: "Bright citrus flavor", type: "page_copy", location: "description", verified: true, sourceUrl: "https://example.com/product",
+    })]);
+    const noEvidence = verifyBriefFacts(brief, { title: "Moneta", description: "A sparkling drink" });
+    expect(noEvidence.sellingPoints[0].sourceEvidence).toEqual([]);
+    expect(noEvidence.sellingPoints[0].evidenceStrength).toBe("claimed");
+    expect(noEvidence.gaps).toEqual(expect.arrayContaining([expect.stringContaining("no quote matched")]));
+  });
+
+  it("accepts a short exact numeric specification as evidence", () => {
+    const brief = finalizeBrief({ sellingPoints: [sp("size", { claim: "12 oz can", sourceEvidence: [{ type: "spec", quote: "12 oz" }] })] });
+    const verified = verifyBriefFacts(brief, { title: "Moneta 12 oz can" });
+    expect(verified.sellingPoints[0].sourceEvidence[0]).toMatchObject({ quote: "12 oz", verified: true });
+  });
 });
 
 describe("buildBriefPrompts", () => {

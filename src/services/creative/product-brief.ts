@@ -289,6 +289,16 @@ export function verifyBriefFacts(brief: ProductBrief & { sellingPoints: BriefSel
   });
   const facts = numbersIn(source);
   const factsWithUnits = unitFacts(source);
+  const normalizeEvidence = (text: string) => text.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+/gu)?.join("") ?? "";
+  const evidenceSources = [
+    { type: "page_copy", location: "title", text: input.title },
+    { type: "page_copy", location: "description", text: input.description ?? "" },
+    ...(input.bullets ?? []).map((text, index) => ({ type: "page_copy", location: `bullet ${index + 1}`, text })),
+    ...Object.entries(input.specs ?? {}).map(([key, value]) => ({ type: "spec", location: key, text: `${key} ${value}` })),
+    ...(input.reviews ?? []).map((review, index) => ({ type: "review", location: `review ${index + 1}`, text: review.text })),
+    ...(input.qa ?? []).map((answer, index) => ({ type: "qa", location: `Q&A ${index + 1}`, text: `${answer.q} ${answer.a}` })),
+    ...(input.price != null ? [{ type: "price", location: "price", text: `$${input.price}` }] : []),
+  ].map((section) => ({ ...section, normalized: normalizeEvidence(section.text) }));
   const unsupported = (value: string) => {
     const missingNumbers = [...numbersIn(value)].filter((number) => !facts.has(number));
     const missingUnits = [...unitFacts(value)].filter((fact) => !factsWithUnits.has(fact) && !missingNumbers.includes(Number(fact.split(":")[0])));
@@ -300,7 +310,20 @@ export function verifyBriefFacts(brief: ProductBrief & { sellingPoints: BriefSel
     if (!missing.length) return true;
     gaps.push(`Selling point ${point.id} withheld: numeric claim ${missing.join(", ")} is not in the supplied product facts`);
     return false;
-  }).map((point, index) => ({ ...point, priority: index + 1 }));
+  }).map((point, index) => {
+    const sourceEvidence = point.sourceEvidence.flatMap((evidence) => {
+      const quote = normalizeEvidence(evidence.quote);
+      const matched = (quote.length >= 8 || (quote.length >= 4 && /\d/.test(quote)))
+        ? evidenceSources.find((section) => section.normalized.includes(quote)) : undefined;
+      return matched ? [{ ...evidence, type: matched.type, location: matched.location, verified: true, sourceUrl: input.url ?? undefined }] : [];
+    });
+    if (!sourceEvidence.length) gaps.push(`Selling point ${point.id} has no quote matched to the supplied product facts; verify before using it as proof`);
+    return {
+      ...point, priority: index + 1, sourceEvidence,
+      evidenceStrength: sourceEvidence.length ? point.evidenceStrength : "claimed" as const,
+      scores: sourceEvidence.length ? point.scores : { ...point.scores, evidenceStrength: 0.3 },
+    };
+  });
   if (!sellingPoints.length && brief.sellingPoints.length) gaps.push("No verified filmable selling points remain; add product facts before planning a proof-led video");
   const keep = new Set(sellingPoints.map((point) => point.id));
   const proposition = unsupported(brief.bigIdea.proposition).length ? "" : brief.bigIdea.proposition;
