@@ -637,6 +637,8 @@ export interface PlanCampaignInput {
   now?: Date;
   /** Performance Agent bias from real results (performanceBias(projectId)); optional. */
   bias?: CreativeInputs["bias"];
+  /** Platform-specific score adjustments; overrides the shared bias for that platform. */
+  biasByPlatform?: Partial<Record<PlatformId, CreativeInputs["bias"]>>;
 }
 
 export const DEFAULT_PLAN_PLATFORMS: PlatformId[] = ["tiktok", "instagram_reels", "meta_feed"];
@@ -651,7 +653,7 @@ export async function planCampaign(input: PlanCampaignInput): Promise<CampaignPl
   const platforms = await Promise.all(
     ids.map(async (platform) => {
       const o = overrides[platform];
-      const scaffold = scaffoldPlatformPlan(input.brief, platform, goal, input.promo, runDate, { durationSec: input.durationSec, strictCompliance: input.strictCompliance, assets: input.assets, hookIds: o?.hookIds, endCardId: o?.endCardId, bias: input.bias });
+      const scaffold = scaffoldPlatformPlan(input.brief, platform, goal, input.promo, runDate, { durationSec: input.durationSec, strictCompliance: input.strictCompliance, assets: input.assets, hookIds: o?.hookIds, endCardId: o?.endCardId, bias: input.biasByPlatform?.[platform] ?? input.bias });
       const res = await writeCampaignScripts(scaffold, input.brief, { goal, promo: input.promo, runDate, strictCompliance: input.strictCompliance, llm: input.llm });
       if (res.source === "fallback") notes.push(`${platform}: copy pass failed, scaffold copy used (${clip(res.error, 100)})`);
       return res.plan;

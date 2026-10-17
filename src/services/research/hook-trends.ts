@@ -590,6 +590,31 @@ export async function trendBias(category: string | null | undefined, platform?: 
   }
 }
 
+/** One data load/classification, then strictly platform-scoped bias for each requested placement. */
+export async function trendBiasByPlatform(
+  category: string | null | undefined,
+  platforms: string[],
+  opts: { projectId?: string | null; now?: Date; windowDays?: number } = {}
+): Promise<Record<string, Bias>> {
+  const cat = categoryKey(category);
+  const out: Record<string, Bias> = {};
+  if (!cat && !opts.projectId) return out;
+  const { classified } = await classifyAds(await loadTrendAds({ projectId: opts.projectId, category: cat }));
+  const byTrendPlatform = new Map<TrendPlatform, Bias>();
+  for (const platform of [...new Set(platforms)]) {
+    const trendPlatform = trendPlatformOf(platform);
+    if (!trendPlatform) continue;
+    if (!byTrendPlatform.has(trendPlatform)) {
+      const slice = computeHookTrends(classified.filter((a) => a.platform === trendPlatform), {
+        category: cat, platform: trendPlatform, now: opts.now, windowDays: opts.windowDays,
+      });
+      byTrendPlatform.set(trendPlatform, trendBiasFromSlice(slice));
+    }
+    out[platform] = byTrendPlatform.get(trendPlatform)!;
+  }
+  return out;
+}
+
 /** The category's trend slice for one platform (all platforms when that one is thin); rules only. Null without a category or project. */
 export async function trendSlice(category: string | null | undefined, platform?: string | null, opts: { projectId?: string | null; now?: Date; windowDays?: number } = {}): Promise<TrendSlice | null> {
   const cat = categoryKey(category);

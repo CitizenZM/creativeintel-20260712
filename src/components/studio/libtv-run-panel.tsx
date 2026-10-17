@@ -339,6 +339,10 @@ export function LibtvRunPanel({
   const needsLogin = !!activeRun?.error?.startsWith("needs libtv login");
   const unplayableMaster = !!activeRun?.masterMp4Url && !isPlayable(activeRun.masterMp4Url);
   const failedJobs = (activeRun?.jobs ?? []).filter((j) => j.status === "failed" && j.error);
+  const productFramesNeedingReview = (activeRun?.jobs ?? []).filter((job) =>
+    job.kind === "image" && job.status === "completed" &&
+    (job.settings?.consistency || job.settings?.qcIssues) && job.settings?.qcOk !== true
+  );
   const done = (activeRun?.jobs ?? []).filter((j) => j.status === "completed" || j.status === "skipped").length;
   const total = activeRun?.jobs.length ?? 0;
 
@@ -749,6 +753,17 @@ export function LibtvRunPanel({
             )}
             {activeRun.status === "completed" && activeRun.masterMp4Url && (
               <div className="flex flex-col gap-2">
+              {productFramesNeedingReview.length > 0 && !activeRun.isFinal && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-950" role="alert">
+                  <p className="font-semibold">{productFramesNeedingReview.length} product keyframe{productFramesNeedingReview.length === 1 ? " needs" : "s need"} manual review</p>
+                  <p>Automatic product-detail verification failed or was unavailable. Check these frames against the official product images and inspect the final video before approval.</p>
+                  <ul className="mt-1 list-disc pl-4">
+                    {productFramesNeedingReview.slice(0, 5).map((job) => (
+                      <li key={job.id}>{job.nodeName}{Array.isArray(job.settings?.qcIssues) && job.settings.qcIssues.length ? ` — ${String(job.settings.qcIssues[0])}` : ""}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {!activeRun.isFinal && (
                 <label className="flex items-start gap-2 text-xs text-slate-700">
                   <input
@@ -757,7 +772,7 @@ export function LibtvRunPanel({
                     onChange={(event) => setReviewedMasterUrl(event.target.checked ? activeRun.masterMp4Url : null)}
                     className="mt-0.5"
                   />
-                  I reviewed this video and approved its brand and packaging for delivery.
+                  I checked the final video against the official product images and approved its brand and packaging for delivery.
                 </label>
               )}
               <Button

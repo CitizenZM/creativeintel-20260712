@@ -29,6 +29,7 @@ import {
   recordFromTeardown,
   toTrendRecords,
   trendBias,
+  trendBiasByPlatform,
   trendBiasFromSlice,
   trendPlatformOf,
   type ClassifiedAd,
@@ -180,6 +181,21 @@ describe("trendBias", () => {
     // Only this account's projects and structures feed the trends.
     expect(db.project.findMany.mock.calls[0][0].where.AND).toContainEqual(TENANT_WHERE);
     expect(db.adStructure.findMany.mock.calls[0][0].where).toEqual({ structure: "admin" });
+  });
+
+  it("uses one data load and never borrows another platform's trends", async () => {
+    vi.clearAllMocks();
+    db.project.findMany.mockResolvedValueOnce([{ id: "proj_tv", category: "TVs" }]).mockResolvedValueOnce([]);
+    db.contentAsset.findMany.mockResolvedValue([...tiktokAds, ...metaAds, ...teardownAssets]);
+    db.adTeardown.findMany.mockResolvedValue(teardowns);
+    db.adStructure.findMany.mockResolvedValue([structure]);
+    const biases = await trendBiasByPlatform("electronics", ["tiktok", "youtube_shorts", "meta_feed"], { now: NOW });
+    expect(biases.tiktok.H08).toBeGreaterThan(0);
+    expect(biases.youtube_shorts).toEqual({});
+    expect(biases.meta_feed).toMatchObject({ H16: expect.any(Number) });
+    expect(biases.meta_feed.H08).toBeUndefined();
+    expect(db.contentAsset.findMany).toHaveBeenCalledTimes(1);
+    expect(db.adTeardown.findMany).toHaveBeenCalledTimes(1);
   });
 
   it("returns {} when the database fails", async () => {

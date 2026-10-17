@@ -395,10 +395,10 @@ export async function assembleGlmMaster(input: {
         const v2 = await renderEditV2({ dir, runId: input.runId, projectId: input.projectId, aspectRatio: input.aspectRatio, canvas: { w, h }, frames: input.frames, segments, sources, voice: input.voice, brand, hookStyle, platform: input.platform ?? null });
         const up = (buffer: Buffer, filename: string, contentType: string) => uploadBuffer({ buffer, filename, contentType, folder: "glm-masters" });
         const [m, p, c, vo, srt] = await Promise.all([
-          up(await readFile(v2.masterFile), `master-${input.runId}.mp4`, "video/mp4"),
-          up(await readFile(v2.previewFile), `preview-${input.runId}.mp4`, "video/mp4"),
-          up(await readFile(v2.contactSheetFile), `sheet-${input.runId}.jpg`, "image/jpeg"),
-          v2.voiceoverFile ? up(await readFile(v2.voiceoverFile), `voiceover-${input.runId}.mp3`, "audio/mpeg") : null,
+          up(await readFile(/* turbopackIgnore: true */ v2.masterFile), `master-${input.runId}.mp4`, "video/mp4"),
+          up(await readFile(/* turbopackIgnore: true */ v2.previewFile), `preview-${input.runId}.mp4`, "video/mp4"),
+          up(await readFile(/* turbopackIgnore: true */ v2.contactSheetFile), `sheet-${input.runId}.jpg`, "image/jpeg"),
+          v2.voiceoverFile ? up(await readFile(/* turbopackIgnore: true */ v2.voiceoverFile), `voiceover-${input.runId}.mp3`, "audio/mpeg") : null,
           v2.srt ? up(Buffer.from(v2.srt, "utf8"), `subtitles-${input.runId}.srt`, "application/x-subrip") : null,
         ]);
         if (m.provider === "inline") throw new Error("No asset storage configured for the master video");
@@ -458,7 +458,7 @@ export async function assembleGlmMaster(input: {
       if (voiced) {
         finalFile = voiced.file;
         const [vo, srt] = await Promise.all([
-          uploadBuffer({ buffer: await readFile(voiced.voiceoverFile), filename: `voiceover-${input.runId}.mp3`, contentType: "audio/mpeg", folder: "glm-masters" }),
+          uploadBuffer({ buffer: await readFile(/* turbopackIgnore: true */ voiced.voiceoverFile), filename: `voiceover-${input.runId}.mp3`, contentType: "audio/mpeg", folder: "glm-masters" }),
           uploadBuffer({ buffer: Buffer.from(voiced.srt, "utf8"), filename: `subtitles-${input.runId}.srt`, contentType: "application/x-subrip", folder: "glm-masters" }),
         ]);
         voiceoverUrl = vo.provider === "inline" ? null : vo.url;
@@ -470,7 +470,7 @@ export async function assembleGlmMaster(input: {
     }
 
     const uploaded = await uploadBuffer({
-      buffer: await readFile(finalFile),
+      buffer: await readFile(/* turbopackIgnore: true */ finalFile),
       filename: `master-${input.runId}.mp4`,
       contentType: "video/mp4",
       folder: "glm-masters",
@@ -535,8 +535,8 @@ export async function renderFromRun(input: {
     const v = await renderEditV2({ dir, runId: input.runId, projectId: input.projectId, aspectRatio: input.outputAspect ?? input.aspectRatio, canvas: { w, h }, frames, segments, sources, voice: input.voice, hookStyle: input.hookStyle, hookText: input.hookText, brand, musicMood: input.musicMood, platform: input.platform ?? null, fixes: input.fixes });
     const tag = `${input.tag}-${Date.now().toString(36)}`;
     const [m, p] = await Promise.all([
-      uploadBuffer({ buffer: await readFile(v.masterFile), filename: `${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
-      uploadBuffer({ buffer: await readFile(v.previewFile), filename: `${tag}-preview-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
+      uploadBuffer({ buffer: await readFile(/* turbopackIgnore: true */ v.masterFile), filename: `${tag}-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
+      uploadBuffer({ buffer: await readFile(/* turbopackIgnore: true */ v.previewFile), filename: `${tag}-preview-${input.runId}.mp4`, contentType: "video/mp4", folder: "glm-masters" }),
     ]);
     if (m.provider === "inline") throw new Error("No asset storage configured for this version");
     const { uploadCovers } = await import("./covers-run");
