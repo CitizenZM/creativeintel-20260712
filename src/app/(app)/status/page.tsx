@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { sqlTable } from "@/lib/sql-table";
 import { Header } from "@/components/layout/header";
 import { collectSources, type JobSourceStatus, type JobStep } from "@/services/research/job-progress";
 import { getStorageStatus } from "@/services/storage";
@@ -206,32 +207,32 @@ export default async function StatusPage() {
         count(*) FILTER (WHERE status IN ('queued', 'claimed', 'running')) AS active,
         count(*) FILTER (WHERE status = 'queued') AS waiting,
         (max(extract(epoch FROM now() - "createdAt")) FILTER (WHERE status = 'queued'))::float AS "oldestQueuedSec"
-      FROM "WorkerTask"
+      FROM ${sqlTable("WorkerTask")}
     `,
     prisma.$queryRaw<{ waiting: bigint; inProgress: bigint; oldestWaitSec: number | null }[]>`
       SELECT
         count(*) FILTER (WHERE status = 'approved') AS waiting,
         count(*) FILTER (WHERE status IN ('claimed', 'running', 'assembling')) AS "inProgress",
         (max(extract(epoch FROM now() - coalesce("approvedAt", "createdAt"))) FILTER (WHERE status = 'approved'))::float AS "oldestWaitSec"
-      FROM "LibtvRun"
+      FROM ${sqlTable("LibtvRun")}
       WHERE status IN ('approved', 'claimed', 'running', 'assembling')
     `,
     prisma.workerTask.count({ where: { status: "failed" } }),
     // Freshness is decided by the database's clock — reading the process clock
     // during render is impure and the app's lint rules reject it.
     prisma.$queryRaw<{ fresh: bigint }[]>`
-      SELECT count(*) AS fresh FROM "WorkerTask"
+      SELECT count(*) AS fresh FROM ${sqlTable("WorkerTask")}
       WHERE "completedAt" > now() - interval '6 hours'
     `,
     prisma.$queryRaw<{ failed: bigint }[]>`
-      SELECT count(*) AS failed FROM "WorkerTask"
+      SELECT count(*) AS failed FROM ${sqlTable("WorkerTask")}
       WHERE kind = 'ad_library_fetch' AND status = 'failed' AND "completedAt" > now() - interval '6 hours'
     `,
     // The worker records a heartbeat on every poll, so this is true liveness —
     // an idle worker with an empty queue still shows as online.
     prisma.$queryRaw<{ last: Date | null; online: boolean | null }[]>`
       SELECT max("lastSeenAt") AS last, max("lastSeenAt") > now() - interval '3 minutes' AS online
-      FROM "WorkerHeartbeat"
+      FROM ${sqlTable("WorkerHeartbeat")}
     `,
   ]);
   const queued = Number(queueRows[0]?.active ?? 0);

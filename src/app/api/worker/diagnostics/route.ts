@@ -2,6 +2,7 @@ import { safePublicError } from "@/lib/public-error";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { sqlTable } from "@/lib/sql-table";
 import { describeMetaError, searchMetaAdLibrary } from "@/services/research/meta-ads";
 import { generateImage, getVideoTask, isZhipuConfigured, submitVideo, zhipuKey, ZHIPU_BASE_URL, ZHIPU_FREE } from "@/services/ai/zhipu";
 import { persistDataUrl } from "@/services/ai/image-engine";
@@ -231,7 +232,7 @@ export async function POST(request: Request) {
   if (body.action !== "externalize-frame-images") return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 
   const rows = await prisma.$queryRaw<{ id: string }[]>`
-    SELECT id FROM "Storyboard" WHERE frames::text LIKE '%"imageUrl": "data:%' OR frames::text LIKE '%"imageUrl":"data:%' LIMIT 20`;
+    SELECT id FROM ${sqlTable("Storyboard")} WHERE frames::text LIKE '%"imageUrl": "data:%' OR frames::text LIKE '%"imageUrl":"data:%' LIMIT 20`;
   let images = 0;
   for (const { id } of rows) {
     const board = await prisma.storyboard.findUnique({ where: { id }, select: { frames: true, projectId: true } });

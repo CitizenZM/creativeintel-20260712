@@ -7,6 +7,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { monthStartUtc, summarizeUsage, type UsageGroup, type UsageSummary } from "./usage-core";
 import { currentAiTrace } from "./usage-context";
+import { sqlTable } from "@/lib/sql-table";
 
 export interface AiUsageEntry {
   provider: string;
@@ -136,7 +137,7 @@ export async function measuredGlmClipSeconds(): Promise<{ seconds: number | null
     const { prisma } = await import("@/lib/db");
     const rows = await prisma.$queryRaw<{ avg: number | null; n: bigint }[]>`
       SELECT avg(extract(epoch FROM j."completedAt" - j."startedAt"))::float AS avg, count(*) AS n
-      FROM "LibtvJob" j JOIN "LibtvRun" r ON r.id = j."runId"
+      FROM ${sqlTable("LibtvJob")} j JOIN ${sqlTable("LibtvRun")} r ON r.id = j."runId"
       WHERE r.executor = 'glm' AND j.kind = 'video' AND j.status = 'completed'
         AND j."startedAt" IS NOT NULL AND j."completedAt" IS NOT NULL
         AND (j.settings->>'zhipuModel') IS NULL
