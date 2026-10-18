@@ -169,6 +169,15 @@ export function StoryboardFrameCard({
   );
   const [approved, setApproved] = useState<boolean | null>(frame.approved ?? null);
   const [showDetail, setShowDetail] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
+  const [draft, setDraft] = useState({
+    scene: frame.scene,
+    voiceover: frame.voiceover,
+    textOverlay: frame.textOverlay,
+    visualDirection: frame.visualDirection,
+    imagePrompt: frame.imagePrompt,
+    videoPrompt: frame.videoPrompt ?? "",
+  });
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState(frame.feedback || "");
   const [saving, setSaving] = useState(false);
@@ -210,7 +219,7 @@ export function StoryboardFrameCard({
     }
   }
 
-  async function saveFrameUpdate(updates: Partial<StoryboardFrameData>) {
+  async function saveFrameUpdate(updates: Partial<StoryboardFrameData>): Promise<boolean> {
     setSaving(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/creative/storyboards/${storyboardId}/frames`, {
@@ -224,8 +233,10 @@ export function StoryboardFrameCard({
       }
       setError(null);
       onUpdate?.(frame.frameNumber, updates);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -246,7 +257,7 @@ export function StoryboardFrameCard({
       setApproved(restored.approved ?? null);
       setFeedback(restored.feedback || "");
       setTransition(restored.transitionEffect as TransitionId | null | undefined);
-      if (restored.imageUrl) setImageUrl(restored.imageUrl);
+      setImageUrl(restored.imageUrl || null);
       setError(null);
       onUndo?.(frame.frameNumber, restored, data.remaining ?? 0);
     } catch (err) {
@@ -270,6 +281,25 @@ export function StoryboardFrameCard({
   async function handleFeedbackSave() {
     await saveFrameUpdate({ feedback, approved: false });
     setShowFeedback(false);
+  }
+
+  async function handleContentSave() {
+    const fields = ["scene", "voiceover", "textOverlay", "visualDirection", "imagePrompt", "videoPrompt"] as const;
+    const updates: Partial<StoryboardFrameData> = {};
+    for (const field of fields) {
+      if (draft[field] !== (frame[field] ?? "")) updates[field] = draft[field];
+    }
+    if (!Object.keys(updates).length) {
+      setShowEditor(false);
+      return;
+    }
+    updates.approved = null;
+    if (updates.imagePrompt !== undefined) updates.imageUrl = null;
+    if (await saveFrameUpdate(updates)) {
+      setApproved(null);
+      if (updates.imageUrl === null) setImageUrl(null);
+      setShowEditor(false);
+    }
   }
 
   return (
@@ -336,6 +366,34 @@ export function StoryboardFrameCard({
           </p>
         )}
       </div>
+
+      {showEditor && (
+        <div className="space-y-2 border-t border-border px-2 py-2">
+          {([
+            ["scene", "Scene"],
+            ["voiceover", "Voiceover"],
+            ["textOverlay", "On-screen text"],
+            ["visualDirection", "Visual direction"],
+            ["imagePrompt", "Keyframe prompt"],
+            ["videoPrompt", "Video prompt"],
+          ] as const).map(([field, label]) => (
+            <label key={field} className="block text-[10px] font-medium">
+              {label}
+              <textarea
+                aria-label={`${label} for frame ${frame.frameNumber}`}
+                value={draft[field]}
+                onChange={(event) => setDraft((current) => ({ ...current, [field]: event.target.value }))}
+                rows={field === "imagePrompt" || field === "videoPrompt" ? 3 : 2}
+                className="mt-0.5 w-full resize-y rounded border border-border bg-background px-1.5 py-1 text-[10px] font-normal"
+              />
+            </label>
+          ))}
+          <div className="flex gap-1">
+            <button onClick={handleContentSave} disabled={saving} className="rounded bg-foreground px-2 py-1 text-[9px] font-semibold text-background disabled:opacity-50">Save frame</button>
+            <button onClick={() => setShowEditor(false)} className="rounded border border-border px-2 py-1 text-[9px] text-muted-foreground">Cancel</button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mx-2 mb-1 rounded border border-red-200 bg-red-50 px-1.5 py-1">
@@ -474,6 +532,22 @@ export function StoryboardFrameCard({
         </button>
 
         {/* Note */}
+        <button
+          onClick={() => {
+            setDraft({
+              scene: frame.scene,
+              voiceover: frame.voiceover,
+              textOverlay: frame.textOverlay,
+              visualDirection: frame.visualDirection,
+              imagePrompt: frame.imagePrompt,
+              videoPrompt: frame.videoPrompt ?? "",
+            });
+            setShowEditor(true);
+          }}
+          className="rounded border border-border px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground hover:text-foreground"
+        >
+          Edit frame
+        </button>
         <button
           onClick={() => { setShowDetail(true); setShowFeedback(true); }}
           title="Add feedback note"
