@@ -9,9 +9,9 @@
  */
 export type PathKind = "machine" | "public" | "protected";
 
-const MACHINE = /^\/api\/(worker|cron|local-files)(\/|$)/;
+const MACHINE = /^\/api\/(worker|cron|local-files|queues)(\/|$)/;
 const AUTH_PAGES = /^\/(sign-in|sign-up|terms|privacy)(\/|$)/;
-const HEALTH = /^\/api\/health\/?$/;
+const HEALTH = /^\/api\/(health|csp-report)\/?$/;
 // Root-level only: a dynamic segment deeper down could end in ".png" and still render a page.
 const PUBLIC_FILE = /^\/[^/]+\.(?:js|css|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|txt|webmanifest)$/i;
 const NEXT_INTERNAL = /^\/_next\//;

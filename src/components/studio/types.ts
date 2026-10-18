@@ -22,6 +22,8 @@ export interface LibtvJobView {
   localPath: string | null;
   error: string | null;
   attempts: number;
+  startedAt: string | null;
+  completedAt: string | null;
 }
 
 export interface LibtvRunView {
@@ -50,6 +52,7 @@ export interface LibtvRunView {
   contactSheetUrl: string | null;
   /** Measured QC of the master (edit engine v2), when the server assembled it. */
   qcReport?: {
+    brandReview?: { masterUrl: string; approvedAt: string; reviewedJobIds?: string[] };
     passed: number;
     total: number;
     checks: { key: string; label: string; value: number | null; target: string; pass: boolean }[];

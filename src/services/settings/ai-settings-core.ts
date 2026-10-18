@@ -36,8 +36,8 @@ export const PROVIDER_CAPABILITIES: Record<ProviderType, Capability[]> = {
 export const BUILTIN_ENGINES: Record<Capability, string[]> = {
   text: ["glm", "openai", "gemini", "anthropic", "openrouter"],
   vision: ["glm", "openai", "gemini", "anthropic", "openrouter"],
-  image: ["glm", "openai", "fal", "pollinations"],
-  video: ["glm", "comfyui", "animatic", "matrix", "openrouter", "libtv"],
+  image: ["glm", "openai", "fal", "pollinations", "bach"],
+  video: ["glm", "comfyui", "animatic", "matrix", "openrouter", "bach", "libtv"],
 };
 
 /** Engines that never cost money (ComfyUI is the operator's own GPU: 0 credits). */
@@ -63,6 +63,7 @@ const ENGINE_LABELS: Record<Capability, Record<string, string>> = {
     openai: "OpenAI gpt-image-1",
     fal: "fal.ai Flux Schnell",
     pollinations: "Pollinations (free, no key)",
+    bach: "Bach.art GPT Image2 Economy",
   },
   video: {
     glm: "Zhipu CogVideoX-Flash (free, server-side)",
@@ -70,6 +71,7 @@ const ENGINE_LABELS: Record<Capability, Record<string, string>> = {
     animatic: "Free animatic (Pollinations stills + zoom/pan, no key)",
     matrix: "Matrix — Seedance 2.x + Qwen-Image (paid, server-side)",
     openrouter: "OpenRouter — Seedream 5 Flash + Veo 3.1 Lite / Wan 3.0 (low cost, server-side)",
+    bach: "Bach.art Chrome video (server-side)",
     libtv: "LibTV (credits, local worker)",
   },
 };
@@ -84,6 +86,7 @@ const ENGINE_ENV: Record<string, string[]> = {
   fal: ["FAL_KEY"],
   comfyui: ["COMFYUI_URL"],
   matrix: ["MATRIX_API_KEY"],
+  bach: ["BACH_ACCESS_KEY", "BACH_SECRET_KEY"],
 };
 
 export interface AiEngineSettings {
@@ -323,6 +326,8 @@ export function videoDefaults(
   if (choice === "animatic") return animatic;
   if (choice === "matrix" && opts.matrixAvailable && !strictFree) return { imageModel: MATRIX_IMAGE_MODEL, videoModel: MATRIX_VIDEO_MODEL };
   if (choice === "openrouter" && opts.openrouterAvailable && !strictFree) return { imageModel: OPENROUTER_IMAGE_MODEL, videoModel: OPENROUTER_VIDEO_MODEL };
+  if (choice === "bach" && process.env.BACH_ACCESS_KEY && process.env.BACH_SECRET_KEY && !strictFree) return { imageModel: "Bach GPT Image2 Economy", videoModel: "Bach Chrome (720p)" };
+  if (choice === "auto" && process.env.BACH_ACCESS_KEY && process.env.BACH_SECRET_KEY && !strictFree) return { imageModel: "Bach GPT Image2 Economy", videoModel: "Bach Chrome (720p)" };
   // GLM without its key can't render — the keyless animatic is the free fallback.
   if (strictFree || choice === "glm") return glmAvailable ? glm : animatic;
   if (choice.startsWith(CUSTOM_PREFIX)) {

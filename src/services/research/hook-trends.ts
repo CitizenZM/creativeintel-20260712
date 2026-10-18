@@ -590,6 +590,31 @@ export async function trendBias(category: string | null | undefined, platform?: 
   }
 }
 
+/** One data load/classification, then strictly platform-scoped bias for each requested placement. */
+export async function trendBiasByPlatform(
+  category: string | null | undefined,
+  platforms: string[],
+  opts: { projectId?: string | null; now?: Date; windowDays?: number } = {}
+): Promise<Record<string, Bias>> {
+  const cat = categoryKey(category);
+  const out: Record<string, Bias> = {};
+  if (!cat && !opts.projectId) return out;
+  const { classified } = await classifyAds(await loadTrendAds({ projectId: opts.projectId, category: cat }));
+  const byTrendPlatform = new Map<TrendPlatform, Bias>();
+  for (const platform of [...new Set(platforms)]) {
+    const trendPlatform = trendPlatformOf(platform);
+    if (!trendPlatform) continue;
+    if (!byTrendPlatform.has(trendPlatform)) {
+      const slice = computeHookTrends(classified.filter((a) => a.platform === trendPlatform), {
+        category: cat, platform: trendPlatform, now: opts.now, windowDays: opts.windowDays,
+      });
+      byTrendPlatform.set(trendPlatform, trendBiasFromSlice(slice));
+    }
+    out[platform] = byTrendPlatform.get(trendPlatform)!;
+  }
+  return out;
+}
+
 /** The category's trend slice for one platform (all platforms when that one is thin); rules only. Null without a category or project. */
 export async function trendSlice(category: string | null | undefined, platform?: string | null, opts: { projectId?: string | null; now?: Date; windowDays?: number } = {}): Promise<TrendSlice | null> {
   const cat = categoryKey(category);
@@ -628,7 +653,7 @@ export interface HookTrendReport {
   category: CategoryId | null;
   platform: TrendPlatform | "all";
   window: { from: string; to: string; days: number };
-  coverage: { ads: number; classified: number; unclassified: number; byMethod: Record<ClassifiedAd["method"], number>; byPlatform: Partial<Record<TrendPlatform, number>>; llmCalls: number };
+  coverage: { ads: number; classified: number; unclassified: number; byMethod: Record<ClassifiedAd["method"], number>; byPlatform: Partial<Record<TrendPlatform, number>>; llmCalls: number; latestEvidenceAt: string | null };
   rising: ReportHook[];
   saturated: ReportHook[];
   longevityLeaders: ReportHook[];
@@ -697,6 +722,11 @@ export function buildHookTrendReport(classified: ClassifiedAd[], input: BuildRep
     byMethod[a.method]++;
     byPlatform[a.platform] = (byPlatform[a.platform] ?? 0) + 1;
   }
+  const latestEvidenceAt = classified
+    .filter((a) => input.platform === "all" || a.platform === input.platform)
+    .map((a) => Math.min((a.lastSeenAt ?? a.seenAt).getTime(), now.getTime()))
+    .filter((timestamp) => Number.isFinite(timestamp))
+    .reduce<number | null>((latest, timestamp) => latest === null ? timestamp : Math.max(latest, timestamp), null);
 
   const recs: string[] = [];
   const plan = new Set(input.planHookIds ?? []);
@@ -731,7 +761,7 @@ export function buildHookTrendReport(classified: ClassifiedAd[], input: BuildRep
     category: input.category,
     platform: input.platform,
     window: { from: main.from, to: main.to, days: main.windowDays },
-    coverage: { ads: classified.length + input.unclassified, classified: classified.length, unclassified: input.unclassified, byMethod, byPlatform, llmCalls: input.llmCalls },
+    coverage: { ads: classified.length + input.unclassified, classified: classified.length, unclassified: input.unclassified, byMethod, byPlatform, llmCalls: input.llmCalls, latestEvidenceAt: latestEvidenceAt === null ? null : new Date(latestEvidenceAt).toISOString() },
     rising,
     saturated,
     longevityLeaders,

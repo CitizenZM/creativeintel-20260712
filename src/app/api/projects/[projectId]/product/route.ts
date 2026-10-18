@@ -1,3 +1,4 @@
+import { safePublicError, redactPublicErrors } from "@/lib/public-error";
 /**
  * Product definition API
  * GET   — current product definition (url, name, images, description)
@@ -30,8 +31,8 @@ function toScrapeResult(outcome: ScrapeOutcome) {
   return {
     ok: !!outcome.data,
     adapter: outcome.adapter,
-    error: outcome.error ?? null,
-    attempts: outcome.attempts,
+    error: outcome.error ? safePublicError(outcome.error) : null,
+    attempts: redactPublicErrors(outcome.attempts),
     imageCount: outcome.data?.images.length ?? 0,
     title: outcome.data?.title ?? null,
     hasDescription: !!outcome.data?.description,
@@ -98,7 +99,7 @@ async function unguardedPOST(
 
   if (!outcome.data) {
     return NextResponse.json(
-      { error: outcome.error || "Failed to read product page", scrapeResult },
+      { error: safePublicError(outcome.error), scrapeResult },
       { status: 422 }
     );
   }
@@ -131,7 +132,7 @@ async function unguardedPATCH(
 
     if (!outcome.data) {
       return NextResponse.json(
-        { mode, error: outcome.error || "Failed to read product page", scrapeResult },
+        { mode, error: safePublicError(outcome.error), scrapeResult },
         { status: 422 }
       );
     }

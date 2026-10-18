@@ -75,6 +75,7 @@ export interface ServableArtifact {
   createdAt: Date;
   producedAt?: Date | null;
   hasBlob: boolean;
+  meta?: unknown;
 }
 
 export type DownloadPlan =
@@ -96,6 +97,8 @@ function contentBody(a: ServableArtifact): { body: string; contentType: string; 
 export function downloadPlan(a: ServableArtifact): DownloadPlan {
   const name = (json: boolean) => artifactFileName({ kind: a.kind, title: a.title, version: a.version, contentType: a.contentType, url: a.url, json });
   if (a.hasBlob) return { source: "blob", filename: name(false), contentType: a.contentType || "application/octet-stream" };
+  const archiveBlobUrl = a.meta && typeof a.meta === "object" ? (a.meta as Record<string, unknown>).archiveBlobUrl : null;
+  if (typeof archiveBlobUrl === "string" && /^https:\/\//.test(archiveBlobUrl)) return { source: "proxy", filename: name(false), contentType: a.contentType, url: archiveBlobUrl };
   if (a.content !== null && a.content !== undefined) {
     const c = contentBody(a);
     return { source: "content", filename: c.json ? name(true) : name(false), contentType: c.contentType, body: c.body };
@@ -208,6 +211,11 @@ export async function openStoredUrl(url: string): Promise<ReadableStream<Uint8Ar
   const { assertSafeUrl } = await import("@/lib/safe-fetch");
   try {
     await assertSafeUrl(url);
+    if (new URL(url).hostname.endsWith(".private.blob.vercel-storage.com")) {
+      const { get } = await import("@vercel/blob");
+      const result = await get(url, { access: "private", token: process.env.ARCHIVE_BLOB_READ_WRITE_TOKEN, abortSignal: AbortSignal.timeout(30_000) });
+      return result?.statusCode === 200 ? result.stream : null;
+    }
     const res = await fetch(url, { signal: AbortSignal.timeout(300_000) });
     if (!res.ok || !res.body) {
       await res.body?.cancel().catch(() => undefined);

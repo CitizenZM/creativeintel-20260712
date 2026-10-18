@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * Worker-facing endpoint for BrowserGenJob. The local Mac worker (driving
  * Google AI Studio / Flow / Kling web UIs via browser-harness) calls this
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error("worker/browser-jobs failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Unknown error handling worker request" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -96,7 +97,7 @@ Generate a realistic ~300 word script/transcript that this video likely contains
   } catch (err) {
     console.error("Script generation failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate script" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

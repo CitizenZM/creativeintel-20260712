@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import OpenAI from "openai";
@@ -27,7 +28,7 @@ async function unguardedGET() {
     const count = await prisma.project.count();
     results.db = { success: true, projectCount: count };
   } catch (err) {
-    results.db = { success: false, error: String(err).slice(0, 500) };
+    results.db = { success: false, error: safePublicError(err) };
   }
 
   // Test OpenAI
@@ -41,7 +42,7 @@ async function unguardedGET() {
     });
     results.openai = { success: true, model: response.model };
   } catch (err) {
-    results.openai = { success: false, error: String(err).slice(0, 300) };
+    results.openai = { success: false, error: safePublicError(err) };
   }
 
   return NextResponse.json(results);

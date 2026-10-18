@@ -1,0 +1,44 @@
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+const m = vi.hoisted(() => ({ send: vi.fn().mockResolvedValue({}), run: vi.fn() }));
+vi.mock("@vercel/queue", () => ({ send: m.send }));
+vi.mock("./runner", () => ({ runResearch: m.run }));
+import { prisma } from "@/lib/db";
+import { acquireSharedSlot } from "@/services/shared-lease";
+import { processResearch } from "./dispatch";
+import { ResearchWaiting } from "./worker-await";
+const enabled = process.env.RUN_LOCAL_PIPELINE_INTEGRATION === "1";
+const suite = enabled ? describe : describe.skip;
+suite("local PostgreSQL durable research", () => {
+  const ids: string[] = [];
+  beforeAll(() => { if (!process.env.APP_DATABASE_URL?.startsWith("postgresql://barrom@localhost/creativeintel_pipeline_verify_")) throw new Error("Use only the isolated local pipeline database"); });
+  afterAll(async () => { if (ids.length) { await prisma.researchContinuation.deleteMany({ where: { jobId: { in: ids } } }); await prisma.researchJob.deleteMany({ where: { id: { in: ids } } }); } await prisma.project.deleteMany({ where: { name: "pipeline-integration" } }); await prisma.$disconnect(); });
+  it("allows one actor across concurrent PostgreSQL lease claims", async () => {
+    const releases = await Promise.all(Array.from({ length: 12 }, () => acquireSharedSlot("integration:actor", 1, 10_000, 0)));
+    expect(releases.filter(Boolean)).toHaveLength(1);
+    for (const release of releases) if (release) await release();
+    const reacquired = await acquireSharedSlot("integration:actor", 1, 10_000, 0);
+    expect(reacquired).not.toBeNull(); await reacquired?.();
+  });
+  it("persists a checkpoint exactly once during concurrent delivery and resumes a worker callback", async () => {
+    if (!process.env.APP_DATABASE_URL?.startsWith("postgresql://barrom@localhost/creativeintel_pipeline_verify_")) throw new Error("Use only the isolated local pipeline database");
+    const project = await prisma.project.create({ data: { name: "pipeline-integration", brandName: "integration", status: "RESEARCHING", budgetUsd: 7 } });
+    const job = await prisma.researchJob.create({ data: { projectId: project.id, status: "running", steps: [] } }); ids.push(job.id);
+    await prisma.researchContinuation.create({ data: { jobId: job.id, projectId: project.id, checkpoint: { phase: "keywords", brandContext: { industry: "test" } } } });
+    let entered = 0;
+    m.run.mockImplementation(async (projectId, jobId, c) => { entered++; expect(projectId).toBe(project.id); expect(jobId).toBe(job.id); await new Promise((r) => setTimeout(r, 50)); await c.save({ phase: "discovery", keywords: { brandKeywords: ["integration"] } }); });
+    await Promise.all([processResearch({ jobId: job.id }), processResearch({ jobId: job.id })]);
+    expect(entered).toBe(1);
+    const persisted = await prisma.researchContinuation.findUniqueOrThrow({ where: { jobId: job.id } });
+    expect(persisted.checkpoint).toMatchObject({ phase: "discovery", keywords: { brandKeywords: ["integration"] } });
+    const task = await prisma.workerTask.create({ data: { projectId: project.id, kind: "browser_fetch", status: "queued", payload: { hash: "integration" } } });
+    m.run.mockRejectedValue(new ResearchWaiting([task.id])); await processResearch({ jobId: job.id });
+    expect((await prisma.researchContinuation.findUniqueOrThrow({ where: { jobId: job.id } })).status).toBe("waiting");
+    m.run.mockClear(); await processResearch({ jobId: job.id }); expect(m.run).not.toHaveBeenCalled();
+    await prisma.workerTask.update({ where: { id: task.id }, data: { status: "completed", result: { text: "local result" } } });
+    m.run.mockImplementation(async (_projectId, _jobId, c) => { expect(c.checkpoint.phase).toBe("discovery"); await c.save({ phase: "rank", candidates: [] }); });
+    await processResearch({ jobId: job.id });
+    expect((await prisma.researchContinuation.findUniqueOrThrow({ where: { jobId: job.id } })).checkpoint).toMatchObject({ phase: "rank" });
+    expect((await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).budgetUsd).toBe(7);
+    await prisma.workerTask.delete({ where: { id: task.id } });
+  });
+});

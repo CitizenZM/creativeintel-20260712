@@ -1,3 +1,4 @@
+import { safePublicError, redactPublicErrors } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeCompetitor } from "@/lib/brand-name";
@@ -110,8 +111,8 @@ async function unguardedPOST(request: Request) {
         scrapeResult = {
           ok: !!outcome.data,
           adapter: outcome.adapter,
-          error: outcome.error ?? null,
-          attempts: outcome.attempts,
+          error: outcome.error ? safePublicError(outcome.error) : null,
+          attempts: redactPublicErrors(outcome.attempts),
           imageCount: outcome.data?.images.length ?? 0,
           title: outcome.data?.title ?? null,
         };
@@ -119,7 +120,7 @@ async function unguardedPOST(request: Request) {
         scrapeResult = {
           ok: false,
           adapter: null,
-          error: e instanceof Error ? e.message : "Product page scrape failed",
+          error: safePublicError(e),
           attempts: [],
           imageCount: 0,
           title: null,

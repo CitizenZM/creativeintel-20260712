@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * GET  ?category= — the structure library (same category first).
  * POST { projectId, teardownId } — save a teardown's structure to the library.
@@ -27,7 +28,7 @@ async function unguardedPOST(req: Request) {
   try {
     return NextResponse.json({ structure: await saveStructureFromTeardown(body.projectId, body.teardownId) }, { status: 201 });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: 400 });
   }
 }
 

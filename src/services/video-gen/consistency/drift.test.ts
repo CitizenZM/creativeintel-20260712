@@ -20,6 +20,7 @@ const THICK: DeviceOpts = { bezel: 0.11, width: 320, height: 240 };
 let dir = "";
 let clip = "";
 let steady = "";
+let offMid = "";
 let good: Buffer;
 let bad: Buffer;
 
@@ -36,8 +37,10 @@ beforeAll(async () => {
   };
   clip = path.join(dir, "drift.mp4");
   steady = path.join(dir, "steady.mp4");
+  offMid = path.join(dir, "off-mid.mp4");
   await mk(clip, ["a.png", "b.png", "a.png"]);
   await mk(steady, ["a.png", "a.png", "a.png"]);
+  await mk(offMid, ["a.png", "b.png", "a.png", "a.png", "a.png"]);
 }, 60_000);
 
 afterAll(async () => {
@@ -75,6 +78,15 @@ describe("clip drift", () => {
     const r = await checkClipDrift(await readFile(steady), refs(), { shot: "Close-up of the tablet", deps: { scoreDeps: { vision } } });
     expect(r.driftFlag).toBe(false);
     expect(r.samples.every((s) => s.pass)).toBe(true);
+  });
+
+  it("finds a quarter-clip product defect with only three vision scores", async () => {
+    vi.mocked(vision).mockClear();
+    const r = await checkClipDrift(offMid, refs(), { shot: "Close-up of the tablet", deps: { scoreDeps: { vision } } });
+    expect(r.samples.map((sample) => sample.at)).toEqual([0, 0.25, 0.97]);
+    expect(r.driftFlag).toBe(true);
+    expect(r.reasons.join(" ")).toMatch(/mid-clip score at/);
+    expect(vision).toHaveBeenCalledTimes(3);
   });
 
   it("re-generates only when autoRegenOnDrift is on, once", async () => {

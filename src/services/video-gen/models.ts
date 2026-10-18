@@ -7,7 +7,7 @@
  *   - studio/fal-status/[jobId]/route.ts MODEL_ENDPOINTS
  */
 
-export type VideoModelProvider = "fal" | "veo";
+export type VideoModelProvider = "fal" | "veo" | "bach";
 
 export interface VideoModelDef {
   key: string;
@@ -44,6 +44,19 @@ export interface VideoModelDef {
 }
 
 export const VIDEO_MODELS: Record<string, VideoModelDef> = {
+  "bach-chrome": {
+    key: "bach-chrome",
+    provider: "bach",
+    submitEndpoint: "video/chrome",
+    statusEndpoint: "video/chrome",
+    maxPromptChars: 6500,
+    supportsNegativePrompt: false,
+    supportsAudio: true,
+    // The supplied API guide has no price table. This conservative estimate
+    // is intentionally visible until the account's actual rate is confirmed.
+    costPerSecond: 0.5,
+    supportedParams: ["duration", "aspect_ratio", "resolution"],
+  },
   "grok-imagine-video": {
     key: "grok-imagine-video",
     provider: "fal",

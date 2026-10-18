@@ -55,10 +55,19 @@ const DEFAULT_PLAYBOOK = `PLATFORM PLAYBOOK — General short-form video:
 - Keep pacing tight; re-hook attention every 5-8 seconds.
 - Close with an unambiguous, single CTA.`;
 
+/** Campaign selection IDs are more specific than the script playbook families. */
+function playbookFamily(platformId: string | null | undefined): string | null {
+  if (!platformId) return null;
+  const id = platformId.toLowerCase();
+  if (id === "instagram_reels" || id === "instagram_stories") return "instagram";
+  if (id.startsWith("youtube_")) return "youtube";
+  return id;
+}
+
 /** Returns a dense platform-specific creative playbook block for prompt injection. */
 export function getPlatformPlaybook(platformId: string | null | undefined): string {
-  if (!platformId) return DEFAULT_PLAYBOOK;
-  return PLAYBOOKS[platformId.toLowerCase()] || DEFAULT_PLAYBOOK;
+  const family = playbookFamily(platformId);
+  return (family && PLAYBOOKS[family]) || DEFAULT_PLAYBOOK;
 }
 
 const HOOK_FORMULAS: Record<string, HookFormula[]> = {
@@ -115,6 +124,6 @@ const DEFAULT_HOOKS: HookFormula[] = [
 
 /** Returns named hook formulas (5-8) with when-to-use guidance for the given platform. */
 export function getHookFormulas(platformId: string | null | undefined): HookFormula[] {
-  if (!platformId) return DEFAULT_HOOKS;
-  return HOOK_FORMULAS[platformId.toLowerCase()] || DEFAULT_HOOKS;
+  const family = playbookFamily(platformId);
+  return (family && HOOK_FORMULAS[family]) || DEFAULT_HOOKS;
 }

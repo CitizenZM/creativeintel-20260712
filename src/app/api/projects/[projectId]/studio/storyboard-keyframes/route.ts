@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateImageByEngine } from "@/services/ai/image-engine";
 import { withAccess } from "@/lib/auth/route-guard";
+import { durablePreviewUrl } from "@/services/storage/durable";
 
 export const maxDuration = 300;
 
@@ -21,7 +22,9 @@ async function unguardedPOST(
 
   try {
     const keyframes = [];
+    const requestDeadline = Date.now() + 270_000;
     for (let i = 0; i < Math.min(prompts.length, 8); i++) {
+      if (requestDeadline - Date.now() < 65_000) break;
       try {
         const fullPrompt = `Cinematic film still for a video ad: ${prompts[i]}. Photorealistic advertising cinematography, natural lighting, commercial production quality. ${noTextDirective}`;
         // OpenAI gpt-image-1 → Pollinations; strict free: CogView-3-Flash → Pollinations.
@@ -33,7 +36,8 @@ async function unguardedPOST(
           pollinations: { width: 1024, height: 1024, as: "dataUrl" },
           folder: "keyframes",
           projectId,
-          defaults: { free: ["glm", "pollinations"], paid: ["openai", "pollinations"] },
+          budgetMs: Math.min(150_000, requestDeadline - Date.now() - 60_000),
+          defaults: { free: ["glm", "pollinations"], paid: ["bach", "openai", "pollinations"] },
         }).catch(() => null);
 
         if (!imageUrl) { keyframes.push(null); continue; }
@@ -44,7 +48,7 @@ async function unguardedPOST(
             prompt: prompts[i],
             style: `keyframe-${i + 1}${scriptId ? `-script-${scriptId}` : ""}`,
             dimensions: "1024x1024",
-            imageUrl,
+            imageUrl: await durablePreviewUrl(imageUrl),
             status: "complete",
           },
         });

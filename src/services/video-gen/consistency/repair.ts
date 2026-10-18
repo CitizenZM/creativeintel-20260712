@@ -201,8 +201,8 @@ export function estimateQuad(gray: Float32Array, W: number, H: number, box: [num
   let top = horizontal(y0 - 0.1 * bh, y0 + 0.22 * bh);
   let bottom = horizontal(y1 + 0.1 * bh, y1 - 0.22 * bh);
   // Opposite sides of a hand-held slab are near-parallel; a pair that disagrees has caught an inner edge.
-  if (left && right && Math.abs(left.b - right.b) > 0.12) (left.inliers >= right.inliers ? (right = null) : (left = null));
-  if (top && bottom && Math.abs(top.b - bottom.b) > 0.12) (top.inliers >= bottom.inliers ? (bottom = null) : (top = null));
+  if (left && right && Math.abs(left.b - right.b) > 0.12) { if (left.inliers >= right.inliers) { right = null; } else { left = null; } }
+  if (top && bottom && Math.abs(top.b - bottom.b) > 0.12) { if (top.inliers >= bottom.inliers) { bottom = null; } else { top = null; } }
   if (!(left || right) || !(top || bottom)) return null;
   // A hidden side: the opposite side's direction through the box edge.
   const midY = (y0 + y1) / 2, midX = (x0 + x1) / 2;
@@ -445,14 +445,14 @@ export async function compositePackshot(frameBuf: Buffer, packshotBuf: Buffer, b
       const [Lo, ao, bo] = rgbToLab(frame[o3], frame[o3 + 1], frame[o3 + 2]);
       origL[i] = Lo;
       if (alpha[i] < 0.02) {
-        ring.n++, (ring.L += Lo), (ring.L2 += Lo * Lo), (ring.a += ao), (ring.b += bo);
+        { ring.n++; ring.L += Lo; ring.L2 += Lo * Lo; ring.a += ao; ring.b += bo; }
       }
       if (alpha[i] > 0.01) {
         const [L, a, b] = rgbToLab(prod[i * 3], prod[i * 3 + 1], prod[i * 3 + 2]);
         lab[i * 3] = L;
         lab[i * 3 + 1] = a;
         lab[i * 3 + 2] = b;
-        if (alpha[i] > 0.5) prodS.n++, (prodS.L += L), (prodS.L2 += L * L), (prodS.a += a), (prodS.b += b);
+        if (alpha[i] > 0.5) { prodS.n++; prodS.L += L; prodS.L2 += L * L; prodS.a += a; prodS.b += b; }
       }
     }
   const stats = (s: typeof ring) => {
@@ -507,12 +507,12 @@ export async function compositePackshot(frameBuf: Buffer, packshotBuf: Buffer, b
       skin[i] = isSkin(frame[o3], frame[o3 + 1], frame[o3 + 2]) ? 1 : 0;
     }
     const stack: number[] = [];
-    for (let i = 0; i < rw * rh; i++) if (skin[i] && alpha[i] < 0.05) (hands[i] = 1), stack.push(i);
+    for (let i = 0; i < rw * rh; i++) if (skin[i] && alpha[i] < 0.05) { hands[i] = 1; stack.push(i); }
     while (stack.length) {
       const i = stack.pop()!;
       const x = i % rw;
       for (const j of [x > 0 ? i - 1 : -1, x < rw - 1 ? i + 1 : -1, i - rw, i + rw]) {
-        if (j >= 0 && j < rw * rh && !hands[j] && skin[j]) (hands[j] = 1), stack.push(j);
+        if (j >= 0 && j < rw * rh && !hands[j] && skin[j]) { hands[j] = 1; stack.push(j); }
       }
     }
     // Close the mask (fills speckle inside fingers, smooths the outline), then count what covers the product.

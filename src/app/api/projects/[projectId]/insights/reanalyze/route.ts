@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db";
 import { createJob, failJob, jobWriter, cancelRequested, runningJob, type JobStep } from "@/services/jobs";
@@ -224,7 +225,7 @@ async function reanalyzePass(projectId: string, deadline: number) {
     } catch (err) {
       stages.push({
         stage, ok: false, count: 0,
-        error: err instanceof Error ? err.message : "stage failed",
+        error: safePublicError(err),
       });
     }
   };
@@ -239,7 +240,7 @@ async function reanalyzePass(projectId: string, deadline: number) {
   const teardown = await runAdTeardownStage(projectId, deadline).catch((err) => {
     stages.push({
       stage: "teardown", ok: false, count: 0,
-      error: err instanceof Error ? err.message : "teardown failed",
+      error: safePublicError(err),
     });
     return null;
   });

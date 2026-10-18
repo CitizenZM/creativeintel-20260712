@@ -119,11 +119,10 @@ export async function providerTaskStatus(job: { executor: string; kind: string; 
 }
 
 export const prismaRecoveryDeps: RecoveryDeps = {
-  async driveRun(executor, runId) {
-    const { loadAiSettings } = await import("@/services/settings/ai-settings");
-    await loadAiSettings();
-    const { driveServerRun } = await import("@/services/video-gen/server-engines");
-    return driveServerRun(executor, runId, 90_000);
+  async driveRun(_executor, runId) {
+    const { enqueueRender } = await import("@/services/video-gen/render-dispatch");
+    await enqueueRender("run", runId);
+    return "running";
   },
   async settleReservation(entryId, usd) {
     const { spendLedger } = await import("./budget-guard");

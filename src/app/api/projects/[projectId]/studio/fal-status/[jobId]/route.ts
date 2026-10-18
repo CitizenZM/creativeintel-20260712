@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { pollJob, stripEndpointMarker, PollError } from "@/services/video-gen/poll";
+import { stripEndpointMarker } from "@/services/video-gen/poll";
 import { withAccess } from "@/lib/auth/route-guard";
 
 export const maxDuration = 30;
@@ -14,19 +14,7 @@ async function unguardedGET(
   const job = await prisma.falVideoJob.findFirst({ where: { id: jobId, projectId } });
   if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
 
-  try {
-    const outcome = await pollJob(job);
-    return NextResponse.json({
-      ...outcome.job,
-      prompt: stripEndpointMarker(outcome.job.prompt),
-      status: outcome.status,
-    });
-  } catch (e) {
-    if (e instanceof PollError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
+  return NextResponse.json({ ...job, prompt: stripEndpointMarker(job.prompt) });
 }
 
 async function unguardedDELETE(

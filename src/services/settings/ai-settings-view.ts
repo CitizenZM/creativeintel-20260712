@@ -14,7 +14,7 @@ import {
   FREE_MODEL_FACTS,
   type FreeModelFacts,
 } from "@/services/ai/free-allowance";
-import { measuredGlmClipSeconds, usageThisMonth } from "@/services/ai/usage";
+import { measuredGlmClipSeconds, usageThisMonth, type UsageLatency } from "@/services/ai/usage";
 import type { UsageSummary } from "@/services/ai/usage-core";
 import { isZhipuConfigured, ZHIPU_FREE } from "@/services/ai/zhipu";
 import {
@@ -50,7 +50,7 @@ export interface AiSettingsView {
   encryptionReady: boolean;
   zhipuConfigured: boolean;
   activeTextModel: string;
-  usage: UsageSummary & { since: string; error?: string };
+  usage: UsageSummary & { since: string; latency: UsageLatency[]; error?: string };
   allowance: FreeAllowanceView;
   dbError?: string;
 }

@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * Client-upload token issuer for local workers (libtv-worker, research-worker).
  *
@@ -71,7 +72,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error("worker/blob-upload failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Unknown error issuing blob upload token" },
+      { error: safePublicError(err) },
       { status: 400 }
     );
   }

@@ -16,6 +16,7 @@ export interface UploadBufferInput {
   filename: string;
   contentType: string;
   folder?: string;
+  signal?: AbortSignal;
 }
 
 export interface UploadResult {
@@ -229,6 +230,7 @@ async function uploadToVercelBlob(input: UploadBufferInput, meta: ImageMeta): Pr
     contentType: input.contentType,
     token: process.env.BLOB_READ_WRITE_TOKEN,
     addRandomSuffix: true,
+    abortSignal: input.signal,
   });
 
   return {
@@ -288,9 +290,9 @@ export async function uploadBuffer(input: UploadBufferInput): Promise<UploadResu
 
 export async function uploadFromUrl(
   url: string,
-  opts?: { filename?: string; folder?: string; contentType?: string }
+  opts?: { filename?: string; folder?: string; contentType?: string; signal?: AbortSignal }
 ): Promise<UploadResult> {
-  const fetched = await safeFetchBuffer(url);
+  const fetched = await safeFetchBuffer(url, { signal: opts?.signal });
   if (!fetched.ok || !fetched.buffer) {
     throw new Error(fetched.error || `Failed to fetch ${url}`);
   }
@@ -309,5 +311,6 @@ export async function uploadFromUrl(
     filename,
     contentType: opts?.contentType || fetched.contentType.split(";")[0] || "application/octet-stream",
     folder: opts?.folder,
+    signal: opts?.signal,
   });
 }

@@ -1,3 +1,4 @@
+import { acquireSharedSlot } from "@/services/shared-lease";
 import OpenAI, { APIConnectionError } from "openai";
 import { jsonrepair } from "jsonrepair";
 import { ZodSchema } from "zod";
@@ -84,32 +85,9 @@ export function requestTimeoutMs(model: string, maxTokens: number): number {
  */
 const GLM_FREE_CONCURRENCY = 2;
 const GLM_SLOT_WAIT_MS = 20_000;
-let _glmActive = 0;
-const _glmWaiting: Array<() => void> = [];
-
-async function acquireGlmSlot(): Promise<(() => void) | null> {
-  if (_glmActive >= GLM_FREE_CONCURRENCY) {
-    const got = await new Promise<boolean>((resolve) => {
-      const wake = () => resolve(true);
-      _glmWaiting.push(wake);
-      setTimeout(() => {
-        const i = _glmWaiting.indexOf(wake);
-        if (i >= 0) {
-          _glmWaiting.splice(i, 1);
-          resolve(false);
-        }
-      }, GLM_SLOT_WAIT_MS);
-    });
-    if (!got) return null;
-  }
-  _glmActive++;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    _glmActive--;
-    _glmWaiting.shift()?.();
-  };
+async function acquireGlmSlot(deadlineAt: number): Promise<(() => Promise<void>) | null> {
+  return acquireSharedSlot("glm-free", GLM_FREE_CONCURRENCY, 160_000,
+    Math.max(0, Math.min(GLM_SLOT_WAIT_MS, deadlineAt - Date.now())));
 }
 
 let _openai: OpenAI | null = null;
@@ -371,9 +349,9 @@ function toUserContent(prompt: UserPrompt): OpenAI.Chat.ChatCompletionUserMessag
  * a size cap; returns null on any failure so the caller can drop the image and
  * keep the rest of the prompt intact rather than failing the whole call.
  */
-async function fetchAsDataUrl(url: string): Promise<string | null> {
+async function fetchAsDataUrl(url: string, deadlineAt = Date.now() + GEMINI_IMAGE_FETCH_TIMEOUT_MS): Promise<string | null> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), GEMINI_IMAGE_FETCH_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, Math.min(GEMINI_IMAGE_FETCH_TIMEOUT_MS, deadlineAt - Date.now())));
   try {
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) return null;
@@ -397,14 +375,15 @@ async function fetchAsDataUrl(url: string): Promise<string | null> {
  * other content parts pass through untouched.
  */
 async function toGeminiContent(
-  content: OpenAI.Chat.ChatCompletionUserMessageParam["content"]
+  content: OpenAI.Chat.ChatCompletionUserMessageParam["content"],
+  deadlineAt: number
 ): Promise<OpenAI.Chat.ChatCompletionUserMessageParam["content"]> {
   if (typeof content === "string") return content;
 
   const parts: OpenAI.Chat.ChatCompletionContentPart[] = [];
   for (const part of content) {
     if (part.type === "image_url" && /^https?:\/\//i.test(part.image_url.url)) {
-      const dataUrl = await fetchAsDataUrl(part.image_url.url);
+      const dataUrl = await fetchAsDataUrl(part.image_url.url, deadlineAt);
       if (dataUrl) {
         parts.push({ type: "image_url", image_url: { url: dataUrl } });
       } else {
@@ -419,7 +398,8 @@ async function toGeminiContent(
 
 async function prepareMessagesForRoute(
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
-  provider: Route
+  provider: Route,
+  deadlineAt: number
 ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
   // Gemini only takes data: URLs; Zhipu (GLM) can't reach many overseas image
   // hosts (YouTube, Meta, Wikimedia CDNs) and answers "图片输入格式/解析错误".
@@ -427,7 +407,7 @@ async function prepareMessagesForRoute(
   const prepared: OpenAI.Chat.ChatCompletionMessageParam[] = [];
   for (const msg of messages) {
     if (msg.role === "user" && Array.isArray(msg.content)) {
-      prepared.push({ ...msg, content: await toGeminiContent(msg.content) });
+      prepared.push({ ...msg, content: await toGeminiContent(msg.content, deadlineAt) });
     } else {
       prepared.push(msg);
     }
@@ -479,15 +459,16 @@ function parseErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "parse error";
 }
 
-async function createOnRoute(
+export async function createOnRoute(
   client: OpenAI,
   provider: Route,
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
   modelToUse: string,
-  maxTokens: number
+  maxTokens: number,
+  deadlineAt: number
 ) {
   const effectiveMaxTokens = provider === "gemini" ? Math.min(maxTokens, GEMINI_MAX_TOKENS) : maxTokens;
-  const preparedMessages = await prepareMessagesForRoute(messages, provider);
+  const preparedMessages = await prepareMessagesForRoute(messages, provider, deadlineAt);
   // GLM-4.7-Flash is a hybrid reasoning model; these calls want the JSON
   // answer, not a thinking trace, so switch thinking off.
   const zhipuFamily = provider === "glm" || (customId(provider) && cachedProvider(customId(provider)!)?.type === "zhipu-paid");
@@ -498,7 +479,12 @@ async function createOnRoute(
     : provider === "openrouter"
       ? ({ reasoning: { enabled: false } } as Record<string, unknown>)
       : {};
-  const reqOpts = { timeout: requestTimeoutMs(modelToUse, effectiveMaxTokens), maxRetries: 0 };
+  const requestOptions = () => {
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) throw new Error("AI call deadline exceeded");
+    return { timeout: Math.min(requestTimeoutMs(modelToUse, effectiveMaxTokens), remaining),
+      signal: AbortSignal.timeout(remaining), maxRetries: 0 };
+  };
   try {
     return await client.chat.completions.create(
       {
@@ -508,7 +494,7 @@ async function createOnRoute(
         response_format: { type: "json_object" },
         ...extra,
       },
-      reqOpts
+      requestOptions()
     );
   } catch (err) {
     const status = (err as { status?: number } | null)?.status;
@@ -523,7 +509,7 @@ async function createOnRoute(
         messages: preparedMessages,
         ...extra,
       },
-      reqOpts
+      requestOptions()
     );
   }
 }
@@ -535,8 +521,8 @@ async function createOnRoute(
  * usually transient, so the provider stays eligible for the next call. Any
  * other error is thrown immediately (it won't be fixed by switching providers).
  */
-/** Fire-and-forget usage row for a completed call. */
-function recordUsage(provider: Route, model: string, capability: TextCapability, usage: OpenAI.CompletionUsage | undefined) {
+/** Persist usage before reporting a completed paid call to its caller. */
+function recordUsage(provider: Route, model: string, capability: TextCapability, usage: OpenAI.CompletionUsage | undefined, requestId: string | undefined, latencyMs: number) {
   const inputTokens = usage?.prompt_tokens ?? 0;
   const outputTokens = usage?.completion_tokens ?? 0;
   const id = customId(provider);
@@ -548,7 +534,7 @@ function recordUsage(provider: Route, model: string, capability: TextCapability,
       : id
         ? costForTokens(cachedProvider(id)?.prices, inputTokens, outputTokens)
         : null;
-  logAiUsage({ provider, model, capability, inputTokens, outputTokens, costUsd });
+  return logAiUsage({ provider, model, capability, inputTokens, outputTokens, costUsd, requestId, latencyMs, projectId: currentSpendScope()?.projectId });
 }
 
 function describeErr(err: unknown): string {
@@ -568,16 +554,17 @@ async function tryModels(
 ) {
   let lastErr: unknown;
   for (const [i, model] of models.entries()) {
-    if (i > 0 && Date.now() > deadlineAt) break; // out of time for this call — let the caller fall back
-    const release = provider === "glm" && ZHIPU_FREE_MODELS.has(model) ? await acquireGlmSlot() : () => {};
+    if (Date.now() >= deadlineAt) break; // out of time for this call — let the caller fall back
+    const release = provider === "glm" && ZHIPU_FREE_MODELS.has(model) ? await acquireGlmSlot(deadlineAt) : () => {};
     if (!release) {
       lastErr = Object.assign(new Error(`${model}: no free slot (free-tier concurrency)`), { status: 429 });
-      console.warn(`[ai] ${provider} ${model} busy locally — trying ${models[i + 1] ?? "the next provider"}`);
+      console.warn(`[ai] ${provider} ${model} shared capacity busy — trying ${models[i + 1] ?? "the next provider"}`);
       continue;
     }
     try {
-      const response = await createOnRoute(client, provider, messages, model, maxTokens);
-      recordUsage(provider, model, capability, response.usage);
+      const startedAt = Date.now();
+      const response = await createOnRoute(client, provider, messages, model, maxTokens, deadlineAt);
+      await recordUsage(provider, model, capability, response.usage, response.id, Date.now() - startedAt);
       if (i > 0) console.warn(`[ai] ${provider}: answered by fallback model ${model}`);
       return response;
     } catch (err) {
@@ -588,7 +575,7 @@ async function tryModels(
       }
       throw err;
     } finally {
-      release();
+      await release();
     }
   }
   throw lastErr;
@@ -599,17 +586,17 @@ async function callModel(
   maxTokens: number,
   modelOverride?: string,
   tier: ModelTier = "standard",
-  capability: TextCapability = "text"
+  capability: TextCapability = "text",
+  deadlineAt = Date.now() + CALL_BUDGET_MS
 ) {
   const order = providerOrder(capability);
   let lastErr: unknown;
   let tried = false;
-  const deadlineAt = Date.now() + CALL_BUDGET_MS;
 
   for (const provider of order) {
     const client = clientFor(provider);
     if (!client) continue;
-    if (tried && Date.now() > deadlineAt) break;
+    if (Date.now() >= deadlineAt) throw new Error("AI call deadline exceeded");
     tried = true;
     // A bring-your-own provider always uses its own configured model ids.
     const modelToUse =
@@ -692,6 +679,8 @@ async function analyzeUnguarded<T>(options: AnalyzeOptions<T>): Promise<T> {
     }
   }
 
+  const deadlineAt = Date.now() + CALL_BUDGET_MS;
+
   // Warm the engine settings (cached ~30 s): chosen engines + strict free mode.
   await loadAiSettings();
   const capability: TextCapability =
@@ -712,7 +701,8 @@ async function analyzeUnguarded<T>(options: AnalyzeOptions<T>): Promise<T> {
     maxTokens,
     modelOverride,
     tier,
-    capability
+    capability,
+    deadlineAt
   );
 
   const text = response.choices[0]?.message?.content || "";
@@ -744,7 +734,8 @@ async function analyzeUnguarded<T>(options: AnalyzeOptions<T>): Promise<T> {
       maxTokens,
       modelOverride,
       tier,
-      capability
+      capability,
+      deadlineAt
     );
 
     const retryText = retryResponse.choices[0]?.message?.content || "";

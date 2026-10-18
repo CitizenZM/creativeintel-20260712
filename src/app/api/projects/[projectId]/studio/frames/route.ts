@@ -1,9 +1,11 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateImageByEngine } from "@/services/ai/image-engine";
 import { withAccess } from "@/lib/auth/route-guard";
+import { durablePreviewUrl } from "@/services/storage/durable";
 
-export const maxDuration = 30;
+export const maxDuration = 180;
 
 /**
  * Image engine order (Settings → AI engines can put any engine first):
@@ -25,7 +27,8 @@ function generateFrameImage(
     pollinations: { width: square ? 512 : 1024, height: square ? 512 : 576, as: "url" },
     folder: "frames",
     projectId,
-    defaults: { free: ["glm", "pollinations"], paid: ["openai", "fal", "pollinations"] },
+    budgetMs: 150_000,
+    defaults: { free: ["glm", "pollinations"], paid: ["bach", "openai", "fal", "pollinations"] },
   });
 }
 
@@ -55,7 +58,7 @@ async function unguardedPOST(
     });
 
     try {
-      const imageUrl = await generateFrameImage(fullPrompt, aspectRatio, projectId);
+      const imageUrl = await durablePreviewUrl(await generateFrameImage(fullPrompt, aspectRatio, projectId));
 
       await prisma.previewAsset.update({
         where: { id: asset.id },
@@ -71,7 +74,7 @@ async function unguardedPOST(
       return NextResponse.json({
         ...asset,
         status: "error",
-        error: err instanceof Error ? err.message : "Generation failed",
+        error: safePublicError(err),
       });
     }
   } catch (err) {

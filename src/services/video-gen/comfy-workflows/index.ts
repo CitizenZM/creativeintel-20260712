@@ -136,8 +136,9 @@ function assertApiFormat(json: unknown, source: string): ComfyWorkflow {
 export async function loadWorkflow(name: WorkflowName, opts: { dir?: string } = { dir: process.env.COMFYUI_WORKFLOW_DIR }): Promise<ComfyWorkflow> {
   const bundled = BUNDLED_WORKFLOWS[name];
   if (opts.dir) {
-    const file = path.join(opts.dir, bundled.file);
-    const raw = await readFile(file, "utf8").catch(() => null);
+    const file = path.join(/* turbopackIgnore: true */ opts.dir, bundled.file);
+    // This is an operator-provided runtime override, never a build-time asset.
+    const raw = await readFile(/* turbopackIgnore: true */ file, "utf8").catch(() => null);
     if (raw !== null) return assertApiFormat(JSON.parse(raw), file);
   }
   return bundled.json;

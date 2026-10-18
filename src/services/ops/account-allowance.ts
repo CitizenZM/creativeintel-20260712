@@ -1,3 +1,4 @@
+import { sqlTable } from "@/lib/sql-table";
 /**
  * Account allowance — sign-up is open, so a member must never be able to spend the platform's
  * provider credit without limit. Each member account gets a monthly paid-AI allowance (UTC calendar
@@ -155,4 +156,40 @@ export async function accountUsage(tenant: string): Promise<{ allowanceUsd: numb
   const allowanceUsd = user?.monthlyAllowanceUsd ?? defaultMemberAllowance();
   const spentUsd = await accountSpentThisMonth(tenant);
   return { allowanceUsd, spentUsd, remainingUsd: round(Math.max(0, allowanceUsd - spentUsd)) };
+}
+
+/** The admin table uses one grouped query rather than seven lookups per member. */
+export async function accountUsageBatch(users: { id: string; monthlyAllowanceUsd: number | null }[], now = new Date()) {
+  const result = new Map<string, { allowanceUsd: number; spentUsd: number; remainingUsd: number }>();
+  if (!users.length) return result;
+  const ids = users.map((u) => u.id);
+  const rows = await prisma.$queryRaw<{ tenant: string; ledger: number; provider: number }[]>`
+    WITH owners AS (
+      SELECT p.id, w."ownerId" AS tenant FROM ${sqlTable("Project")}  p JOIN ${sqlTable("Workspace")}  w ON w.id = p."workspaceId"
+      WHERE w."ownerId" = ANY(${ids}::text[])
+    ), ledger AS (
+      SELECT COALESCE(s."actorId", o.tenant) AS tenant, sum(COALESCE(s."actualUsd", s."estUsd"))::float8 AS spent
+      FROM ${sqlTable("SpendEntry")}  s LEFT JOIN owners o ON o.id = s."projectId"
+      WHERE s."createdAt" >= ${monthStartUtc(now)} AND COALESCE(s."actorId", o.tenant) = ANY(${ids}::text[])
+      GROUP BY COALESCE(s."actorId", o.tenant)
+    ), provider AS (
+      SELECT o.tenant, sum(a."costUsd")::float8 AS spent FROM owners o JOIN ${sqlTable("AiUsage")}  a ON a."projectId" = o.id
+      WHERE a."createdAt" >= ${monthStartUtc(now)} GROUP BY o.tenant
+    ), inflight AS (
+      SELECT o.tenant, sum(j."costUsd")::float8 AS spent FROM owners o JOIN ${sqlTable("FalVideoJob")}  j ON j."projectId" = o.id
+      WHERE j."createdAt" >= ${monthStartUtc(now)} AND j.status NOT IN ('completed', 'failed') GROUP BY o.tenant
+    )
+    SELECT u.id AS tenant, COALESCE(l.spent, 0)::float8 AS ledger,
+      (COALESCE(p.spent, 0) + COALESCE(f.spent, 0))::float8 AS provider
+    FROM ${sqlTable("AppUser")}  u LEFT JOIN ledger l ON l.tenant = u.id LEFT JOIN provider p ON p.tenant = u.id LEFT JOIN inflight f ON f.tenant = u.id
+    WHERE u.id = ANY(${ids}::text[])
+  `;
+  const byId = new Map(rows.map((row) => [row.tenant, row]));
+  for (const user of users) {
+    const row = byId.get(user.id);
+    const allowanceUsd = user.monthlyAllowanceUsd ?? defaultMemberAllowance();
+    const spentUsd = round(Math.max(row?.ledger ?? 0, row?.provider ?? 0));
+    result.set(user.id, { allowanceUsd, spentUsd, remainingUsd: round(Math.max(0, allowanceUsd - spentUsd)) });
+  }
+  return result;
 }

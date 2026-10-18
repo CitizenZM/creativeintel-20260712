@@ -4,7 +4,16 @@ const uploadBuffer = vi.hoisted(() => vi.fn());
 vi.mock("@/services/storage", () => ({ uploadBuffer }));
 vi.mock("@/services/settings/ai-settings", () => ({ cachedAiSettings: vi.fn(), cachedProvider: vi.fn(), loadAiSettings: vi.fn() }));
 
-import { persistDataUrl } from "./image-engine";
+import { imageOrderForRequest, persistDataUrl } from "./image-engine";
+
+describe("reference-guided image routing", () => {
+  it("does not fall back to engines that silently drop the product reference", () => {
+    const order = ["openai", "bach", "fal", "glm", "pollinations"] as const;
+    expect(imageOrderForRequest([...order], ["https://cdn.example/official-product.jpg"])).toEqual(["bach"]);
+    expect(imageOrderForRequest([...order], [])).toEqual([...order]);
+    expect(imageOrderForRequest(["openai", "fal"], ["https://cdn.example/official-product.jpg"])).toEqual([]);
+  });
+});
 
 describe("persistDataUrl", () => {
   it("stores a base64 image and returns its URL", async () => {

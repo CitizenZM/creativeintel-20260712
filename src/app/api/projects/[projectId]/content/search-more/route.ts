@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * "Load more" — runs the same adapter dispatch as the research runner so the
  * results honour the campaign platform. The old version was hardcoded to
@@ -81,7 +82,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("Search-more failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

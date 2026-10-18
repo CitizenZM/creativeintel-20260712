@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import {
   Loader2, Link, Package, RefreshCw, ExternalLink, Upload,
   CheckCircle2, AlertCircle, X, Plus, Pencil, Check, Sparkles,
@@ -416,8 +417,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
             <div className="grid grid-cols-6 gap-1.5">
               {preview.images.slice(0, 6).map((img, i) => (
                 <div key={i} className="aspect-square rounded-md overflow-hidden border border-blue-200 bg-white">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
+                  <Image unoptimized width={1024} height={1024}
                     src={img.url}
                     alt={img.alt || "Preview"}
                     className="w-full h-full object-contain"
@@ -587,7 +587,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
             {/* Product page images */}
             {(data?.productPageImages || []).slice(0, 4).map((img, i) => (
               <div key={`pp-${i}`} className="relative group aspect-square rounded-lg overflow-hidden border border-border bg-muted">
-                <img
+                <Image unoptimized width={1024} height={1024}
                   src={img.url}
                   alt={img.alt || "Product"}
                   className="w-full h-full object-contain bg-white"
@@ -601,7 +601,7 @@ export function ProductDefinition({ projectId }: { projectId: string }) {
             {/* User-uploaded images */}
             {(data?.userProductImages || []).slice(0, 4).map((img, i) => (
               <div key={`up-${i}`} className="relative group aspect-square rounded-lg overflow-hidden border border-border bg-muted">
-                <img
+                <Image unoptimized width={1024} height={1024}
                   src={img.url}
                   alt={img.caption || img.alt || "Uploaded"}
                   className="w-full h-full object-contain bg-white"

@@ -1,3 +1,4 @@
+import { deferWorkerTask, ignoredWorkerPayload } from "../worker-await";
 /**
  * Browser-only ad sources (Meta Ad Library media, TikTok Ad Library, Google Ads
  * Transparency Center). These block server-side fetches from Vercel, so the
@@ -71,6 +72,7 @@ export async function runBrowserAdapter(
       };
     }
 
+    if (ignoredWorkerPayload(hash)) return { candidates: [], report: { name, status: "failed", count: 0, note: "Browser worker task failed or exceeded its deadline" } };
     const { taskId, deduped } = await enqueueWorkerTask({
       projectId: ctx.projectId,
       kind: "ad_library_fetch",
@@ -78,6 +80,7 @@ export async function runBrowserAdapter(
       priority: ctx.competitorId ? 0 : 1,
     });
 
+    if (taskId) deferWorkerTask(taskId);
     return {
       candidates: [],
       report: {

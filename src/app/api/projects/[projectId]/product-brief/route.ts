@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * The sp-1 product brief (ranked filmable selling points, keywords, objections, big idea) stored on
  * Project.productBrief. GET returns what is stored; POST regenerates it from the project's scraped
@@ -74,7 +75,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
     await archiveAround("product brief", (o) => archiveProjectFields(project.id, ["productBrief"], o), () => prisma.project.update({ where: { id: project.id }, data: { productBrief: brief as object, productBriefAt: at } }));
     return NextResponse.json({ brief, at: at.toISOString() });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: 500 });
   }
 }
 

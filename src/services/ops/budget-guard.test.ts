@@ -58,6 +58,14 @@ describe("chargeOrRefuse", () => {
 });
 
 describe("withSpendGuard", () => {
+  it("keeps the first settlement when duplicate callbacks report different costs", async () => {
+    const ledger = new MemorySpendLedger();
+    const reservation = await ledger.reserve(scope({ kind: "video", jobId: "v1" }), 0.12);
+    await Promise.all([ledger.settle(reservation.id, 0.10), ledger.settle(reservation.id, 0.12)]);
+    expect((await ledger.entries({ projectId: "p1" }))[0].actualUsd).toBe(0.10);
+    expect(await ledger.openEntryForJob("v1", "video")).toBeNull();
+  });
+
   it("reconciles the reservation with the cost the provider reported", async () => {
     const ledger = new MemorySpendLedger();
     const out = await withSpendGuard(scope(), 0.018, async () => {

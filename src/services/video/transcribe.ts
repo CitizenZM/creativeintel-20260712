@@ -113,6 +113,7 @@ async function transcribeGroq(
     method: "POST",
     headers: { Authorization: `Bearer ${key}` },
     body: form,
+    signal: AbortSignal.timeout(90_000),
   });
   if (!res.ok) {
     throw new Error(`Groq ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -141,6 +142,7 @@ async function transcribeOpenAI(
     method: "POST",
     headers: { Authorization: `Bearer ${key}` },
     body: form,
+    signal: AbortSignal.timeout(90_000),
   });
   if (!res.ok) {
     throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 200)}`);

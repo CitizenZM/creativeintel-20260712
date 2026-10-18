@@ -304,6 +304,20 @@ export function findUnsourcedSocialProof(text: string, sourceText: string): stri
 const URGENCY_SIGNAL_REGEX =
   /\b(today|tonight|hours?|days?|weeks?|deadline|expir(?:es|ing)|ending|ends?|until|limited(?:\s+time)?|last chance|midnight|countdown|this\s+week(?:end)?)\b/i;
 
+/** Remove CTA choices the brand kit has explicitly ruled out before asking a model to rewrite. */
+export function repairScriptCta(script: ScriptV2, opts: ScriptClaimsAuditInput): ScriptV2 {
+  const approvedCtas = (opts.ctaOptions ?? []).map((value) => value.trim()).filter(Boolean);
+  const currentCta = script.cta?.text?.trim() ?? "";
+  const text = approvedCtas.length && currentCta && !approvedCtas.includes(currentCta)
+    ? approvedCtas[0]
+    : script.cta.text;
+  const urgency = script.cta.urgency && !URGENCY_SIGNAL_REGEX.test(opts.offerText ?? "")
+    ? ""
+    : script.cta.urgency;
+  if (text === script.cta.text && urgency === script.cta.urgency) return script;
+  return { ...script, cta: { ...script.cta, text, urgency } };
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -340,6 +354,11 @@ const NUMBER_WORDS: Record<string, number> = {
   sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
   twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
 };
+const NUMBER_WORD_PATTERN = Object.keys(NUMBER_WORDS).join("|");
+const SPELLED_CLAIM_REGEX = new RegExp(
+  `\\b((?:${NUMBER_WORD_PATTERN})(?:[\\s-](?:one|two|three|four|five|six|seven|eight|nine))?)\\s+(?:percent\\b|%(?!\\w)|in\\b|out of\\b)`,
+  "gi"
+);
 
 /** "eighty-four" -> 84, "twelve" -> 12. Only covers one..ninety-nine. */
 function spelledToNumber(phrase: string): number | null {
@@ -370,7 +389,7 @@ function parseNumericLiteral(raw: string): number {
  */
 const DASH_CLASS = "\\s\\-\\u2010-\\u2015"; // ascii space/hyphen + unicode hyphen..horizontal-bar (incl. en/em dash)
 const STRUCTURAL_UNIT_AFTER = new RegExp(
-  `^[${DASH_CLASS}]*(?:\\d[\\d,]*(?:\\.\\d+)?[${DASH_CLASS}]*)?(seconds?|secs?|s|mm|cm|ml|oz|fps|year[-\\s]?olds?|years?\\s+old|yo)\\b`,
+  `^[${DASH_CLASS}]*(?:\\d[\\d,]*(?:\\.\\d+)?[${DASH_CLASS}]*)?(seconds?|secs?|s|mm|cm|fps|year[-\\s]?olds?|years?\\s+old|yo)\\b`,
   "i"
 );
 const STRUCTURAL_DAY_AFTER = new RegExp(`^[${DASH_CLASS}]*days?\\b`, "i");
@@ -448,7 +467,7 @@ export function extractNumericClaims(text: string): NumericClaim[] {
   }
 
   // Spelled-out numbers followed by percent/%/in/out of
-  for (const m of text.matchAll(/\b([a-z]+(?:[\s-][a-z]+)?)\s+(percent|%|in|out of)\b/gi)) {
+  for (const m of text.matchAll(SPELLED_CLAIM_REGEX)) {
     const start = m.index ?? 0;
     const end = start + m[0].length;
     if (overlaps(start, end)) continue;
@@ -462,17 +481,29 @@ export function extractNumericClaims(text: string): NumericClaim[] {
     const end = start + m[0].length;
     if (overlaps(start, end)) continue;
     if (isStructuralNumber(text, start, end)) continue;
-    claim(start, end, m[0], parseNumericLiteral(m[0]));
+    const suffix = text.slice(end);
+    const unit = suffix.match(/^\s?(kg|mg|g|oz|ml|l)\b/i)?.[0] ?? "";
+    const rangeUnit = unit ? "" : suffix.match(/^\s*[–-]\s*\d[\d,]*(?:\.\d+)?\s?(kg|mg|g|oz|ml|l)\b/i)?.[1] ?? "";
+    // Coupon codes and model identifiers are names, not numeric assertions.
+    if (/\p{L}/u.test(text[start - 1] ?? "") || (!unit && !rangeUnit && /\p{L}/u.test(text[end] ?? ""))) continue;
+    claim(start, end + unit.length, m[0] + (unit || rangeUnit), parseNumericLiteral(m[0]));
   }
 
   return claims;
 }
 
-/** Does `value` occur anywhere in `sourceText`, as a number (digits or spelled-out)? */
-function numberOccursIn(value: number, sourceText: string): boolean {
+/** A percentage must be supported by a percentage, not an unrelated price or product count. */
+function numberOccursIn(claim: NumericClaim, sourceText: string): boolean {
   if (!sourceText) return false;
-  if (extractNumericClaims(sourceText).some((c) => c.value === value)) return true;
-  const spelled = Object.entries(NUMBER_WORDS).find(([, n]) => n === value)?.[0];
+  const isPercent = /%|percent\b/i.test(claim.raw);
+  const measureUnit = claim.raw.match(/(?:kg|mg|g|oz|ml|l)\b$/i)?.[0].toLowerCase();
+  if (extractNumericClaims(sourceText).some((source) =>
+    source.value === claim.value
+    && (!isPercent || /%|percent\b/i.test(source.raw))
+    && (!measureUnit || source.raw.match(/(?:kg|mg|g|oz|ml|l)\b$/i)?.[0].toLowerCase() === measureUnit)
+  )) return true;
+  if (isPercent || measureUnit) return false;
+  const spelled = Object.entries(NUMBER_WORDS).find(([, n]) => n === claim.value)?.[0];
   return spelled ? new RegExp(`\\b${spelled}\\b`, "i").test(sourceText) : false;
 }
 
@@ -500,15 +531,13 @@ export function auditScriptText(text: string, opts: ScriptClaimsAuditInput): Scr
   for (const hit of opts.strictCompliance ? findAbsoluteMatches(text) : []) {
     violations.push({ path: "body", text: hit, reason: `absolute/curative claim: "${hit}"` });
   }
-  if (sourceText) {
-    for (const nc of extractNumericClaims(text)) {
-      if (!numberOccursIn(nc.value, sourceText)) {
-        violations.push({
-          path: "body",
-          text: nc.raw,
-          reason: `unsourced numeric claim: "${nc.raw}" does not appear in brand truth / briefing / claimsAllowed / offer text`,
-        });
-      }
+  for (const nc of extractNumericClaims(text)) {
+    if (!numberOccursIn(nc, sourceText)) {
+      violations.push({
+        path: "body",
+        text: nc.raw,
+        reason: `unsourced numeric claim: "${nc.raw}" does not appear in brand truth / briefing / claimsAllowed / offer text`,
+      });
     }
   }
   return { ok: violations.length === 0, violations };
@@ -554,9 +583,9 @@ export function auditScriptClaims(script: ScriptV2, opts: ScriptClaimsAuditInput
     // The rendered body repeats every field above plus structural timing
     // ("[BODY beat 1 …] 3–4.2s"), so numbers are only audited on the spoken /
     // on-screen fields where they would actually be a claim.
-    if (sourceText && field.path !== "body (rendered)") {
+    if (field.path !== "body (rendered)") {
       for (const nc of extractNumericClaims(field.text)) {
-        if (!numberOccursIn(nc.value, sourceText)) {
+        if (!numberOccursIn(nc, sourceText)) {
           violations.push({
             path: field.path,
             text: nc.raw,

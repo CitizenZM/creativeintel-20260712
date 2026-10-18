@@ -1,8 +1,6 @@
-import { COMPLIANCE_FLAG } from "@/lib/script-pick";
-import { NextResponse, after } from "next/server";
-import { createJob, failJob, runJobItems, runningJob } from "@/services/jobs";
-import { analyzeWithClaude } from "@/services/ai/claude-client";
-import { buildScriptWritingPrompt } from "@/services/ai/prompts/script-writing";
+import { safePublicError } from "@/lib/public-error";
+import { NextResponse } from "next/server";
+import { createJob, runningJob } from "@/services/jobs";
 import {
   defaultTemplateBatch,
   getScriptTemplate,
@@ -10,18 +8,19 @@ import {
   type ScriptTemplate,
   type VideoType,
 } from "@/services/ai/prompts/script-templates";
-import { auditScriptClaims, scriptV2Schema, type ScriptClaimsViolation, type ScriptV2 } from "@/lib/script-schema";
+import type { ScriptClaimsViolation } from "@/lib/script-schema";
 import { withIdempotency } from "@/lib/idempotency";
 import { pMapSettled } from "@/lib/parallel";
 import {
   loadScriptContext,
-  buildScriptInput,
   persistScript,
   auditContext,
-  formatComplianceViolations,
   type ScriptAngle,
 } from "../_script-context";
 import { withAccess } from "@/lib/auth/route-guard";
+import { writeBatchScript } from "@/services/creative/batch-workers";
+import { enqueueCreativeBatch } from "@/services/creative/batch-dispatch";
+import { currentSpendScope } from "@/services/ops/spend-scope";
 
 export const maxDuration = 300;
 
@@ -59,9 +58,10 @@ async function unguardedPOST(
 
     let templates: ScriptTemplate[];
     if (Array.isArray(body.templateIds) && body.templateIds.length) {
-      templates = body.templateIds
+      templates = [...new Map(body.templateIds
         .map((id) => getScriptTemplate(id))
         .filter((t): t is ScriptTemplate => t !== null)
+        .map((template) => [template.id, template] as const)).values()]
         .slice(0, MAX_COUNT);
       if (!templates.length) {
         return NextResponse.json({ error: "No valid templateIds" }, { status: 400 });
@@ -77,60 +77,13 @@ async function unguardedPOST(
 
     const claimsAudit = auditContext(ctx);
 
-    const writeOne = async (template: ScriptTemplate, i: number) => {
-        const videoType = overrideType ?? template.videoType;
-        const angle = angles.length ? angles[i % angles.length] : undefined;
-
-        const prompt = buildScriptWritingPrompt(
-          buildScriptInput(ctx, {
-            template,
-            videoType,
-            angle,
-            totalDurationSec,
-            customBrief: body.customBrief?.trim() || undefined,
-          })
-        );
-
-        let generated: ScriptV2 = await analyzeWithClaude({
-          systemPrompt: prompt.system,
-          userPrompt: prompt.user,
-          responseSchema: scriptV2Schema,
-          maxTokens: 8000,
-        });
-
-        let audit = auditScriptClaims(generated, claimsAudit);
-
-        if (!audit.ok) {
-          const retryUserPrompt = `${prompt.user}\n\nCOMPLIANCE FAILURE — the previous draft violated brand rules. Fix these lines:\n${formatComplianceViolations(
-            audit.violations
-          )}`;
-          generated = await analyzeWithClaude({
-            systemPrompt: prompt.system,
-            userPrompt: retryUserPrompt,
-            responseSchema: scriptV2Schema,
-            maxTokens: 8000,
-          });
-          audit = auditScriptClaims(generated, claimsAudit);
-        }
-
-        if (!audit.ok) {
-          console.warn(
-            `[scripts-batch] compliance violations persisted for project ${projectId}, template ${template.id}:`,
-            audit.violations
-          );
-          generated = { ...generated, title: `${COMPLIANCE_FLAG}${generated.title}` };
-        }
-
-        const script = await persistScript(projectId, generated, {
-          template,
-          complianceNotes: audit.ok ? undefined : audit.violations.map((v) => v.reason),
-          videoType,
-          totalDurationSec,
-          angleTitle: angle?.title,
-        });
-
-        return audit.ok ? script : { ...script, complianceWarnings: audit.violations };
-    };
+    const writeOne = (template: ScriptTemplate, i: number) =>
+      writeBatchScript(projectId, ctx, claimsAudit, template, i, {
+        angles,
+        overrideType,
+        totalDurationSec,
+        customBrief: body.customBrief,
+      });
 
     if (body.background) {
       const running = await runningJob(projectId, "scripts");
@@ -139,17 +92,9 @@ async function unguardedPOST(
         projectId,
         "scripts",
         templates.map((t) => ({ key: t.id, label: t.name })),
-        { templateIds: templates.map((t) => t.id), customBrief: body.customBrief ?? null }
+        { templateIds: templates.map((t) => t.id), angles, videoType: overrideType, totalDurationSec, customBrief: body.customBrief ?? null, actorId: currentSpendScope()?.actorId ?? null }
       );
-      after(() =>
-        runJobItems(
-          job.id,
-          templates,
-          (t) => ({ key: t.id, label: t.name }),
-          (t, i) => writeOne(t, i),
-          { concurrency: CONCURRENCY }
-        ).catch((err) => failJob(job.id, err))
-      );
+      await enqueueCreativeBatch(job.id);
       const payload = { jobId: job.id, requested: templates.length };
       await idem.commit?.(payload, 202);
       return NextResponse.json(payload, { status: 202 });
@@ -169,7 +114,7 @@ async function unguardedPOST(
         r.status === "rejected"
           ? {
               templateId: templates[i].id,
-              error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+              error: safePublicError(r.reason),
             }
           : null
       )
@@ -197,7 +142,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("Scripts batch failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to generate scripts" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }

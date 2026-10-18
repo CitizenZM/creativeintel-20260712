@@ -27,6 +27,7 @@ import { isShotType } from "./consistency/thresholds";
 import { finishDirectedMotion, finishDirectedStill } from "./shot-director";
 import { guardJobCall, guardQc, releaseJobReservations, settleClipOnPoll, type RunRef } from "@/services/ops/spend";
 import { isBudgetExceeded } from "@/services/ops/budget-guard";
+import { currentAiTrace, withAiTrace } from "@/services/ai/usage-context";
 
 export type TickResult = "idle" | "running" | "done" | "failed";
 
@@ -96,12 +97,12 @@ const TERMINAL_JOB = new Set(["completed", "skipped", "failed"]);
 
 /**
  * Image and video models invent lettering — garbled signs ("Obalzarus"), fake
- * brand names on the product. Captions and the real packshot carry all text, so
- * every generated frame is told to have none. Prepended so a model that
+ * brand names on the product. Generated frames may retain text printed on the
+ * approved packshot; added captions and unrelated lettering stay out. Prepended so a model that
  * truncates long prompts (CogVideoX: 500 chars) still sees it.
  */
-export const NO_TEXT_IMAGE = "No text, letters, words, numbers, logos, signage or watermarks anywhere in the image.";
-export const NO_TEXT_VIDEO = "No text, letters, logos or signage appear.";
+export const NO_TEXT_IMAGE = "Preserve the exact printed brand, label and logo on the supplied product reference. Add no new lettering, logos, signage or watermarks.";
+export const NO_TEXT_VIDEO = "Keep the exact printed brand, label and logo on the referenced product throughout motion. Add no new lettering, logos or signage.";
 
 /**
  * Engines whose image-to-video warps faces (the free CogVideoX, small local
@@ -238,7 +239,7 @@ async function applyTaskResult(run: RunRef, job: LibtvJob, result: TaskResult, c
   }
 }
 
-export async function tickRun(
+async function tickRunInner(
   adapter: EngineAdapter,
   runId: string,
   opts: { remainingMs?: number; reserveMs?: number } = {}
@@ -362,8 +363,8 @@ export async function tickRun(
       data: {
         settings: {
           ...rest,
-          qcOk: d.chosen.pass || (repaired && repair!.pass),
-          qcIssues: d.chosen.defects.slice(0, 5),
+          qcOk: result.reviewed ? d.chosen.pass || (repaired && repair!.pass) : null,
+          qcIssues: result.reviewed ? d.chosen.defects.slice(0, 5) : result.reasons.slice(0, 5),
           consistency: consistencyRecord(result, d, attempts, repair ? { method: repair.method, reason: repair.reason, score: repair.score, pass: repair.pass, url: repair.url } : null),
           ...(repair ? { repair } : {}),
         } as never,
@@ -403,13 +404,14 @@ export async function tickRun(
   }
 
   // A keyframe or clip whose invocation was cut off before it got a task id stays
-  // "running" forever: re-queue it after IMAGE_STALE_MS (fail it after MAX_IMAGE_ATTEMPTS).
+  // "running" forever. A video submission may already be billable: do not
+  // re-submit it automatically when the provider outcome is unknown.
   for (const j of run.jobs.filter((x) => (x.kind === "image" || x.kind === "video") && x.status === "running" && !x.nodeId)) {
     if (!j.startedAt || Date.now() - new Date(j.startedAt).getTime() < IMAGE_STALE_MS) continue;
-    if ((j.attempts ?? 0) >= MAX_IMAGE_ATTEMPTS) await jobFailed(j.id, `${j.kind === "video" ? "Clip" : "Keyframe"} submission timed out repeatedly`);
+    if (j.kind === "video") {
+      await prisma.libtvJob.updateMany({ where: { id: j.id, status: "running" }, data: { status: "failed", completedAt: new Date(), error: "Video submission outcome unknown; reconcile with provider before retrying" } });
+    } else if ((j.attempts ?? 0) >= MAX_IMAGE_ATTEMPTS) await jobFailed(j.id, "Keyframe submission timed out repeatedly");
     else await prisma.libtvJob.updateMany({ where: { id: j.id, status: "running" }, data: { status: "queued" } });
-    // Whether that submit reached the provider is unknown: its reservation closes at the estimate (a resubmit reserves afresh).
-    if (j.kind === "video") await releaseJobReservations(run, j.id, "estimate");
   }
 
   // Keyframes that finish asynchronously (engines with pollImage).
@@ -510,10 +512,12 @@ export async function tickRun(
       console.warn(`[${adapter.engine}] poll ${j.nodeName} failed:`, errorText(err));
     }
   }
-  const byNameFresh = new Map(fresh.map((j) => [j.nodeName, j]));
-  let inFlight = videos.filter((x) => x.status === "running").length;
+  // Polling may have completed a clip and freed a slot in this same tick.
+  const afterPoll = await prisma.libtvJob.findMany({ where: { runId } });
+  const byNameFresh = new Map(afterPoll.map((j) => [j.nodeName, j]));
+  let inFlight = afterPoll.filter((x) => x.kind === "video" && x.status === "running").length;
   // A keyframe-review run holds its clips until "release-videos".
-  for (const j of videos.filter((x) => x.status === "queued" && !(x.settings as { hold?: number } | null)?.hold)) {
+  for (const j of afterPoll.filter((x) => x.kind === "video" && x.status === "queued" && !(x.settings as { hold?: number } | null)?.hold)) {
     if (inFlight >= adapter.maxVideosInFlight) break;
     const ref = byNameFresh.get(refName(((j.leftRefs as string[] | null) ?? [])[0] ?? ""));
     if (ref && !TERMINAL_JOB.has(ref.status)) continue; // keyframe not ready yet
@@ -547,10 +551,13 @@ export async function tickRun(
       await prisma.libtvJob.update({ where: { id: j.id }, data: { nodeId: taskId } });
       inFlight++;
     } catch (err) {
-      await jobFailed(j.id, errorText(err));
-      // A submit whose outcome is unknown (timeout, 5xx) stays reserved at its estimate: close it, so the
-      // resubmit's own reservation is the one its poll settles.
-      await releaseJobReservations(run, j.id, "estimate");
+      const message = errorText(err);
+      if (/timeout|timed out|abort|network|fetch failed|\b5\d\d\b/i.test(message)) {
+        await prisma.libtvJob.update({ where: { id: j.id }, data: { status: "failed", completedAt: new Date(), error: `Video submission outcome unknown: ${message}`.slice(0, 2000) } });
+      } else {
+        await jobFailed(j.id, message);
+        await releaseJobReservations(run, j.id, "estimate");
+      }
     }
   }
 
@@ -589,6 +596,14 @@ export async function tickRun(
     await runFailed(runId, `Assembly failed: ${errorText(err)}`);
     return "failed";
   }
+}
+
+export function tickRun(
+  adapter: EngineAdapter,
+  runId: string,
+  opts: { remainingMs?: number; reserveMs?: number } = {}
+): Promise<TickResult> {
+  return withAiTrace({ traceId: currentAiTrace()?.traceId ?? runId, runId, stage: "render" }, () => tickRunInner(adapter, runId, opts));
 }
 
 /**
@@ -681,7 +696,7 @@ export async function advanceActiveRuns(
   const runs = await prisma.libtvRun.findMany({
     where: { executor: adapter.engine, status: { in: ["approved", "claimed", "running", "assembling"] } },
     select: { id: true, status: true, jobs: { select: { status: true } } },
-    take: 5,
+    take: 100,
   });
   if (!runs.length) return 0;
   const deadline = Date.now() + budgetMs;

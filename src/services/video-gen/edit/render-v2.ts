@@ -873,7 +873,7 @@ async function applyCtaHero(input: { dir: string; canvas: Canvas; frames: Assemb
       bgFile = path.join(input.dir, "ctabg.jpg");
       await run(ffmpegPath!, ["-y", "-v", "error", "-ss", f3(seg.from), "-i", src, "-frames:v", "1", "-q:v", "3", bgFile], { timeout: 60_000 });
     }
-    const hero = await composeCtaHero({ packshot: await readFile(packFile), background: await readFile(bgFile), canvas: input.canvas });
+    const hero = await composeCtaHero({ packshot: await readFile(/* turbopackIgnore: true */ packFile), background: await readFile(/* turbopackIgnore: true */ bgFile), canvas: input.canvas });
     const heroFile = path.join(input.dir, "ctahero.jpg");
     await writeFile(heroFile, hero);
     input.sources.set(CTA_HERO_URL, heroFile);

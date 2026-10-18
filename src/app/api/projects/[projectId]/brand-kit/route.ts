@@ -10,23 +10,10 @@ import { planKitSave } from "@/services/brand-kit-merge";
 
 export const maxDuration = 30;
 
-const KIT_FIELD_KEYS = [
-  "colors",
-  "fonts",
-  "cta",
-  "offer",
-  "landingUrl",
-  "claimsAllowed",
-  "claimsForbidden",
-  "tone",
-  "doNotShow",
-  "skuName",
-  "skuDimensions",
-  "productSummary",
-] as const;
+type KitFieldKey = "colors" | "fonts" | "cta" | "offer" | "landingUrl" | "claimsAllowed" | "claimsForbidden" | "tone" | "doNotShow" | "skuName" | "skuDimensions" | "productSummary";
 
 /** Maps a PATCH body key (from brandKitUpdateSchema) to its field-status key. */
-const FIELD_STATUS_KEY: Record<string, (typeof KIT_FIELD_KEYS)[number]> = {
+const FIELD_STATUS_KEY: Record<string, KitFieldKey> = {
   colorsHex: "colors",
   fonts: "fonts",
   ctaOptions: "cta",

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-type Run = { id: string; status: string; approvedBudgetUsd: number | null; creditCap: number | null };
+type Run = { id: string; status: string; approvedBudgetUsd: number | null; creditCap: number | null; masterMp4Url?: string | null; jobs?: { id: string; kind: string; status: string; settings: unknown }[] };
 const store = vi.hoisted(() => ({ runs: new Map<string, Run>() }));
 
 vi.mock("@/lib/db", () => ({
@@ -8,7 +8,7 @@ vi.mock("@/lib/db", () => ({
     libtvRun: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
         const r = store.runs.get(where.id);
-        return r ? { ...r, jobs: [] } : null;
+        return r ? { ...r, jobs: r.jobs ?? [] } : null;
       }),
       updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
         const r = store.runs.get(where.id as string);
@@ -23,7 +23,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { approveRun } from "./libtv-queue";
+import { approveRun, setRunFinal } from "./libtv-queue";
 
 beforeEach(() => {
   store.runs.clear();
@@ -53,5 +53,25 @@ describe("approveRun with a USD budget from the credit cap", () => {
     store.runs.get("r1")!.approvedBudgetUsd = 3;
     await approveRun("r1", 120);
     expect(store.runs.get("r1")!.approvedBudgetUsd).toBe(3);
+  });
+});
+
+describe("final delivery", () => {
+  it("requires explicit brand approval for a completed master", async () => {
+    store.runs.set("r1", { id: "r1", status: "completed", approvedBudgetUsd: null, creditCap: null, masterMp4Url: "https://example.com/master.mp4" });
+    expect(await setRunFinal("r1", true)).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("requires every unresolved QC output to be individually acknowledged", async () => {
+    store.runs.set("r1", {
+      id: "r1", status: "completed", approvedBudgetUsd: null, creditCap: null,
+      masterMp4Url: "https://example.com/master.mp4",
+      jobs: [
+        { id: "k1", kind: "image", status: "completed", settings: { consistency: { score: 0.4 }, qcOk: false } },
+        { id: "v1", kind: "video", status: "completed", settings: { driftFlag: true } },
+      ],
+    });
+    expect(await setRunFinal("r1", true, true, ["k1"])).toMatchObject({ ok: false, status: 400 });
+    expect(await setRunFinal("r1", true, true, ["k1", "unrelated"])).toMatchObject({ ok: false, status: 400 });
   });
 });

@@ -1,3 +1,5 @@
+import { safePublicError } from "@/lib/public-error";
+import { wakeProjectResearch } from "@/services/research/dispatch";
 /**
  * Worker-facing endpoint for WorkerTask — the local research worker on the
  * operator's Mac drives the public ad libraries (Meta / TikTok / Google ATC)
@@ -13,7 +15,7 @@
  *   { action: "fail", id, error }
  *   { action: "heartbeat", id }
  */
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { timingSafeEqual, createHash } from "node:crypto";
 import { prisma } from "@/lib/db";
 import {
@@ -144,6 +146,7 @@ export async function POST(request: Request) {
         // uses for a direct fetch.
         if (task.kind === "browser_fetch") {
           const updated = await completeTask(body.id, parseBrowserFetchResult(body.result));
+          if (task.projectId) after(() => wakeProjectResearch(task.projectId!));
           return NextResponse.json({ task: { id: updated.id, status: updated.status } });
         }
 
@@ -165,6 +168,7 @@ export async function POST(request: Request) {
           saved: persisted.saved,
           failed: persisted.failed,
         });
+        if (task.projectId) after(() => wakeProjectResearch(task.projectId!));
         return NextResponse.json({
           task: updated,
           accepted: candidates.length,
@@ -178,6 +182,7 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "id and error required" }, { status: 400 });
         }
         const task = await failTask(body.id, body.error);
+        if (task?.projectId) after(() => wakeProjectResearch(task.projectId!));
         return NextResponse.json({ task });
       }
 
@@ -198,7 +203,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error("worker/tasks failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Unknown error handling worker request" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }
