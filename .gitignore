@@ -49,3 +49,6 @@ next-env.d.ts
 
 # content-history backfill checkpoint (scripts/backfill-artifacts.ts)
 .artifacts-backfill.checkpoint.json
+
+# local env backups never get committed
+.env*.bak*
