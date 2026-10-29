@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppChrome } from "@/components/layout/app-chrome";
 import { UserMenu } from "@/components/layout/user-menu";
 import { isClerkActive } from "@/lib/auth/mode";
+import { accountUrl } from "@/lib/auth/account";
 import { currentAppUser } from "@/services/app-user";
 import "./globals.css";
 
@@ -72,8 +73,8 @@ export default async function RootLayout({
         {clerk ? (
           <ClerkProvider
             appearance={clerkAppearance}
-            signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL || "/sign-in"}
-            signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL || "/sign-up"}
+            signInUrl={`${accountUrl()}/sign-in`}
+            signUpUrl={`${accountUrl()}/sign-up`}
           >
             {shell}
           </ClerkProvider>

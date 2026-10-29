@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Principal, ProjectTenant } from "./access";
 import { ACCESS_RANK, projectAccessFor } from "./access";
 import { classifyPath, isApiPath, projectIdFromPath } from "./paths";
+import { type Apps, accountSignInUrl, canEnterCreative, isCreativeOwnerClaim, noAccessUrl } from "./account";
 
 /** Where a blocked account lands. Signed-in users may always reach it. */
 export const BLOCKED_PATH = "/blocked";
@@ -57,8 +58,10 @@ const REQUIRED_RANK: Record<ProjectAction, number> = { read: 1, download: 2, wri
 
 export type AccessDecision =
   | "allow"
-  | "sign-in" // signed-out page request → Clerk sign-in
+  | "sign-in" // signed-out page request → account.xark.io sign-in
   | "unauthorized" // signed-out API request → 401
+  | "no-access-page" // signed in, but no apps.creative claim → account.xark.io/no-access
+  | "no-access-api" // the same, API → 403
   | "blocked-page" // blocked account, page → /blocked
   | "blocked-api" // blocked account, API → 403
   | "forbidden-page" // member on an admin page, or on someone else's project → /projects
@@ -69,7 +72,8 @@ export type AccessDecision =
 
 /**
  * The Clerk-mode gate as a pure decision, so it can be tested as a table. Machine and public routes
- * (src/lib/auth/paths.ts) pass untouched; everything else needs a signed-in, unblocked user. Members
+ * (src/lib/auth/paths.ts) pass untouched; everything else needs a signed-in user whose Xark Accounts
+ * `apps` claim opens CreativeIntel (src/lib/auth/account.ts), and who isn't blocked. Members
  * are further kept out of admin areas and out of every project their own workspace doesn't hold,
  * unless it was shared with them — then only as far as their share level allows (projectAction).
  * Lookups are only called when the answer depends on them.
@@ -79,6 +83,7 @@ export async function decideAccess({
   method = "GET",
   search = "",
   userId,
+  apps,
   principalOf,
   projectTenant,
 }: {
@@ -86,18 +91,23 @@ export async function decideAccess({
   method?: string;
   search?: string;
   userId: string | null | undefined;
+  /** The session's `apps` claim (parseApps). `apps.creative === "owner"` is an owner. */
+  apps: Apps;
   principalOf: (clerkUserId: string) => Promise<Principal>;
   projectTenant: (projectId: string, appUserId: string | null) => Promise<ProjectTenant | null>;
 }): Promise<AccessDecision> {
   if (classifyPath(pathname) !== "protected") return "allow";
   const api = isApiPath(pathname);
   if (!userId) return api ? "unauthorized" : "sign-in";
+  if (!canEnterCreative(apps)) return api ? "no-access-api" : "no-access-page";
   if (isBlockedPath(pathname)) return "allow";
 
   try {
     const principal = await principalOf(userId);
-    if (principal.status === "blocked") return api ? "blocked-api" : "blocked-page";
-    if (principal.role === "owner") return "allow";
+    // Owners (OWNER_EMAILS, the DB role, or the apps.creative claim) are never blocked.
+    const owner = principal.role === "owner" || isCreativeOwnerClaim(apps);
+    if (!owner && principal.status === "blocked") return api ? "blocked-api" : "blocked-page";
+    if (owner) return "allow";
 
     if (isAdminOnlyPath(pathname)) return api ? "forbidden-api" : "forbidden-page";
     const projectId = projectIdFromPath(pathname);
@@ -115,9 +125,9 @@ export async function decideAccess({
   }
 }
 
-/** The response for every refusal except "sign-in", which Clerk's redirectToSignIn handles. */
+/** The response for every refusal. Sign-in and no-access are 302s to account.xark.io. */
 export function deniedResponse(
-  decision: Exclude<AccessDecision, "allow" | "sign-in">,
+  decision: Exclude<AccessDecision, "allow">,
   request: NextRequest,
 ): NextResponse {
   const redirectTo = (pathname: string) => {
@@ -127,6 +137,12 @@ export function deniedResponse(
     return NextResponse.redirect(url);
   };
   switch (decision) {
+    case "sign-in":
+      return NextResponse.redirect(accountSignInUrl(request.nextUrl.href), 302);
+    case "no-access-page":
+      return NextResponse.redirect(noAccessUrl(), 302);
+    case "no-access-api":
+      return NextResponse.json({ error: "No access to CreativeIntel" }, { status: 403 });
     case "unauthorized":
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     case "blocked-page":

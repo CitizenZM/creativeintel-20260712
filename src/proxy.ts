@@ -3,7 +3,8 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { selectAuthMode } from "@/lib/auth/mode";
 import { decideAccess, deniedResponse } from "@/lib/auth/gate";
-import { canonicalRedirect, classifyPath, isApiPath, rewriteSluggedPath } from "@/lib/auth/paths";
+import { canonicalRedirect, classifyPath, isApiPath, legacyHostRedirect, rewriteSluggedPath } from "@/lib/auth/paths";
+import { accountUrl, parseApps } from "@/lib/auth/account";
 import { getPrincipal, getProjectTenant } from "@/services/access";
 import { ACTOR_HEADER } from "@/lib/auth/actor";
 
@@ -11,9 +12,12 @@ import { ACTOR_HEADER } from "@/lib/auth/actor";
  * The gate in front of every route (Next 16 renamed `middleware` to `proxy`).
  * Which gate runs is decided once per process by `selectAuthMode` (src/lib/auth/mode.ts):
  *
- * - clerk     — Clerk sessions. Every page and /api route needs a signed-in user except the
- *               machine routes, /sign-in, /sign-up and /api/health. Pages redirect to /sign-in,
- *               API calls get a 401. Sign-up is open, so data is isolated per account
+ * - clerk     — Clerk sessions from the shared Xark Accounts instance (src/lib/auth/account.ts).
+ *               Every page and /api route needs a signed-in user except the machine routes,
+ *               /sign-in, /sign-up and /api/health. Pages redirect (302) to account.xark.io/sign-in,
+ *               API calls get a 401. A signed-in user without the `apps.creative` claim (and not
+ *               `apps.account === "super_admin"`) is sent to account.xark.io/no-access (API: 403).
+ *               Data is isolated per account
  *               (src/lib/auth/gate.ts): an owner (master admin) reaches everything; a member only
  *               reaches projects in workspaces they own and never the admin areas, and a blocked
  *               account is sent to /blocked. The proxy runs on the Node.js runtime (Next 16
@@ -49,10 +53,11 @@ function continueRequest(request: NextRequest, actorId: string | null = null): N
 }
 
 // ── Clerk ────────────────────────────────────────────────────────────────────
-const SIGN_IN_URL = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL || "/sign-in";
-const SIGN_UP_URL = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL || "/sign-up";
-// Production: creative.xark.io. Browsers on any other host are sent there (a production Clerk
-// instance can't issue sessions on the *.vercel.app aliases) and only it may present sessions.
+const SIGN_IN_URL = `${accountUrl()}/sign-in`;
+const SIGN_UP_URL = `${accountUrl()}/sign-up`;
+// Production: creative.account.xark.io. Browsers on any other host are sent there (a production
+// Clerk instance can't issue sessions on the *.vercel.app aliases) and only it may present sessions.
+// The old host, creative.xark.io, 301s there before any auth work (legacyHostRedirect).
 const CANONICAL_HOST = process.env.AUTH_CANONICAL_HOST?.trim() || undefined;
 
 const clerkGate =
@@ -60,16 +65,16 @@ const clerkGate =
     ? clerkMiddleware(
         async (auth, request) => {
           if (classifyPath(request.nextUrl.pathname) === "protected") {
-            const { userId, redirectToSignIn } = await auth();
+            const { userId, sessionClaims } = await auth();
             const decision = await decideAccess({
               pathname: request.nextUrl.pathname,
               method: request.method,
               search: request.nextUrl.search,
               userId,
+              apps: parseApps(sessionClaims?.apps),
               principalOf: getPrincipal,
               projectTenant: getProjectTenant,
             });
-            if (decision === "sign-in") return redirectToSignIn({ returnBackUrl: request.url });
             if (decision !== "allow") return deniedResponse(decision, request);
             // Allowed and signed in: the principal is cached from decideAccess, so this is free.
             const actor = userId ? await getPrincipal(userId).catch(() => null) : null;
@@ -125,6 +130,8 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
   const { pathname, search } = request.nextUrl;
   const kind = classifyPath(pathname);
   if (kind === "machine") return continueRequest(request);
+  const legacy = legacyHostRedirect(request.nextUrl.hostname, pathname, search, CANONICAL_HOST);
+  if (legacy) return NextResponse.redirect(legacy, 301);
 
   switch (AUTH.mode) {
     case "clerk": {

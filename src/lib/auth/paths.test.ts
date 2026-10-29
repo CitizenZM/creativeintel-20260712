@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalRedirect, classifyPath, isApiPath, projectIdFromPath, rewriteSluggedPath } from "./paths";
+import { canonicalRedirect, classifyPath, isApiPath, legacyHostRedirect, projectIdFromPath, rewriteSluggedPath } from "./paths";
 
 describe("classifyPath", () => {
   it.each([
@@ -111,4 +111,22 @@ describe("projectIdFromPath", () => {
     ["/all", null],
     ["/library/brands/x", null],
   ])("%s → %s", (p, expected) => expect(projectIdFromPath(p)).toBe(expected));
+});
+
+describe("legacyHostRedirect", () => {
+  it("sends creative.xark.io to the canonical host, keeping path and query (API included)", () => {
+    expect(legacyHostRedirect("creative.xark.io", "/projects/x", "?a=1", "creative.account.xark.io")).toBe(
+      "https://creative.account.xark.io/projects/x?a=1",
+    );
+    expect(legacyHostRedirect("Creative.Xark.io", "/api/projects", "", "creative.account.xark.io")).toBe(
+      "https://creative.account.xark.io/api/projects",
+    );
+  });
+
+  it("is a no-op on other hosts, without a canonical host, or when the canonical host is still the old one", () => {
+    expect(legacyHostRedirect("creative.account.xark.io", "/", "", "creative.account.xark.io")).toBeNull();
+    expect(legacyHostRedirect("foo.vercel.app", "/", "", "creative.account.xark.io")).toBeNull();
+    expect(legacyHostRedirect("creative.xark.io", "/", "", undefined)).toBeNull();
+    expect(legacyHostRedirect("creative.xark.io", "/", "", "creative.xark.io")).toBeNull();
+  });
 });

@@ -1,11 +1,13 @@
 import { cache } from "react";
 import { unstable_rethrow } from "next/navigation";
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
 import type { AppUser } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { isClerkActive } from "@/lib/auth/mode";
 import { clerkProfile, needsTouch } from "@/lib/auth/profile";
 import { resolveRole } from "@/lib/auth/roles";
+import { isCreativeOwnerClaim, parseApps } from "@/lib/auth/account";
+import { invalidatePrincipal } from "@/services/access";
 import { ensurePersonalWorkspace } from "@/services/personal-workspace";
 import { LEGAL_VERSION } from "@/lib/legal";
 import { linkSharesToUser } from "@/services/project-shares";
@@ -13,7 +15,10 @@ import { linkSharesToUser } from "@/services/project-shares";
 /**
  * The signed-in person's AppUser row, created on their first authenticated request (lazy upsert —
  * no webhook). Role comes from OWNER_EMAILS matched against the Clerk-verified primary email (see
- * src/lib/auth/roles.ts). Sign-up is open: a new member is active straight away and gets their own
+ * src/lib/auth/roles.ts) or the Xark Accounts claim `apps.creative === "owner"` (promote-only).
+ * After the move to the shared Xark Accounts instance a returning user has a new Clerk id: their
+ * existing row is relinked by verified primary email instead of creating a second one (relinkByEmail).
+ * A new member is active straight away and gets their own
  * empty workspace (src/services/personal-workspace.ts), so they start with no
  * projects, brands or history and never see anyone else's. Returns null when Clerk
  * isn't the active gate, when nobody is signed in, or when the DB is unreachable (never throws, so
@@ -22,17 +27,18 @@ import { linkSharesToUser } from "@/services/project-shares";
 export const currentAppUser = cache(async (): Promise<AppUser | null> => {
   if (!isClerkActive()) return null;
   // Outside the try: auth() reads headers, and Next must see that to render the route dynamically.
-  const { userId } = await auth();
+  const { userId, sessionClaims } = await auth();
   if (!userId) return null;
   try {
     const owners = process.env.OWNER_EMAILS;
+    const claimOwner = isCreativeOwnerClaim(parseApps(sessionClaims?.apps));
     const now = new Date();
 
     const existing = await prisma.appUser.findUnique({ where: { clerkUserId: userId } });
     if (existing) {
-      let role = existing.role;
+      let role = claimOwner ? "owner" : existing.role;
       // OWNER_EMAILS now lists this user: promote, but only on a verified email (re-read from Clerk).
-      if (resolveRole(existing.email, owners, existing.role) !== existing.role) {
+      if (role !== "owner" && resolveRole(existing.email, owners, existing.role) !== existing.role) {
         const user = await currentUser();
         role = resolveRole(user ? clerkProfile(user).ownerEligibleEmail : null, owners, existing.role);
       }
@@ -49,7 +55,9 @@ export const currentAppUser = cache(async (): Promise<AppUser | null> => {
     const user = await currentUser();
     if (!user) return null;
     const { email, name, ownerEligibleEmail, legalAcceptedAt } = clerkProfile(user);
-    const role = resolveRole(ownerEligibleEmail, owners);
+    const relinked = ownerEligibleEmail ? await relinkByEmail(userId, ownerEligibleEmail, claimOwner, now) : null;
+    if (relinked) return relinked;
+    const role = claimOwner ? "owner" : resolveRole(ownerEligibleEmail, owners);
     const created = await prisma.appUser.upsert({
       where: { clerkUserId: userId },
       create: {
@@ -77,3 +85,45 @@ export const currentAppUser = cache(async (): Promise<AppUser | null> => {
     return null;
   }
 });
+
+/**
+ * The row a user had under the old per-app Clerk instance, moved onto their new Clerk id. Only ever
+ * on a Clerk-verified primary email (the caller passes ownerEligibleEmail), case-insensitive, oldest
+ * row first. A row whose Clerk id is still a live user of this instance belongs to someone else
+ * (e.g. they changed their email since) and is never taken over. Null = nothing to relink.
+ */
+async function relinkByEmail(userId: string, verifiedEmail: string, claimOwner: boolean, now: Date): Promise<AppUser | null> {
+  const previous = await prisma.appUser.findFirst({
+    where: { email: { equals: verifiedEmail, mode: "insensitive" } },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!previous) return null;
+  if (await isLiveClerkUser(previous.clerkUserId)) {
+    console.warn(`[auth] ${verifiedEmail}: row ${previous.id} belongs to another live account — not relinked`);
+    return null;
+  }
+  const role = claimOwner ? "owner" : resolveRole(verifiedEmail, process.env.OWNER_EMAILS, previous.role);
+  const relinked = await prisma.appUser.update({
+    where: { id: previous.id },
+    data: {
+      clerkUserId: userId,
+      role,
+      lastSeenAt: now,
+      ...(role === "owner" && previous.status === "blocked" ? { status: "active" } : {}),
+    },
+  });
+  invalidatePrincipal(userId);
+  console.info(`[auth] relinked ${verifiedEmail} (${previous.clerkUserId} → ${userId})`);
+  return relinked;
+}
+
+/** True when this Clerk instance has the user; false on a 404 (an id from the old instance). */
+async function isLiveClerkUser(clerkUserId: string): Promise<boolean> {
+  try {
+    await (await clerkClient()).users.getUser(clerkUserId);
+    return true;
+  } catch (err) {
+    if ((err as { status?: number })?.status === 404) return false;
+    throw err;
+  }
+}
