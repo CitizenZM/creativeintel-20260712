@@ -3,12 +3,13 @@
  * to change a word, which threw away a script that was otherwise right — and
  * cost another model call.
  *
- * Only the human-facing copy is editable. The structured fields the studio
- * compiles from (template, videoType, beats) stay as generated, so an edit can
- * never leave a board pointing at something that no longer exists.
+ * A human-edited body becomes the source of truth for the next storyboard.
+ * Generated scene and copy suggestions are cleared with it so stale claims
+ * cannot silently override the correction. Template and video type remain.
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { Prisma } from "@/generated/prisma/client";
 import { archiveAround, archiveScript } from "@/services/artifacts/archive";
 import { auditScriptText } from "@/lib/script-schema";
 import { auditContext, formatComplianceViolations, loadScriptContext } from "../../_script-context";
@@ -64,15 +65,7 @@ async function unguardedPATCH(
   });
   if (!existing) return NextResponse.json({ error: "Script not found" }, { status: 404 });
 
-  const data: {
-    title?: string;
-    body?: string;
-    status?: string;
-    selectedHookIdx?: number | null;
-    selectedCtaIdx?: number | null;
-    roleName?: string | null;
-    environmentName?: string | null;
-  } = {};
+  const data: Prisma.ScriptUpdateInput = {};
 
   const optionIndex = (value: unknown, options: unknown): number | null | "invalid" => {
     if (value === null) return null;
@@ -96,7 +89,17 @@ async function unguardedPATCH(
     data[key] = typeof body[key] === "string" ? (body[key] as string).trim().slice(0, 120) || null : null;
   }
   if (typeof body.title === "string" && body.title.trim()) data.title = body.title.trim().slice(0, 300);
-  if (typeof body.body === "string" && body.body.trim()) data.body = body.body.trim();
+  if (typeof body.body === "string" && body.body.trim()) {
+    data.body = body.body.trim();
+    data.scenes = Prisma.DbNull;
+    data.hook = Prisma.DbNull;
+    data.bodyBeats = Prisma.DbNull;
+    data.cta = Prisma.DbNull;
+    data.hookVariants = [];
+    data.ctaVariants = [];
+    data.selectedHookIdx = null;
+    data.selectedCtaIdx = null;
+  }
   if (body.status !== undefined) {
     if (!isSelectionStatus(body.status)) {
       return NextResponse.json({ error: "status must be draft or selected" }, { status: 400 });
@@ -111,7 +114,7 @@ async function unguardedPATCH(
   // An edited script still has to clear the same compliance bar a generated
   // one does — it is reported, not rejected, since a human made the change.
   let complianceWarnings: string[] = [];
-  if (data.body) {
+  if (typeof data.body === "string") {
     const ctx = await loadScriptContext(projectId).catch(() => null);
     if (ctx) {
       const audit = auditScriptText(data.body, auditContext(ctx));

@@ -46,6 +46,9 @@ interface StatusPayload {
   error?: string | null;
   etaSeconds?: number | null;
   startedAt?: string | null;
+  queueDepth?: number;
+  runningWorkers?: number;
+  waitingForWorkers?: boolean;
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -101,6 +104,7 @@ export function ResearchProgress({ projectId }: { projectId: string }) {
   const [sources, setSources] = useState<SourceStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [eta, setEta] = useState<number | null>(null);
+  const [workerQueue, setWorkerQueue] = useState({ queued: 0, running: 0, waiting: false });
   const [expanded, setExpanded] = useState(false);
   const polling = useRef(false);
   const alive = useRef(true);
@@ -111,6 +115,7 @@ export function ResearchProgress({ projectId }: { projectId: string }) {
     if (typeof data.progress === "number") setProgress(data.progress);
     if (Array.isArray(data.steps)) setSteps(data.steps);
     if (Array.isArray(data.sources)) setSources(data.sources);
+    setWorkerQueue({ queued: data.queueDepth ?? 0, running: data.runningWorkers ?? 0, waiting: data.waitingForWorkers ?? false });
     setEta(typeof data.etaSeconds === "number" ? data.etaSeconds : null);
   }, []);
 
@@ -261,6 +266,7 @@ export function ResearchProgress({ projectId }: { projectId: string }) {
                   ? "Research partly complete"
                   : "Research complete"}
           </p>
+          {running && (workerQueue.waiting || workerQueue.queued > 0) && <p className="text-xs text-muted-foreground mt-1">Browser workers: {workerQueue.queued} queued · {workerQueue.running} running{workerQueue.waiting ? " · waiting for results" : ""}</p>}
           <p className="text-xs text-muted-foreground mt-0.5">
             {running
               ? steps.find((s) => s.status === "running")?.name ?? "Starting…"

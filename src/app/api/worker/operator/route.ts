@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * Operator endpoint — the Studio's approve-frames → compile → approve steps
  * for the operator's tooling when no browser session is available.
@@ -57,7 +58,7 @@ import { assembleGlmMaster } from "@/services/video-gen/glm-assemble";
 import { renderVariantForRun } from "@/services/video-gen/variants";
 import { renderExportForRun } from "@/services/video-gen/exports";
 import { storyboardFrames } from "@/services/video-gen/server-executor";
-import { driveServerRun } from "@/services/video-gen/server-engines";
+import { enqueueRender } from "@/services/video-gen/render-dispatch";
 import { loadAiSettings } from "@/services/settings/ai-settings";
 import { serverApprovalBudget } from "@/services/ops/approval-budget";
 import { withSpendScope } from "@/services/ops/spend-scope";
@@ -157,7 +158,7 @@ async function handleOperatorPost(request: Request) {
       if (err instanceof LibtvCompileError) {
         return NextResponse.json({ error: err.message, missing: err.missing }, { status: err.status });
       }
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: 500 });
     }
   }
 
@@ -222,7 +223,7 @@ async function handleOperatorPost(request: Request) {
       released++;
     }
     await loadAiSettings();
-    after(() => driveServerRun(run.executor, run.id, 280_000).then(() => undefined));
+    after(() => enqueueRender("run", run.id));
     return NextResponse.json({ ok: true, released });
   }
 
@@ -231,7 +232,7 @@ async function handleOperatorPost(request: Request) {
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
     if (!isServerEngine(run.executor)) return NextResponse.json({ error: `Not a server run (executor ${run.executor ?? "none"})` }, { status: 409 });
     await loadAiSettings();
-    after(() => driveServerRun(run.executor, run.id, 280_000).then(() => undefined));
+    after(() => enqueueRender("run", run.id));
     return NextResponse.json({ ok: true, driving: run.id, status: run.status });
   }
 
@@ -268,7 +269,7 @@ async function handleOperatorPost(request: Request) {
       const { saveStructureFromTeardown } = await import("@/services/structures");
       return NextResponse.json({ ok: true, structure: await saveStructureFromTeardown(input.projectId, input.teardownId) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: 400 });
     }
   }
 
@@ -315,7 +316,7 @@ async function handleOperatorPost(request: Request) {
       await archiveAround("product brief", (o) => archiveProjectFields(project.id, ["productBrief"], o), () => prisma.project.update({ where: { id: project.id }, data: { productBrief: brief as object, productBriefAt: new Date() } }));
       return NextResponse.json({ ok: true, brief });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: 500 });
     }
   }
 
@@ -335,7 +336,7 @@ async function handleOperatorPost(request: Request) {
       return NextResponse.json({ ok: true, summary: summarizePlan(plan) });
     } catch (err) {
       const status = err instanceof CampaignPlanError ? err.status : 500;
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
+      return NextResponse.json({ error: safePublicError(err) }, { status });
     }
   }
 
@@ -380,7 +381,7 @@ async function handleOperatorPost(request: Request) {
       const choice = selectCreative({ ...input, category: category as never, platform: input.platform as never });
       return NextResponse.json({ ok: true, category, choice });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: 400 });
     }
   }
 
@@ -391,7 +392,7 @@ async function handleOperatorPost(request: Request) {
       const { reviewAndStore } = await import("@/services/video-gen/director");
       return NextResponse.json({ ok: true, review: await reviewAndStore(run.id) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: 409 });
     }
   }
 
@@ -413,7 +414,7 @@ async function handleOperatorPost(request: Request) {
     try {
       return NextResponse.json({ ok: true, export: await renderExportForRun(run.id, input.format) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: 409 });
     }
   }
 
@@ -428,7 +429,7 @@ async function handleOperatorPost(request: Request) {
       const { action: _a, projectId, ...req } = input;
       return NextResponse.json({ ok: true, testPlan: await createTestPlan(projectId, req) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof TestPlanError ? err.status : 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: err instanceof TestPlanError ? err.status : 500 });
     }
   }
 
@@ -440,7 +441,7 @@ async function handleOperatorPost(request: Request) {
       const variant = await renderVariantForRun(run.id, input.hookStyle, input.hookText);
       return NextResponse.json({ ok: true, variant });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: 409 });
     }
   }
 
@@ -463,7 +464,7 @@ async function handleOperatorPost(request: Request) {
       const { buildExportPack } = await import("@/services/delivery/export-pack");
       return NextResponse.json({ ok: true, ...(await buildExportPack(run.id, { platforms: input.platforms })) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: 409 });
     }
   }
   if (input.action === "estimate-run") return opsReply(await (await import("@/services/ops/operator-ops")).estimateRunAction(input));
@@ -481,7 +482,7 @@ async function handleOperatorPost(request: Request) {
       return NextResponse.json({ ok: true, nextRound: await planNextRound(input.projectId, { platform: input.platform }) });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return NextResponse.json({ error: msg }, { status: /not found/i.test(msg) ? 404 : 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: /not found/i.test(msg) ? 404 : 500 });
     }
   }
 
@@ -492,7 +493,7 @@ async function handleOperatorPost(request: Request) {
       if (input.action === "catalog-plan") return NextResponse.json({ ok: true, ...(await store.planCatalogRun(input)) });
       return NextResponse.json({ ok: true, ...(await store.renderCatalogImages(input)) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof store.CatalogError ? err.status : 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: err instanceof store.CatalogError ? err.status : 500 });
     }
   }
 
@@ -503,7 +504,7 @@ async function handleOperatorPost(request: Request) {
       if (narrative !== false) await loadAiSettings();
       return NextResponse.json({ ok: true, mediaPlan: await createMediaPlan(projectId, { ...req, narrative }) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof MediaPlanError ? err.status : 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: err instanceof MediaPlanError ? err.status : 500 });
     }
   }
   if (input.action === "report-preview" || input.action === "report-delivery-config") {
@@ -515,7 +516,7 @@ async function handleOperatorPost(request: Request) {
       }
       return NextResponse.json({ ok: true, ...(await updateDeliveryConfig(input.projectId, input.config)) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof DeliveryError ? err.status : 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: err instanceof DeliveryError ? err.status : 500 });
     }
   }
 
@@ -535,7 +536,7 @@ async function handleOperatorPost(request: Request) {
       const { plan, clone } = await cloneAdIntoProject(input.projectId, { teardownId: input.teardownId, structureId: input.structureId, platform: input.platform, goal: input.goal });
       return NextResponse.json({ ok: true, label: clone.plan.label, hook: clone.hook, endCard: clone.endCard, summary: summarizePlan(plan) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof CampaignPlanError ? err.status : 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: err instanceof CampaignPlanError ? err.status : 500 });
     }
   }
 
@@ -561,7 +562,7 @@ async function handleOperatorPost(request: Request) {
       return NextResponse.json({ ok: true, set }, { status: 201 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return NextResponse.json({ error: msg }, { status: /not found/i.test(msg) ? 404 : /Unknown image ad|No product image/.test(msg) ? 400 : 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: /not found/i.test(msg) ? 404 : /Unknown image ad|No product image/.test(msg) ? 400 : 500 });
     }
   }
 
@@ -570,7 +571,7 @@ async function handleOperatorPost(request: Request) {
     try {
       return NextResponse.json({ ok: true, preflight: await preflightRun(input.projectId, input.runId, input) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof PreflightError ? err.status : 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: err instanceof PreflightError ? err.status : 500 });
     }
   }
 
@@ -587,7 +588,7 @@ async function handleOperatorPost(request: Request) {
     try {
       return NextResponse.json({ ok: true, covers: await coversForRun(input.projectId, input.runId, { force: input.force }) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof CoversError ? err.status : 500 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: err instanceof CoversError ? err.status : 500 });
     }
   }
 
@@ -599,7 +600,7 @@ async function handleOperatorPost(request: Request) {
     try {
       return NextResponse.json({ ok: true, autofix: await autoFixRender(run.id, prismaDeps({ platform: (input.platform as import("@/services/creative/types").PlatformId | undefined) ?? null })) });
     } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+      return NextResponse.json({ error: safePublicError(err) }, { status: 409 });
     }
   }
 
@@ -645,7 +646,7 @@ async function handleOperatorPost(request: Request) {
   if (!run) {
     return NextResponse.json({ error: `Run cannot be approved from status "${existing.status}"` }, { status: 409 });
   }
-  after(() => driveServerRun(run.executor, run.id, 280_000).then(() => undefined));
+  after(() => enqueueRender("run", run.id));
   return NextResponse.json({ ok: true, run: summarize((await getRunWithJobs(run.id)) ?? run) });
 }
 

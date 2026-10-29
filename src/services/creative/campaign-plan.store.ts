@@ -6,7 +6,7 @@
 import { prisma } from "@/lib/db";
 import { archiveAround, archiveProjectFields } from "@/services/artifacts/archive";
 import type { CampaignPlan } from "./campaign-plan.types";
-import { DEFAULT_PLAN_PLATFORMS, normalizeOverrides, planCampaign, type LlmFn, type PromoInput } from "./campaign-planner";
+import { DEFAULT_PLAN_PLATFORMS, normalizeOverrides, normalizePlatform, planCampaign, type LlmFn, type PromoInput } from "./campaign-planner";
 import type { ProductBrief } from "./product-brief";
 import { goalFromText } from "./prompt-blocks";
 
@@ -50,6 +50,7 @@ export async function createCampaignPlan(projectId: string, req: PlanRequest = {
   const platforms = req.platforms?.length ? req.platforms : selection?.platform ? [selection.platform] : DEFAULT_PLAN_PLATFORMS;
   const goal = req.goal || goalFromText([project.campaignGoal, project.goalType, kit?.offerText].filter(Boolean).join(" "));
   const promo = req.promo ?? (brief.product?.price ? { price: brief.product.price } : undefined);
+  const biases = req.bias === undefined ? await loadPlanBias(projectId, brief.category, platforms.map(normalizePlatform)) : undefined;
   const plan = await planCampaign({
     projectId,
     brief,
@@ -61,7 +62,8 @@ export async function createCampaignPlan(projectId: string, req: PlanRequest = {
     strictCompliance: req.strictCompliance ?? strictByDefault(),
     overrides: normalizeOverrides(req.overrides),
     llm: req.llm,
-    bias: req.bias === undefined ? await loadPlanBias(projectId, brief.category, platforms) : (req.bias ?? undefined),
+    bias: req.bias ?? undefined,
+    biasByPlatform: biases,
   });
   await archiveAround("campaign plan", (o) => archiveProjectFields(projectId, ["campaignPlan"], o), () => prisma.project.update({ where: { id: projectId }, data: { campaignPlan: plan as object, campaignPlanAt: new Date() } }));
   return plan;
@@ -71,12 +73,12 @@ export async function createCampaignPlan(projectId: string, req: PlanRequest = {
  * Default selectCreative bias: our own results (Performance Agent) merged with competitor hook
  * trends (research/hook-trends, rules only — no model call); our results win for any id both score.
  */
-async function loadPlanBias(projectId: string, category: string | undefined, platforms: string[]): Promise<Partial<Record<string, number>> | undefined> {
+async function loadPlanBias(projectId: string, category: string | undefined, platforms: string[]): Promise<Record<string, Partial<Record<string, number>> | undefined>> {
   const [perf, trends] = await Promise.all([
     import("@/services/performance/agent").then((m) => m.performanceBias(projectId)).catch(() => undefined),
-    import("@/services/research/hook-trends").then((m) => m.trendBias(category, platforms.length === 1 ? platforms[0] : null, { projectId }).then((t) => ({ t, merge: m.mergeBias }))).catch(() => undefined),
+    import("@/services/research/hook-trends").then((m) => m.trendBiasByPlatform(category, platforms, { projectId }).then((biases) => ({ biases, merge: m.mergeBias }))).catch(() => undefined),
   ]);
-  return trends ? trends.merge(perf, trends.t) : perf && Object.keys(perf).length ? perf : undefined;
+  return Object.fromEntries(platforms.map((platform) => [platform, trends ? trends.merge(perf, trends.biases[platform]) : perf && Object.keys(perf).length ? perf : undefined]));
 }
 
 export async function getCampaignPlan(projectId: string): Promise<{ plan: CampaignPlan | null; planAt: Date | null } | null> {

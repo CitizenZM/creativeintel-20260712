@@ -7,4 +7,4 @@ cd "$(dirname "$0")"
 WORKER_TOKEN="$(security find-generic-password -s creativeintel-worker-token -w)"
 export WORKER_TOKEN
 export APP_URL="${APP_URL:-https://creativeintel.vercel.app}"
-exec node worker.mjs
+exec node pool.mjs

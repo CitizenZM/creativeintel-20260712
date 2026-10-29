@@ -5,6 +5,15 @@ const CLERK = { NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_x", CLERK_SECRET_KEY
 const CF = { CF_ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com", CF_ACCESS_AUD: "aud" };
 
 describe("selectAuthMode", () => {
+  it("locks hosted deployments without authentication, even with a none override", () => {
+    expect(selectAuthMode({ VERCEL: "1" }).mode).toBe("locked");
+    expect(selectAuthMode({ VERCEL: "1", AUTH_PROVIDER: "none" }).mode).toBe("locked");
+  });
+  it("requires isolated preview DB and test Clerk keys, including machine access", () => {
+    expect(selectAuthMode({ VERCEL_ENV: "preview", ...CLERK }).mode).toBe("locked");
+    expect(selectAuthMode({ VERCEL_ENV: "preview", ...CLERK, PREVIEW_DATABASE_URL: "postgres://preview" }).mode).toBe("clerk");
+    expect(selectAuthMode({ VERCEL_ENV: "preview", ...CLERK, CLERK_SECRET_KEY: "sk_live_x", PREVIEW_DATABASE_URL: "postgres://preview" }).mode).toBe("locked");
+  });
   it("defaults to clerk when both Clerk keys are set", () => {
     expect(selectAuthMode({ ...CLERK }).mode).toBe("clerk");
   });

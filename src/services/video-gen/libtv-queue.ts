@@ -13,6 +13,8 @@
 import { prisma } from "@/lib/db";
 import { archiveBeforeReplace, archiveInBackground, archiveJob, archiveRun } from "@/services/artifacts/archive";
 import { canvasUrlFor } from "./libtv-compile";
+import { patchQcReport } from "./qc-report";
+import { manualReviewJobs } from "./manual-review";
 
 const STALE_AFTER_MS = 30 * 60 * 1000;
 const MAX_JOB_ATTEMPTS = 3;
@@ -342,14 +344,26 @@ export async function cloneRunForRerender(runId: string, shotIndexes: number[]):
  * Mark (or unmark) a finished run as the deliverable for its script. Only one
  * run per script is final, so picking one clears the others.
  */
-export async function setRunFinal(runId: string, final: boolean) {
+export async function setRunFinal(runId: string, final: boolean, brandApproved = false, reviewedJobIds: string[] = []) {
   const run = await prisma.libtvRun.findUnique({
     where: { id: runId },
-    select: { id: true, projectId: true, scriptId: true, status: true, masterMp4Url: true },
+    select: { id: true, projectId: true, scriptId: true, status: true, masterMp4Url: true, jobs: { select: { id: true, kind: true, status: true, settings: true } } },
   });
   if (!run) return { ok: false as const, status: 404, error: "Run not found" };
   if (final && (run.status !== "completed" || !run.masterMp4Url)) {
     return { ok: false as const, status: 409, error: "Only a completed run with a master video can be final" };
+  }
+  if (final && !brandApproved) {
+    return { ok: false as const, status: 400, error: "Review the final video and confirm its brand and packaging before delivery" };
+  }
+  const requiredReviewIds = manualReviewJobs(run.jobs ?? []).map((job) => job.id);
+  if (final && requiredReviewIds.some((id) => !reviewedJobIds.includes(id))) {
+    return { ok: false as const, status: 400, error: "Review each flagged keyframe and clip before delivery" };
+  }
+  if (final && run.masterMp4Url) {
+    const masterUrl = run.masterMp4Url;
+    const approvedAt = new Date().toISOString();
+    await patchQcReport(runId, (qc) => ({ ...qc, brandReview: { masterUrl, approvedAt, reviewedJobIds: requiredReviewIds } }));
   }
   await prisma.$transaction([
     ...(final
@@ -523,6 +537,7 @@ export async function runDone(input: RunDoneInput) {
     data: {
       status: "completed",
       masterMp4Url: input.masterMp4Url ?? undefined,
+      ...(input.masterMp4Url ? { isFinal: false } : {}),
       previewMp4Url: input.previewMp4Url ?? undefined,
       contactSheetUrl: input.contactSheetUrl ?? undefined,
       voiceoverUrl: input.voiceoverUrl ?? undefined,

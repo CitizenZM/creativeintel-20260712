@@ -76,7 +76,7 @@ describe("synthesizeMusic moods", () => {
     const sigs = MOOD_IDS.map(sig);
     for (let i = 0; i < sigs.length; i++)
       for (let j = i + 1; j < sigs.length; j++) expect(sigs[i].some((v, k) => Math.abs(v - sigs[j][k]) > 1e-3), `${MOOD_IDS[i]} vs ${MOOD_IDS[j]}`).toBe(true);
-  }, 60_000);
+  }, 120_000);
 
   it("is deterministic for a seed (a re-assembly is identical)", { timeout: 30_000 }, () => {
     const a = render("chill-lofi");

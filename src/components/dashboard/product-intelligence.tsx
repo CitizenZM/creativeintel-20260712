@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import {
   Loader2, CheckCircle2, AlertCircle, RefreshCw, ShieldCheck,
   Package, Users, MapPin, Eye, Globe, Sparkles, Camera, ExternalLink,
@@ -109,7 +110,7 @@ function ImageGrid({ images, title, emptyMessage }: {
                     <p className="text-[9px]">Failed to load</p>
                   </div>
                 ) : (
-                  <img
+                  <Image unoptimized width={1024} height={1024}
                     src={img.url}
                     alt={img.caption}
                     className="w-full h-full object-cover transition-transform group-hover:scale-105"
@@ -393,7 +394,7 @@ export function ProductIntelligence({ projectId }: { projectId: string }) {
                       {/* Thumbnail */}
                       {envImage && (
                         <div className="flex-shrink-0 w-24 h-16 rounded-lg overflow-hidden bg-muted">
-                          <img
+                          <Image unoptimized width={1024} height={1024}
                             src={envImage.url}
                             alt={env.name}
                             className="w-full h-full object-cover"

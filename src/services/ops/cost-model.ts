@@ -1,3 +1,4 @@
+import { gemini38TokenPrices } from "@/services/ai/usage-core";
 /**
  * Cost model — one price table per engine and model, and a line-item forecast for a run.
  *
@@ -104,9 +105,16 @@ export const DEFAULT_PRICES: PriceTable = {
     "qwen/qwen-image-3": { perImage: 0.03, source: "libtv-pricing.ts Qwen-Image 3 note (3¢)", asOf: PRICES_AS_OF },
     "qwen/qwen-image": { perImage: 0.02, source: "libtv-pricing.ts Matrix Qwen-Image (~2¢, estimate)", asOf: PRICES_AS_OF },
     "doubao/seedream-4.5": { perImage: 0.04, source: "libtv-pricing.ts Matrix Seedream 4.5 (~4¢, estimate)", asOf: PRICES_AS_OF },
+    "fal-ai/flux/schnell": { perImage: 0.006, source: "https://fal.ai/models/fal-ai/flux/schnell — $0.003/rounded-up MP, ≤2 MP built-in shape estimate", asOf: "2026-10-12", verified: true },
     "gpt-image-1": { perImage: 0.042, source: LP, asOf: PRICES_AS_OF },
   },
   llm: {
+    get "gemini-3.8-flash"() {
+      const price = gemini38TokenPrices();
+      return tok(price.inPerM, price.outPerM, "https://ai.google.dev/gemini-api/docs/pricing (intro through 2026-12-31; standard thereafter)", "2026-10-12", true);
+    },
+    "claude-sonnet-5": tok(2, 10, "https://www.anthropic.com/claude-sonnet-5-5", "2026-10-12", true),
+    "claude-opus-5-5": tok(4, 20, "https://www.anthropic.com/claude-sonnet-5-5", "2026-10-12", true),
     "gemini-2.5-flash": tok(0.3, 2.5, LP),
     "gemini-2.5-pro": tok(1.25, 10, LP),
     "gpt-4o": tok(2.5, 10, LP),

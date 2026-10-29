@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { poolOptions, splitSchema } from "./db";
 
 describe("splitSchema", () => {
@@ -29,5 +29,21 @@ describe("poolOptions", () => {
       max: 5,
       connectionTimeoutMillis: 5_000,
     });
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
+
+describe("preview database isolation", () => {
+  it("allows build-time route imports but rejects database access without a preview URL", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("PREVIEW_DATABASE_URL", "");
+
+    const { prisma } = await import("./db");
+
+    expect(() => prisma.project).toThrow("Preview database is not configured");
   });
 });

@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * GET  — the stored test plan (Project.testPlan), or null.
  * POST { totalBudget, days, goal?, platforms?, targetCpa?, targetLift?, maxVariants?, narrative? } —
@@ -31,7 +32,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
   try {
     return NextResponse.json({ ok: true, testPlan: await createTestPlan(projectId, req as Parameters<typeof createTestPlan>[1]) });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof TestPlanError ? err.status : 500 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: err instanceof TestPlanError ? err.status : 500 });
   }
 }
 

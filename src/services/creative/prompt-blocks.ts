@@ -11,7 +11,8 @@
 import type { PlatformPlan } from "./campaign-plan.types";
 import { platformBrief, selectCreative } from "./library";
 import { playbookSlice } from "./playbooks";
-import { TO_CREATIVE_CATEGORY, type ProductBrief, type SpCategory } from "./product-brief";
+import { classifyProduct, TO_CREATIVE_CATEGORY, type ProductBrief, type SpCategory } from "./product-brief";
+import { isSupportedBriefPoint } from "./script-source-facts";
 import type { CampaignGoal, CreativeChoice, CreativeInputs, PlatformId } from "./types";
 
 /** Campaign platform ids (CAMPAIGN_PLATFORMS: tiktok|instagram|youtube|tvc|amazon + free text) → profile id. */
@@ -55,10 +56,11 @@ export function briefBlock(brief: ProductBrief, maxPoints = 3, opts: BlockOption
   const strict = !!opts.strictCompliance;
   const pts = brief.sellingPoints.slice(0, maxPoints);
   const point = (p: (typeof pts)[number], i: number) => {
+    const fact = p.sourceEvidence?.find((source) => source.verified === true)?.quote;
+    if (!fact || !isSupportedBriefPoint(p)) return `${i + 1}. UNVERIFIED SHOT IDEA: ${clip(p.proofVisual.shot, 140)} | visual concept only; do not state a product claim`;
     const base = `${i + 1}. ${clip(p.claim, 90)} → ${clip(p.benefit, 90)} | proof shot: ${clip(p.proofVisual.shot, 140)}${p.proofVisual.overlayText ? ` | overlay "${clip(p.proofVisual.overlayText, 40)}"` : ""}`;
     if (strict) return `${base}${p.compliance?.safeWording ? ` | safe wording: ${clip(p.compliance.safeWording, 100)}` : ""}${p.compliance?.requiredDisclosure ? ` | disclosure: ${clip(p.compliance.requiredDisclosure, 100)}` : ""}`;
-    const fact = p.sourceEvidence?.[0]?.quote;
-    return `${base}${fact ? ` | fact: "${clip(fact, 90)}"` : ""}`;
+    return `${base} | fact: "${clip(fact, 90)}"`;
   };
   const lines = [
     `BIG IDEA: ${clip(brief.bigIdea.proposition, 120)}${brief.bigIdea.alternates.length ? ` (alternates: ${brief.bigIdea.alternates.slice(0, 3).map((a) => clip(a, 80)).join(" | ")})` : ""}`,
@@ -106,22 +108,28 @@ export function planBlock(plan: PlatformPlan, hookIndex = 0, opts: { brief?: Pro
   const T = opts.targetSec && opts.targetSec > 0 ? opts.targetSec : D;
   const k = (T - 1) / Math.max(0.1, D - 1);
   const at = (t: number) => (t >= D - 1 ? Math.round((T - (D - t)) * 10) / 10 : Math.round(t * k * 10) / 10);
+  const hasUnverified = !opts.brief?.sellingPoints.length || opts.brief.sellingPoints.some((point) => !isSupportedBriefPoint(point));
   const spText = (id?: string) => {
     const p = id ? opts.brief?.sellingPoints.find((x) => x.id === id) : undefined;
-    return p ? ` [selling point: "${clip(p.claim, 70)} → ${clip(p.benefit, 70)}"]` : "";
+    if (!p) return "";
+    return isSupportedBriefPoint(p)
+      ? ` [selling point: "${clip(p.claim, 70)} → ${clip(p.benefit, 70)}"]`
+      : " [unverified shot idea: do not state a product claim]";
   };
   const hookEnd = v ? at(v.durationSec) : 0;
   const lines = [
     `CAMPAIGN PLAN — ${plan.label}, ${T} s${T !== D ? ` (plan was ${D} s; times rescaled)` : ""}. FOLLOW THIS BEAT MAP: hook, body beats and CTA in this order and at these times; write the script's hook from the chosen variant and the body beats from the plan beats.`,
-    v ? `HOOK (0–${hookEnd} s) = ${v.hookId} ${v.name}: frame 1 ${clip(v.openingVisual, 200)} | text "${clip(v.openingText, 50)}" | VO "${clip(v.openingVO, 90)}"` : "",
-    ...plan.beats.map((b) => `${at(b.t0)}–${at(b.t1)} s ${b.purpose.toUpperCase()}${spText(b.sellingPointId)}: ${clip(b.visual, 150)}${b.vo ? ` | VO "${clip(b.vo, 90)}"` : ""}${b.onScreenText ? ` | text "${clip(b.onScreenText, 40)}"` : ""}`),
-    `END CARD: ${plan.endCard.id} ${plan.endCard.name}${plan.endCard.headline ? ` — "${plan.endCard.headline}"` : ""}; button "${plan.endCard.button}". Last second: logo + bouncing button. Voice: ${clip(plan.voice, 80)}. Captions: ${clip(plan.captionStyle, 80)}.`,
+    v ? `HOOK (0–${hookEnd} s) = ${v.hookId} ${v.name}: frame 1 ${clip(v.openingVisual, 200)}${hasUnverified ? " | draft hook copy withheld; write from verified facts" : ` | text "${clip(v.openingText, 50)}" | VO "${clip(v.openingVO, 90)}"`}` : "",
+    ...plan.beats.map((b) => `${at(b.t0)}–${at(b.t1)} s ${b.purpose.toUpperCase()}${spText(b.sellingPointId)}: ${clip(b.visual, 150)}${!hasUnverified && b.vo ? ` | VO "${clip(b.vo, 90)}"` : ""}${!hasUnverified && b.onScreenText ? ` | text "${clip(b.onScreenText, 40)}"` : ""}`),
+    `END CARD: ${plan.endCard.id} ${plan.endCard.name}${!hasUnverified && plan.endCard.headline ? ` — "${plan.endCard.headline}"` : ""}; button "${plan.endCard.button}". Last second: logo + bouncing button. Voice: ${clip(plan.voice, 80)}. Captions: ${clip(plan.captionStyle, 80)}.`,
   ];
   return lines.filter(Boolean).join("\n");
 }
 
 export interface CreativeBlockInput {
   brief?: ProductBrief | null;
+  /** Verified product-page/name text for category selection when no structured brief exists. */
+  productHint?: string | null;
   platform?: string | null;
   goalText?: string | null;
   /** Explicit goal (wins over goalText), e.g. the stored plan's goal. */
@@ -154,7 +162,10 @@ export function creativeBlock(input: CreativeBlockInput): { text: string; choice
       parts.push(choiceBlock(choice));
     }
   } else if (input.plan) parts.push(planBlock(input.plan, input.hookIndex ?? 0, { targetSec: input.targetSec }));
-  parts.push(playbookSlice({ category: input.brief?.category, platform, goal, maxWords: 400 }));
+  const category = input.brief?.category && input.brief.category !== "other"
+    ? input.brief.category
+    : classifyProduct(input.productHint ?? "");
+  parts.push(playbookSlice({ category, platform, goal, maxWords: 400 }));
   parts.push(
     `RULES: frame 1 bright with the product or subject; hero proof and key message by ${goal === "promo" ? "3 s — and the sale pitch (offer + reason to buy now) in the first 3 s" : "the platform hook second"}; product shown at least twice; every zoom lands on the product; one idea per ad; last second = logo + CTA button; every readable text inside the safe box (y 288–1220 on 9:16); no invented numbers, ratings or testimonials.`
   );

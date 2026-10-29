@@ -50,8 +50,11 @@ export async function revokeInvitation(id: string) {
   return { id: invitation.id, email: invitation.emailAddress, status: invitation.status };
 }
 
-/** Clerk's API errors carry `errors[0].longMessage`; fall back to the message. */
+/** Only known invitation failures receive actionable copy; upstream details stay private. */
 export function clerkErrorMessage(err: unknown): string {
-  const e = err as { errors?: { longMessage?: string; message?: string; code?: string }[]; message?: string };
-  return e?.errors?.[0]?.longMessage || e?.errors?.[0]?.message || e?.message || "Clerk request failed";
+  const code = (err as { errors?: { code?: string }[] })?.errors?.[0]?.code;
+  if (code === "duplicate_record" || code === "email_address_exists") return "This email already has an account or invitation.";
+  if (code === "form_identifier_exists") return "This email already has an account.";
+  if (code === "form_param_format_invalid") return "Enter a valid email address.";
+  return "Unable to manage invitations right now. Please try again.";
 }

@@ -303,7 +303,7 @@ export function pickPersona(platform: PlatformId | string, category: CategoryId 
     if (category && p.categories.includes(category as CategoryId)) s += 2;
     s += 2 * tags.filter((t) => p.audience.includes(t)).length;
     if (wantsWoman !== wantsMan) s += (wantsWoman ? p.look.gender === "woman" : p.look.gender === "man") ? 1 : -1;
-    if (s > bestScore) (best = p), (bestScore = s);
+    if (s > bestScore) { best = p; bestScore = s; }
   }
   return best;
 }

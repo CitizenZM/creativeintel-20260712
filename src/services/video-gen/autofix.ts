@@ -165,7 +165,7 @@ export function prismaDeps(opts: { platform?: PlatformId | null } = {}): AutoFix
       const qc = (fresh?.qcReport && typeof fresh.qcReport === "object" ? fresh.qcReport : {}) as Record<string, unknown>;
       // Promotion swaps the measured sections (checks, preflight, layout, fixes) and keeps the rest
       // (variants, exports, director review, covers…).
-      const next = promote ? { ...qc, ...(promote.qc as object), autofix: record } : { ...qc, autofix: record };
+      const next = promote ? { ...qc, ...(promote.qc as object), autofix: record, brandReview: null } : { ...qc, autofix: record };
       // Content history: the master being replaced is archived BEFORE the swap (qcReport keeps only one predecessor).
       const { archiveAround, archiveRun } = await import("@/services/artifacts/archive");
       await archiveAround(
@@ -174,7 +174,7 @@ export function prismaDeps(opts: { platform?: PlatformId | null } = {}): AutoFix
         () =>
           prisma.libtvRun.update({
             where: { id: runId },
-            data: { qcReport: next as never, ...(promote ? { masterMp4Url: promote.masterUrl, previewMp4Url: promote.previewUrl } : {}) },
+            data: { qcReport: next as never, ...(promote ? { masterMp4Url: promote.masterUrl, previewMp4Url: promote.previewUrl, isFinal: false } : {}) },
           })
       );
     },

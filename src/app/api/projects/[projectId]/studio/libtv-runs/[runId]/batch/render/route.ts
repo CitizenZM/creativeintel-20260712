@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * POST { batchId, limit? } — render the next free re-edit variants of a planned batch (same clips, new
  * edit; never generates new hook clips). Claims now, renders after the response (~2–3 min each); the
@@ -25,7 +26,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
     if (claimed.length) after(() => renderClaimedVariants(run.id, batchId, claimed).then(() => undefined));
     return NextResponse.json({ ok: true, rendering: claimed.map((v) => ({ id: v.id, name: v.name })) }, { status: claimed.length ? 202 : 200 });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: 409 });
   }
 }
 

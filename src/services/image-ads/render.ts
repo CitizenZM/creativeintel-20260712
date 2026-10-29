@@ -407,7 +407,7 @@ async function logoLayer(logo: Buffer | null | undefined, brandName: string, box
     const { data, info } = await sharp(trimmed).resize(48, 48, { fit: "inside" }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     let n = 0;
     const sum = [0, 0, 0];
-    for (let i = 0; i < info.width * info.height; i++) if (data[i * 4 + 3] > 128) (n++, (sum[0] += data[i * 4]), (sum[1] += data[i * 4 + 1]), (sum[2] += data[i * 4 + 2]));
+    for (let i = 0; i < info.width * info.height; i++) if (data[i * 4 + 3] > 128) { n++; sum[0] += data[i * 4]; sum[1] += data[i * 4 + 1]; sum[2] += data[i * 4 + 2]; }
     const avg = n ? `#${sum.map((s) => Math.round(s / n).toString(16).padStart(2, "0")).join("")}` : "#000000";
     if (!needsPlate(avg, under)) return fitInto(trimmed, { ...box, h: box.h * 0.9 });
     const pad = Math.round(box.h * 0.16);

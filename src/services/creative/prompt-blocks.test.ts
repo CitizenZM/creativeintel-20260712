@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { campaignToPlatform, creativeBlock, goalFromText } from "./prompt-blocks";
+import { briefBlock, campaignToPlatform, creativeBlock, goalFromText } from "./prompt-blocks";
 import { finalizeBrief } from "./product-brief";
 
 const brief = finalizeBrief({
@@ -8,7 +8,7 @@ const brief = finalizeBrief({
   audience: { primary: "families upgrading for the holidays", awarenessStage: "solution_aware" },
   primaryJob: { statement: "When the sun hits the living room, I want a picture that still pops" },
   sellingPoints: [
-    { id: "sp1", claim: "3,000 nits peak", benefit: "picture holds in a sunlit room", proofVisual: { device: "split_screen", shot: "sun-glare split vs old TV", overlayText: "3,000 NITS", durationSec: 3 }, sourceEvidence: [{ type: "spec", quote: "up to 3,000 nits" }], evidenceStrength: "measured_spec", compliance: { claimType: "objective_spec", riskLevel: "medium", safeWording: "up to 3,000 nits peak", requiredDisclosure: "Peak brightness on a 10% window" } },
+    { id: "sp1", claim: "3,000 nits peak", benefit: "picture holds in a sunlit room", proofVisual: { device: "split_screen", shot: "sun-glare split vs old TV", overlayText: "3,000 NITS", durationSec: 3 }, sourceEvidence: [{ type: "spec", quote: "up to 3,000 nits", verified: true }], evidenceStrength: "measured_spec", compliance: { claimType: "objective_spec", riskLevel: "medium", safeWording: "up to 3,000 nits peak", requiredDisclosure: "Peak brightness on a 10% window" } },
   ],
   objections: [{ objection: "Wall mount is hard", answer: "Free installation", bustingVisual: "installers mount it in 1 s" }],
   keywords: [{ term: "black friday tv deal", placement: ["hook_text"] }],
@@ -48,9 +48,25 @@ describe("prompt blocks", () => {
     expect(text).toContain("brand truth and compliance still win");
   });
 
+  it("does not pass legacy unverified source quotes to the script writer as facts", () => {
+    const legacy = structuredClone(brief);
+    legacy.sellingPoints[0].sourceEvidence[0].verified = undefined;
+    const block = briefBlock(legacy);
+    expect(block).not.toContain('fact: "up to 3,000 nits"');
+    expect(block).not.toContain("3,000 nits peak");
+    expect(block).not.toContain("3,000 NITS");
+    expect(block).toContain("UNVERIFIED SHOT IDEA");
+  });
+
   it("still gives platform rules without a brief", () => {
     const { text, choice } = creativeBlock({ platform: "youtube" });
     expect(choice).toBeNull();
     expect(text).toContain("PLATFORM youtube_instream_skippable");
+  });
+
+  it("selects the food playbook from verified product text when the structured brief is absent", () => {
+    const { text } = creativeBlock({ platform: "instagram_reels", productHint: "Moneta daily protein drink powder" });
+    expect(text).toContain("CATEGORY PLAYBOOK — Food & beverage");
+    expect(text).not.toContain("CATEGORY PLAYBOOK — General products");
   });
 });

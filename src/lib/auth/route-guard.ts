@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { selectAuthMode } from "./mode";
@@ -22,7 +23,9 @@ import { getPrincipal, getProjectTenant } from "@/services/access";
  * Outside Clerk mode (local dev, tests, Cloudflare Access) the proxy is the only gate, as before.
  */
 export async function checkRouteAccess(request: Request): Promise<Response | null> {
-  if (selectAuthMode(process.env).mode !== "clerk") return null;
+  const mode = selectAuthMode(process.env).mode;
+  if (mode === "locked") return NextResponse.json({ error: "Authentication is misconfigured" }, { status: 503 });
+  if (mode !== "clerk") return null;
 
   let userId: string | null;
   try {
@@ -67,14 +70,14 @@ type RouteHandler = (request: any, ...rest: any[]) => Response | Promise<Respons
  */
 export function withAccess<H extends RouteHandler>(handler: H): H {
   const guarded = async (request: Request, ...rest: unknown[]) => {
-    const denied = await checkRouteAccess(request);
-    if (denied) return denied;
-    const projectId = projectIdFromPath(new URL(request.url).pathname);
     const state: { refusal?: unknown } = {};
     const run = () => handler(request, ...rest);
     const refused = (err: unknown) =>
       NextResponse.json({ error: (err as Error).message, code: "BUDGET_EXCEEDED" }, { status: 402 });
     try {
+      const denied = await checkRouteAccess(request);
+      if (denied) return denied;
+      const projectId = projectIdFromPath(new URL(request.url).pathname);
       const res = projectId
         ? await withSpendScope({ projectId, actorId: request.headers.get(ACTOR_HEADER), state }, run)
         : await run();
@@ -82,7 +85,8 @@ export function withAccess<H extends RouteHandler>(handler: H): H {
       return isBudgetExceeded(state.refusal) && res.status >= 400 ? refused(state.refusal) : res;
     } catch (err) {
       if (isBudgetExceeded(err)) return refused(err);
-      throw err;
+      console.error("[api] request failed:", err);
+      return NextResponse.json({ error: safePublicError(err) }, { status: 500 });
     }
   };
   return guarded as unknown as H;

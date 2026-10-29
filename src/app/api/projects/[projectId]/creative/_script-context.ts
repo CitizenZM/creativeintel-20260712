@@ -4,7 +4,7 @@ import { renderLearningBlock } from "@/services/performance/learn";
 import { timingEvidence, type ReferenceAd, type TeardownTiming, type TimingEvidence } from "@/lib/attention-blueprint";
 import { prisma } from "@/lib/db";
 import { archiveInBackground, archiveScript } from "@/services/artifacts/archive";
-import { getBrandTruthForPrompts, type BrandCtaOption } from "@/services/brand-kit";
+import { renderBrandTruthForPrompts, type BrandCtaOption } from "@/services/brand-kit";
 import type {
   ScriptInput,
   DeepAnalysisBlocks,
@@ -24,6 +24,7 @@ import { creativeDirectionLine, sanitizeStyleCategories } from "@/lib/style-cate
 import type { CampaignPlan, PlatformPlan } from "@/services/creative/campaign-plan.types";
 import { campaignToPlatform, creativeBlock as creativeBlockFn, type CreativeBlockInput } from "@/services/creative/prompt-blocks";
 import type { ProductBrief } from "@/services/creative/product-brief";
+import { scriptSourceFacts, verifiedBriefSellingPoints } from "@/services/creative/script-source-facts";
 
 const VALID_NARRATIVE_TYPES: NarrativeType[] = [
   "PROBLEM_SOLUTION",
@@ -107,10 +108,25 @@ export interface ScriptContext {
  * batch routes feed the prompt from an identical set.
  */
 export async function loadScriptContext(projectId: string): Promise<ScriptContext | null> {
-  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      brandName: true,
+      productName: true,
+      productPageTitle: true,
+      productUrl: true,
+      productPageText: true,
+      productBrief: true,
+      campaignPlan: true,
+      campaignGoal: true,
+      briefingText: true,
+      goalType: true,
+    },
+  });
   if (!project) return null;
 
-  const [sellingPoints, campaignSel, deepAnal, audienceData, brandKit, brandTruth] =
+  const [sellingPoints, campaignSel, deepAnal, audienceData, brandKit] =
     await Promise.all([
       // Points the user sent to script context lead; the strongest others fill
       // the remaining slots.
@@ -122,9 +138,12 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
       prisma.campaignSelection.findUnique({ where: { projectId } }).catch(() => null),
       prisma.deepAnalysis.findUnique({ where: { projectId } }).catch(() => null),
       prisma.audienceProfile.findUnique({ where: { projectId } }).catch(() => null),
-      prisma.brandKit.findUnique({ where: { projectId } }).catch(() => null),
-      getBrandTruthForPrompts(projectId).catch(() => ""),
+      prisma.brandKit.findUnique({
+        where: { projectId },
+        include: { assets: { select: { kind: true, variant: true } } },
+      }).catch(() => null),
     ]);
+  const brandTruth = renderBrandTruthForPrompts(brandKit, project);
 
   const platformId = (campaignSel?.platform as string | null) || undefined;
 
@@ -198,6 +217,7 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
   const totalDurationSec = (campaignSel?.totalDurationSec as number | null) || platformPlan?.durationSec || 30;
   const creativeInput: CreativeBlockInput = {
     brief: brief?.sellingPoints ? brief : null,
+    productHint: [project.productName, project.productPageTitle, project.productPageText?.slice(0, 500)].filter(Boolean).join(" "),
     platform: platformId,
     goalText: [project.campaignGoal, (project as { goalType?: string | null }).goalType, brandKit?.offerText].filter(Boolean).join(" "),
     ...(platformPlan && storedPlan ? { plan: platformPlan, goal: storedPlan.goal, promo: storedPlan.promo, runDate: storedPlan.runDate } : {}),
@@ -219,13 +239,13 @@ export async function loadScriptContext(projectId: string): Promise<ScriptContex
     goalType: project.goalType,
     styleCategories: sanitizeStyleCategories(campaignSel?.styleCategories),
     // The ranked, filmable brief wins over legacy mined points when it exists.
-    sellingPoints: brief?.sellingPoints?.length ? brief.sellingPoints.slice(0, 6).map((sp) => `${sp.claim} → ${sp.benefit}`) : sellingPoints.map((sp) => sp.point),
+    sellingPoints: brief?.sellingPoints ? verifiedBriefSellingPoints(brief) : sellingPoints.map((sp) => sp.point),
     platformId,
     creativeBlock: creative.text,
     creativeInput,
     campaignPlan: platformPlan,
     planHookCursor: 0,
-    briefFacts: briefFacts(brief, platformPlan) || undefined,
+    briefFacts: scriptSourceFacts(brief, storedPlan?.promo) || undefined,
     strictCompliance,
     totalDurationSec,
     selectedEnvironment: (campaignSel?.selectedEnvironment as string | null) || undefined,
@@ -279,21 +299,6 @@ export function pickPlatformPlan(
   if (!platformId) return plan.platforms[0];
   const want = toPlatform(platformId);
   return plan.platforms.find((p) => p.platform === want || p.platform === platformId) ?? null;
-}
-
-/** The brief's and plan's own facts (claims, evidence, offer copy) — sourced text for the claims audit. */
-export function briefFacts(brief: ProductBrief | null | undefined, plan: PlatformPlan | null | undefined): string {
-  const parts: string[] = [];
-  for (const p of brief?.sellingPoints ?? []) {
-    parts.push(p.claim, p.benefit, p.proofVisual?.overlayText ?? "", ...(p.sourceEvidence ?? []).map((e) => e.quote));
-  }
-  if (brief?.product?.price) parts.push(String(brief.product.price));
-  if (plan) {
-    parts.push(plan.endCard.headline ?? "", plan.endCard.button, ...Object.values(plan.endCard.data ?? {}).map(String));
-    for (const b of plan.beats) parts.push(b.onScreenText ?? "", b.vo ?? "");
-    for (const h of plan.hookVariants) parts.push(h.openingText, h.openingVO);
-  }
-  return parts.filter((s) => s && s.trim()).join("\n").slice(0, 6000);
 }
 
 /** The most-viewed competitor ad with a beat-level teardown — the structure to emulate. */

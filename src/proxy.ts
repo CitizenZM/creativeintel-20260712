@@ -6,6 +6,8 @@ import { decideAccess, deniedResponse } from "@/lib/auth/gate";
 import { canonicalRedirect, classifyPath, isApiPath, rewriteSluggedPath } from "@/lib/auth/paths";
 import { getPrincipal, getProjectTenant } from "@/services/access";
 import { ACTOR_HEADER } from "@/lib/auth/actor";
+import { randomBytes } from "node:crypto";
+import { enforceCsp, scriptPolicy } from "@/lib/csp";
 
 /**
  * The gate in front of every route (Next 16 renamed `middleware` to `proxy`).
@@ -121,15 +123,28 @@ function denyAccess(request: NextRequest): NextResponse {
 }
 
 // ── Gate ─────────────────────────────────────────────────────────────────────
-export async function proxy(request: NextRequest, event: NextFetchEvent) {
+async function routeProxy(request: NextRequest, event: NextFetchEvent) {
   const { pathname, search } = request.nextUrl;
   const kind = classifyPath(pathname);
+  // Lock machine routes too in an unconfigured preview: inherited production
+  // worker/cron keys must not grant access to production data or AI providers.
+  if (process.env.VERCEL_ENV === "preview" && AUTH.mode === "locked") {
+    return new NextResponse("Preview is not configured", { status: 503 });
+  }
   if (kind === "machine") return continueRequest(request);
+  if (pathname === "/api/csp-report") return continueRequest(request);
+
+  // Legal documents have a static, auth-free root layout; no Clerk cookies or
+  // session lookup may turn these public pages into uncachable responses.
+  if (/^\/(terms|privacy)\/?$/.test(pathname)) {
+    const redirect = canonicalRedirect(request.nextUrl.hostname, pathname, search, CANONICAL_HOST);
+    return redirect ? NextResponse.redirect(redirect, 308) : continueRequest(request);
+  }
 
   switch (AUTH.mode) {
     case "clerk": {
       const redirect = canonicalRedirect(request.nextUrl.hostname, pathname, search, CANONICAL_HOST);
-      if (redirect) return NextResponse.redirect(redirect);
+      if (redirect) return NextResponse.redirect(redirect, 308);
       return clerkGate!(request, event);
     }
     case "cf-access":
@@ -142,6 +157,26 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
     case "none":
       return continueRequest(request);
   }
+}
+
+export async function proxy(request: NextRequest, event: NextFetchEvent) {
+  // Static legal pages keep their report-only policy. Dynamic application pages
+  // get a request nonce, which Next extracts to authorize its inline scripts.
+  if (!enforceCsp() || /^\/(terms|privacy)\/?$/.test(request.nextUrl.pathname) || isApiPath(request.nextUrl.pathname)) {
+    return routeProxy(request, event);
+  }
+  const nonce = randomBytes(18).toString("base64");
+  const policy = scriptPolicy(nonce);
+  const headers = new Headers(request.headers);
+  headers.set("x-nonce", nonce);
+  headers.set("Content-Security-Policy", policy);
+  const secured = new (await import("next/server")).NextRequest(request, { headers });
+  const response = await routeProxy(secured, event);
+  if (response) {
+    response.headers.set("Content-Security-Policy", `${policy}; frame-ancestors 'none'`);
+    response.headers.delete("Content-Security-Policy-Report-Only");
+  }
+  return response;
 }
 
 export const config = {

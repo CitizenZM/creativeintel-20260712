@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * GET  — the project's image ad sets (Project.imageAdSets, newest first).
  * POST { templates?, formats?, promo?, proof?, copy? } — render a static ad set (templates × formats)
@@ -31,7 +32,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
     return NextResponse.json({ ok: true, set }, { status: 201 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: /not found/i.test(msg) ? 404 : /Unknown image ad|No product image/.test(msg) ? 400 : 500 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: /not found/i.test(msg) ? 404 : /Unknown image ad|No product image/.test(msg) ? 400 : 500 });
   }
 }
 

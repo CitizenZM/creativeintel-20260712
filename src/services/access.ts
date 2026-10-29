@@ -1,25 +1,15 @@
 import { clerkClient } from "@clerk/nextjs/server";
-import { STALE_ON_ERROR_MS, createPrincipalLookup, normalizeShareAccess, type Principal, type ProjectTenant, type ShareAccess } from "@/lib/auth/access";
+import { createPrincipalLookup, normalizeShareAccess, type Principal, type ProjectTenant } from "@/lib/auth/access";
 import { clerkProfile } from "@/lib/auth/profile";
-import { createTtlCache, type TtlCache } from "@/lib/auth/ttl-cache";
+import { type TtlCache } from "@/lib/auth/ttl-cache";
 
-/** How long an account's role / status is trusted before the DB is asked again. */
-export const PRINCIPAL_TTL_MS = 30_000;
-/** A project never changes workspace, and a workspace never changes owner, so this can be longer. */
-export const TENANT_TTL_MS = 120_000;
-/** Share levels change from /settings/users; this process drops its copy at once, others within 15 s. */
-export const SHARE_TTL_MS = 15_000;
-
-// On globalThis so the proxy bundle and the route bundles share one cache when they run in the same
-// process (`next start`); on Vercel they may be separate instances, hence the short TTLs.
-const g = globalThis as unknown as {
-  __principalCache?: TtlCache<Principal>;
-  __tenantCache?: TtlCache<ProjectTenant | null>;
-  __shareCache?: TtlCache<{ access: ShareAccess | null }>;
+/** Authorization reads the shared database on every request. Removing process-local
+ * permission caches makes block/share changes effective on every instance immediately
+ * and fails closed when the database is unavailable. */
+const principals: TtlCache<Principal> = {
+  get: () => undefined, getStale: () => undefined,
+  set: () => {}, delete: () => {}, clear: () => {}, size: 0,
 };
-const principals = (g.__principalCache ??= createTtlCache<Principal>({ ttlMs: PRINCIPAL_TTL_MS }));
-const tenants = (g.__tenantCache ??= createTtlCache<ProjectTenant | null>({ ttlMs: TENANT_TTL_MS }));
-const shares = (g.__shareCache ??= createTtlCache<{ access: ShareAccess | null }>({ ttlMs: SHARE_TTL_MS }));
 
 async function db() {
   // Imported lazily so the proxy only builds a DB client once Clerk mode actually needs one.
@@ -47,50 +37,21 @@ export const getPrincipal = createPrincipalLookup({
  * of it when they don't own it.
  */
 export async function getProjectTenant(projectId: string, appUserId: string | null = null): Promise<ProjectTenant | null> {
-  let tenant = tenants.get(projectId);
-  if (tenant === undefined) {
-    try {
-      const project = await (await db()).project.findUnique({
-        where: { id: projectId },
-        select: { workspace: { select: { ownerId: true } } },
-      });
-      tenant = project ? { ownerId: project.workspace?.ownerId ?? null } : null;
-    } catch (err) {
-      // DB briefly unreachable: a project's owner never changes, so a confirmed answer still holds.
-      const stale = tenants.getStale(projectId, STALE_ON_ERROR_MS);
-      if (stale === undefined) throw err;
-      tenant = stale;
-    }
-    // Don't cache a miss: the project may be created a moment later.
-    if (tenant) tenants.set(projectId, tenant);
-  }
-  if (!tenant || !appUserId || tenant.ownerId === appUserId) return tenant;
-
-  const key = `${projectId}:${appUserId}`;
-  let share = shares.get(key);
-  if (!share) {
-    try {
-      const row = await (await db()).projectShare.findFirst({
-        where: { projectId, userId: appUserId },
-        select: { access: true },
-      });
-      share = { access: normalizeShareAccess(row?.access) };
-      shares.set(key, share);
-    } catch (err) {
-      const stale = shares.getStale(key, STALE_ON_ERROR_MS);
-      if (!stale) throw err;
-      share = stale;
-    }
-  }
-  return { ...tenant, share: share.access };
+  const prisma = await db();
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      workspace: { select: { ownerId: true } },
+      ...(appUserId ? { shares: { where: { userId: appUserId }, select: { access: true }, take: 1 } } : {}),
+    },
+  });
+  if (!project) return null;
+  return {
+    ownerId: project.workspace?.ownerId ?? null,
+    ...(appUserId ? { share: normalizeShareAccess(project.shares?.[0]?.access) } : {}),
+  };
 }
 
-/** Forget cached share levels after an admin changes them (same process only). */
-export function invalidateShares(): void {
-  shares.clear();
-}
-
-/** Forget a user's cached role / status after an owner changes it (same process only). */
-export function invalidatePrincipal(clerkUserId: string): void {
-  principals.delete(clerkUserId);
-}
+// Retained for callers; there is no stale process-local permission state to invalidate.
+export function invalidateShares(): void {}
+export function invalidatePrincipal(_clerkUserId: string): void {}

@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 import { NextResponse } from "next/server";
 import { cronHeartbeat } from "@/services/ops/heartbeat";
 import { autoRecover } from "@/services/ops/health";
@@ -25,6 +26,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: out.counts.critical === 0, at: out.at, dryRun: out.dryRun, counts: out.counts, actions: out.actions, issues: out.issues.slice(0, 50) });
   } catch (err) {
     console.warn("[ops-health] scan failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: 500 });
   }
 }

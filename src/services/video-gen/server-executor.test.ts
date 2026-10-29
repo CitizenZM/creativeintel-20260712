@@ -386,7 +386,7 @@ describe("assembly timing", () => {
     expect(store.runs.get("run1")!.status).toBe("completed");
   });
 
-  it("re-queues a clip whose submission was cut off before it got a task id", async () => {
+  it("stops a clip whose submission was cut off before it got a task id", async () => {
     seed();
     const k1 = store.jobs.find((j) => j.id === "k1")!;
     Object.assign(k1, { status: "completed", resultUrl: "https://cdn/K1.png" });
@@ -397,8 +397,8 @@ describe("assembly timing", () => {
     const adapter = fakeAdapter();
     await tickRun(adapter, "run1");
     await tickRun(adapter, "run1");
-    expect(adapter.submitVideo).toHaveBeenCalled();
-    expect(store.jobs.find((j) => j.id === "v1")!.nodeId).toBe("task-V1");
+    expect((adapter.submitVideo as ReturnType<typeof vi.fn>).mock.calls.some(([, ctx]) => ctx.nodeName === "V1")).toBe(false);
+    expect(store.jobs.find((j) => j.id === "v1")!.status).toBe("failed");
   });
 
   it("does not touch an assembly that is still in progress", async () => {
@@ -507,6 +507,14 @@ describe("consistency gate (keyframes edited from references)", () => {
     expect(settingsOf("k1").consistency).toMatchObject({ score: 0.62, pass: false, bestOf: true, attempts: 3, tries: [{ score: 0.4 }, { score: 0.62 }, { score: 0.5 }] });
   });
 
+  it("marks a keyframe as unreviewed when vision is unavailable", async () => {
+    seedGated();
+    consistency.scoreFrame.mockResolvedValueOnce({ ...verdict(0.5, true), reviewed: false, reasons: ["vision review unavailable"] });
+    await tickRun(countingAdapter(), "run1");
+    expect(statusOf("k1")).toBe("completed");
+    expect(settingsOf("k1")).toMatchObject({ qcOk: null, qcIssues: ["vision review unavailable"], consistency: { reviewed: false } });
+  });
+
   it("repairs a best attempt that still has a major product defect from the packshot", async () => {
     seedGated();
     const box = [0.2, 0.5, 0.55, 0.8];
@@ -556,9 +564,8 @@ describe("clip drift results", () => {
     await tickRun(adapter, "run1");
     adapter.videoTasks.set("task-V1", { status: "SUCCESS", url: "https://cdn/V1-a.mp4", creditsSpent: 20, settingsPatch: { drift, driftFlag: true }, regenerate: true });
     await tickRun(adapter, "run1");
-    expect(statusOf("v1")).toBe("queued");
+    expect(statusOf("v1")).toBe("running"); // the freed slot is reused in the same tick
     expect(store.jobs.find((j) => j.id === "v1")!.settings).toMatchObject({ driftRegens: 1, driftRejectedUrl: "https://cdn/V1-a.mp4", priorCreditsSpent: 20, driftFlag: true });
-    await tickRun(adapter, "run1"); // the re-queued clip is submitted on the next tick
     const submits = (adapter.submitVideo as ReturnType<typeof vi.fn>).mock.calls;
     expect(submits).toHaveLength(2);
     expect(submits[0][0].seed).toBe(1000);
@@ -763,16 +770,17 @@ describe("clip reservations are released", () => {
     expect(adapter.submitVideo).toHaveBeenCalledTimes(2);
   });
 
-  it("closes a submit with an unknown outcome at its estimate", async () => {
+  it("halts a timed-out paid submit for reconciliation instead of resubmitting", async () => {
     const ledger = await paidClipRun();
     const adapter = fakeAdapter({ engine: "openrouter", submitVideo: vi.fn(async () => Promise.reject(new Error("request timed out"))) });
     await tickRun(adapter, "run1");
     const [clip] = await clips(ledger);
-    expect(clip.actualUsd).toBe(clip.estUsd);
-    expect(await ledger.openEntryForJob("v1", "video")).toBeNull();
+    expect(clip.actualUsd).toBeNull();
+    expect(statusOf("v1")).toBe("failed");
+    expect(adapter.submitVideo).toHaveBeenCalledTimes(1);
   });
 
-  it("closes the reservation of a clip whose invocation died before it got a task id", async () => {
+  it("halts a stale clip without a task ID and keeps its estimate reserved", async () => {
     const ledger = await paidClipRun();
     const { reserve } = { reserve: ledger.reserve.bind(ledger) };
     await reserve({ projectId: "p1", runId: "run1", jobId: "v1", kind: "video", model: "google/veo-3.1-lite" }, 0.126);
@@ -780,7 +788,8 @@ describe("clip reservations are released", () => {
     Object.assign(store.runs.get("run1")!, { status: "running" });
     await tickRun(fakeAdapter({ engine: "openrouter" }), "run1");
     const all = await clips(ledger);
-    expect(all[0].actualUsd).toBe(0.126);
+    expect(all[0].actualUsd).toBeNull();
+    expect(statusOf("v1")).toBe("failed");
   });
 });
 

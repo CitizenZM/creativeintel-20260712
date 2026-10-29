@@ -144,7 +144,6 @@ const DAY = 86_400_000;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dayOf = (d: Date | string | number) => Math.floor(new Date(d).getTime() / DAY) * DAY;
-const isoDay = (t: number) => new Date(t).toISOString().slice(0, 10);
 
 function perfFamily(platform: string): string {
   const p = platform.toLowerCase();

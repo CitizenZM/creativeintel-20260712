@@ -57,8 +57,8 @@ export function floodMask(raw: Buffer | Uint8Array, w: number, h: number, channe
       stack[sp++] = i;
     }
   };
-  for (let x = 0; x < w; x++) push(x), push((h - 1) * w + x);
-  for (let y = 0; y < h; y++) push(y * w), push(y * w + w - 1);
+  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
   while (sp > 0) {
     const i = stack[--sp];
     const x = i % w;
@@ -78,8 +78,8 @@ export function transparentBorderShare(raw: Buffer | Uint8Array, w: number, h: n
     n++;
     if (raw[(y * w + x) * 4 + 3] < 16) clear++;
   };
-  for (let x = 0; x < w; x++) at(x, 0), at(x, h - 1);
-  for (let y = 1; y < h - 1; y++) at(0, y), at(w - 1, y);
+  for (let x = 0; x < w; x++) { at(x, 0); at(x, h - 1); }
+  for (let y = 1; y < h - 1; y++) { at(0, y); at(w - 1, y); }
   return clear / Math.max(1, n);
 }
 

@@ -1,3 +1,4 @@
+import { safePublicError } from "@/lib/public-error";
 /**
  * POST { teardownId } | { structureId }, platform?, goal? — Ad Cloner: the reference ad's structure for
  * this product, merged into Project.campaignPlan as "Cloned from <ref>" (one copy pass). Same service as
@@ -23,7 +24,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
     const { plan, clone } = await cloneAdIntoProject(projectId, { teardownId: input.teardownId, structureId: input.structureId, platform: input.platform, goal: input.goal });
     return NextResponse.json({ ok: true, label: clone.plan.label, hook: clone.hook, endCard: clone.endCard, summary: summarizePlan(plan) });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: err instanceof CampaignPlanError ? err.status : 500 });
+    return NextResponse.json({ error: safePublicError(err) }, { status: err instanceof CampaignPlanError ? err.status : 500 });
   }
 }
 

@@ -81,13 +81,32 @@ export async function createJob(
 function createWriter(jobId: string) {
   let chain: Promise<unknown> = Promise.resolve();
   return (data: Record<string, unknown>) => {
-    chain = chain
-      .then(() =>
-        prisma.job.update({ where: { id: jobId }, data: { ...data, heartbeatAt: new Date() } as never })
-      )
-      .catch((err) => console.error(`[jobs] write failed for ${jobId}:`, err));
-    return chain;
+    // Snapshot mutable step arrays before another worker changes them. A failed
+    // checkpoint must reach the caller; otherwise a paid result can be lost.
+    const snapshot = structuredClone(data);
+    const write = chain.catch(() => {}).then(() =>
+      prisma.job.update({ where: { id: jobId }, data: { ...snapshot, heartbeatAt: new Date() } as never })
+    );
+    chain = write;
+    return write;
   };
+}
+
+/** Preserve successful items when a queued delivery is retried after a crash. */
+export function resumeJobSteps(
+  items: readonly { key: string; label: string }[],
+  saved: JobStep[] | null | undefined,
+  preserveFailed = false
+): JobStep[] {
+  const byKey = new Map((saved ?? []).map((step) => [step.key, step]));
+  return items.map((item) => {
+    const previous = byKey.get(item.key);
+    return previous?.status === "done"
+      ? { ...item, status: "done", resultId: previous.resultId }
+      : preserveFailed && previous?.status === "failed"
+      ? { ...item, status: "failed", error: previous.error }
+      : { ...item, status: "queued" };
+  });
 }
 
 async function cancelRequested(jobId: string): Promise<boolean> {
@@ -110,25 +129,27 @@ export async function runJobItems<T>(
   items: readonly T[],
   describe: (item: T, index: number) => { key: string; label: string },
   worker: (item: T, index: number) => Promise<{ id?: string } | void>,
-  options: { concurrency?: number; deadlineMs?: number } = {}
+  options: { concurrency?: number; deadlineMs?: number; requeueOnDeadline?: boolean } = {}
 ) {
-  // A batch lives in one 300 s serverless run. Items not started by the deadline
-  // are left for a retry (the job's Retry re-runs failed items) instead of the
-  // run being killed mid-item and the whole job going stale.
+  // Stop starting new items before the 300 s function limit. Queue consumers
+  // leave those items queued for the next delivery.
   const startBy = Date.now() + (options.deadlineMs ?? BATCH_START_DEADLINE_MS);
   const write = createWriter(jobId);
-  const steps: JobStep[] = items.map((item, i) => ({ ...describe(item, i), status: "queued" }));
-  let done = 0;
-  let failed = 0;
-  const ids: string[] = [];
-  const failures: JobFailure[] = [];
+  const saved = await prisma.job.findUnique({ where: { id: jobId }, select: { steps: true, startedAt: true } });
+  if (!saved) throw new Error(`Job ${jobId} was deleted`);
+  const steps = resumeJobSteps(items.map(describe), saved.steps as unknown as JobStep[] | null, !!options.requeueOnDeadline);
+  let done = steps.filter((step) => step.status === "done").length;
+  let failed = steps.filter((step) => step.status === "failed").length;
+  const ids: string[] = steps.flatMap((step) => step.resultId ? [step.resultId] : []);
+  const failures: JobFailure[] = steps.filter((step) => step.status === "failed").map((step) => ({ key: step.key, label: step.label, error: step.error ?? "Item failed" }));
   let cancelled = false;
 
-  await write({ status: "running", startedAt: new Date(), steps, total: items.length });
+  await write({ status: "running", startedAt: saved.startedAt ?? new Date(), steps, total: items.length, done, failed, completedAt: null, error: null });
 
-  await pMapSettled(
+  const settled = await pMapSettled(
     items,
     async (item, i) => {
+      if (steps[i].status === "done" || (options.requeueOnDeadline && steps[i].status === "failed")) return;
       if (cancelled || (await cancelRequested(jobId))) {
         cancelled = true;
         steps[i] = { ...steps[i], status: "cancelled" };
@@ -136,6 +157,7 @@ export async function runJobItems<T>(
         throw new JobCancelled();
       }
       if (Date.now() > startBy) {
+        if (options.requeueOnDeadline) return;
         failed += 1;
         const error = "Not started — this run ran out of time. Retry to write it.";
         failures.push({ key: steps[i].key, label: steps[i].label, error });
@@ -160,18 +182,22 @@ export async function runJobItems<T>(
     },
     { concurrency: options.concurrency ?? 4 }
   );
+  const unexpected = settled.find((outcome) => outcome.status === "rejected" && !(outcome.reason instanceof JobCancelled));
+  if (unexpected?.status === "rejected") throw unexpected.reason;
 
-  const status: JobStatus = cancelled ? "cancelled" : done === 0 && failed > 0 ? "failed" : "completed";
+  const remaining = steps.some((step) => step.status === "queued" || step.status === "running");
+  const status: JobStatus = cancelled ? "cancelled" : remaining && options.requeueOnDeadline ? "queued" : done === 0 && failed > 0 ? "failed" : "completed";
   await write({
     status,
     done,
     failed,
     steps,
     currentStep: null,
-    completedAt: new Date(),
+    completedAt: status === "queued" ? null : new Date(),
     result: { ids, failures },
     error: status === "failed" ? failures[0]?.error ?? "Every item failed" : null,
   });
+  return status;
 }
 
 /** Mark a job failed from outside the item loop (setup errors, crashes). */
@@ -241,7 +267,10 @@ export async function viewJob(job: JobRow): Promise<JobView> {
   let status = job.status as JobStatus;
   let error = job.error;
   const heartbeat = job.heartbeatAt ?? job.startedAt ?? job.createdAt;
-  if (!TERMINAL.includes(status) && Date.now() - heartbeat.getTime() > STALE_MS) {
+  // Queue-backed batches are recovered by cron. Marking them failed here
+  // would prevent a delayed delivery from resuming its saved steps.
+  const queueBacked = job.kind === "scripts" || job.kind === "storyboards";
+  if (!queueBacked && !TERMINAL.includes(status) && Date.now() - heartbeat.getTime() > STALE_MS) {
     status = "failed";
     error = "The server stopped before this finished — retry to pick up the remaining items.";
     await prisma.job

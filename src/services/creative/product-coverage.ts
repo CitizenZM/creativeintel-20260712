@@ -90,9 +90,16 @@ export function validateProductCoverage<F extends CoverageFrame>(input: F[], opt
   };
   const stats = () => {
     const on = frames.filter(shows);
+    const intervals = on.map((f) => [f.startSec, f.endSec] as const).filter(([start, end]) => end > start).sort((a, b) => a[0] - b[0]);
+    let covered = 0;
+    let end = -Infinity;
+    for (const [start, stop] of intervals) {
+      covered += Math.max(0, stop - Math.max(start, end));
+      end = Math.max(end, stop);
+    }
     return {
       first: on.length ? Math.min(...on.map((f) => f.startSec)) : null,
-      coverage: total > 0 ? on.reduce((n, f) => n + len(f), 0) / total : 0,
+      coverage: total > 0 ? Math.min(1, covered / total) : 0,
       appearances: on.length,
     };
   };

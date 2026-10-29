@@ -1,3 +1,5 @@
+import { safePublicError } from "@/lib/public-error";
+import { enqueueRender } from "@/services/video-gen/render-dispatch";
 /**
  * Per-shot image-conditioned (image-to-video) generation.
  *
@@ -54,7 +56,7 @@ async function unguardedPOST(
   } catch (err) {
     console.error("generate-shots failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Unknown error generating shots" },
+      { error: safePublicError(err) },
       { status: 500 }
     );
   }
@@ -272,12 +274,13 @@ async function handlePost(
             status: "queued",
           },
         });
+        await enqueueRender("video", job.id).catch((error) => console.error("Render dispatch failed", error));
 
         return { shotIndex, jobId: job.id, mode };
       } catch (err) {
         return {
           shotIndex,
-          error: err instanceof Error ? err.message : "Unknown error generating shot",
+          error: safePublicError(err),
         };
       }
     },

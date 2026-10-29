@@ -9,6 +9,7 @@ import { comfyAdapter } from "./comfy-executor";
 import { animaticAdapter } from "./animatic-executor";
 import { matrixAdapter } from "./matrix-executor";
 import { openrouterAdapter } from "./openrouter-executor";
+import { bachAdapter } from "./bach-executor";
 
 const ADAPTERS: Record<ServerEngine, EngineAdapter> = {
   glm: glmAdapter,
@@ -16,6 +17,7 @@ const ADAPTERS: Record<ServerEngine, EngineAdapter> = {
   animatic: animaticAdapter,
   matrix: matrixAdapter,
   openrouter: openrouterAdapter,
+  bach: bachAdapter,
 };
 
 export function adapterFor(executor: string | null | undefined): EngineAdapter | null {

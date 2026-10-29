@@ -19,6 +19,7 @@ import type { CampaignPlan, EndCardPlan, HookVariant, PlanBeat, PlanOverrides, P
 import { END_CARDS, endCardById, hookById, inGiftingWindow, platformProfile, selectCreative } from "./library";
 import { playbookSlice } from "./playbooks";
 import { TO_CREATIVE_CATEGORY, type ProductBrief, type SpCategory } from "./product-brief";
+import { isSupportedBriefPoint } from "./script-source-facts";
 import { campaignToPlatform, goalFromText } from "./prompt-blocks";
 import type { CampaignGoal, CreativeInputs, EndCardDef, EndCardId, HookDef, PlatformId } from "./types";
 import { PLATFORM_PROFILES } from "./platforms.data";
@@ -257,7 +258,7 @@ function hookCopy(h: HookDef, c: CopyCtx, k: number): { text: string; vo: string
   if (h.id === "H26" && doubt) return { text: `"${clipWords(stripEnd(doubt), 8)}?"`, vo: `${stripEnd(doubt)}? Watch this.` };
   if (h.id === "H13") return { text: `3 REASONS TO SWITCH`, vo: `Three reasons people are switching to ${c.product}.` };
   if (h.id === "H14" || h.id === "H30" || h.id === "H09") return { text: painQuestion.toUpperCase(), vo: painQuestion };
-  if (h.family === "native") return { text: `POV: ${clipWords(lowerFirst(stripEnd(squash(top?.benefit)) || `you found the ${c.product}`), 7)}`, vo: `Okay, I need to talk about the ${c.product}.` };
+  if (h.family === "native") return { text: `POV: ${clipWords(lowerFirst(stripEnd(squash(top?.benefit)) || `you found the ${c.product}`), 7)}`, vo: `${c.product}: ${clipWords(stripEnd(squash(top?.benefit)) || big, 9)}.` };
   if (h.family === "reveal") return { text: c.product.toUpperCase(), vo: `${c.product}. ${clipWords(big, 8)}.` };
   if (h.family === "claim") return { text: numbered ? keyword(numbered.claim) : keyword(big), vo: fitVO([`${stripEnd(squash(numbered?.claim))}.`, `${big}.`], 8) };
   return { text: keyword(big), vo: fitVO([`${big}.`], 8) };
@@ -525,25 +526,26 @@ export interface WriteOptions {
 export function campaignCopyPrompts(scaffold: PlatformPlan, brief: ProductBrief, opts: WriteOptions): { system: string; user: string } {
   const strict = !!opts.strictCompliance;
   const facts = offerFacts(opts.promo, opts.runDate ?? new Date().toISOString());
+  const hasUnverified = !brief.sellingPoints.length || brief.sellingPoints.some((point) => !isSupportedBriefPoint(point));
   const system = `You are CreativeIntel's campaign copywriter. You receive one platform's timed ad plan and write its copy. Output JSON only:
 {"beats":[{"i":beatIndex,"vo":"spoken line","onScreenText":"≤ 6 words","visual":"optional sharper shot description"}],"hooks":[{"hookId":"H..","openingVisual":"frame 1 + move","openingText":"≤ 6 words","openingVO":"spoken opener"}]}
 RULES
 - Keep every beat's index, timing and purpose. VO fits its words budget (2.5 words per second); lines read as one script in order. The CTA beat is the last second: offer + action, matching the button.
 - ${opts.goal === "promo" ? `First 3 s = the sale pitch: each hook opening asks the occasion/need question, the pitch beat lands the offer ("${offerLine(facts)}"). Example: "Want a New Year gift?" → "20% OFF this Black Friday".` : "The hook states the value proposition by the platform hook second."}
-- Write a distinct opening for EVERY hook variant, following its recipe; the body is shared.
-- ${strict ? "Stay inside each claim's safe wording and keep required disclosures." : "Sell hard: the boldest, most persuasive wording the FACTS support — superlatives, urgency and direct comparisons are welcome when a fact carries them."} Only numbers that appear in FACTS or OFFER.
+- Write a distinct, concrete opening for EVERY hook variant, following its recipe; the body is shared. No greetings or filler. The first visual must show the supplied product or a specific outcome.
+- ${strict ? "Stay inside each verified claim's safe wording and keep required disclosures." : "Sell hard: the boldest, most persuasive wording VERIFIED FACTS support — superlatives, urgency and direct comparisons are welcome when a verified fact carries them."} Only product claims supported by VERIFIED FACTS; only numbers that appear in VERIFIED FACTS or OFFER. Unverified angles are shot ideas, not copy claims.
 - Visuals keep the product in frame; every zoom lands on the product. On-screen text never repeats the VO word for word.
-${playbookSlice({ category: brief.category, platform: scaffold.platform, goal: opts.goal, maxWords: 300 })}`;
+${playbookSlice({ category: brief.category, platform: scaffold.platform, goal: opts.goal, maxWords: 180 })}`;
   const user = JSON.stringify({
     product: brief.product,
     bigIdea: brief.bigIdea?.proposition,
     audience: brief.audience?.primary,
-    facts: brief.sellingPoints.slice(0, 6).map((p) => ({ id: p.id, claim: p.claim, benefit: p.benefit, evidence: p.sourceEvidence?.slice(0, 2).map((e) => clip(e.quote, 140)) })),
+    verifiedFacts: brief.sellingPoints.slice(0, 6).filter(isSupportedBriefPoint).map((p) => ({ id: p.id, claim: p.claim, benefit: p.benefit, evidence: p.sourceEvidence?.filter((e) => e.verified === true).slice(0, 1).map((e) => clip(e.quote, 100)) })),
     objection: brief.objections?.[0],
     offer: { ...facts, line: offerLine(facts), endCard: scaffold.endCard },
     platform: { id: scaffold.platform, durationSec: scaffold.durationSec, voice: scaffold.voice, captions: scaffold.captionStyle, pacing: scaffold.pacing },
-    hooks: scaffold.hookVariants.map((h) => ({ hookId: h.hookId, name: h.name, family: h.family, recipe: clip(h.openingVisual, 260), text: h.openingText, vo: h.openingVO })),
-    beats: scaffold.beats.map((b, i) => ({ i, t: `${b.t0}-${b.t1}`, purpose: b.purpose, sellingPointId: b.sellingPointId, visual: clip(b.visual, 240), vo: b.vo, onScreenText: b.onScreenText, words: voBudget(b.t1 - b.t0) })),
+    hooks: scaffold.hookVariants.map((h) => ({ hookId: h.hookId, name: h.name, family: h.family, recipe: clip(h.openingVisual, 200), ...(!hasUnverified ? { text: h.openingText, vo: h.openingVO } : {}) })),
+    beats: scaffold.beats.map((b, i) => ({ i, t: `${b.t0}-${b.t1}`, purpose: b.purpose, sellingPointId: b.sellingPointId, visual: clip(b.visual, 180), ...(!hasUnverified ? { vo: b.vo, onScreenText: b.onScreenText } : {}), words: voBudget(b.t1 - b.t0) })),
   });
   return { system, user };
 }
@@ -582,7 +584,7 @@ export function mergeCampaignCopy(scaffold: PlatformPlan, raw: unknown, productN
     const r = hookCopySchema.safeParse(item);
     const h = r.success ? hooks.find((x) => x.hookId === r.data.hookId) : undefined;
     if (!r.success || !h) continue;
-    if (r.data.openingVisual?.trim()) {
+    if (r.data.openingVisual?.trim() && (!product || r.data.openingVisual.toLowerCase().includes(product))) {
       h.openingVisual = clip(r.data.openingVisual, 420);
       applied++;
     }
@@ -595,7 +597,20 @@ export function mergeCampaignCopy(scaffold: PlatformPlan, raw: unknown, productN
       applied++;
     }
   }
-  const plan: PlatformPlan = { ...scaffold, beats, hookVariants: hooks, copySource: applied ? "llm" : "scaffold" };
+  const normalizedHook = (value: string) => value.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+/gu)?.join("") ?? "";
+  const seen = new Set<string>();
+  const notes = [...(scaffold.notes ?? [])];
+  for (let index = 0; index < hooks.length; index++) {
+    const signature = `${normalizedHook(hooks[index].openingText)}|${normalizedHook(hooks[index].openingVO)}`;
+    if (signature !== "|" && seen.has(signature)) {
+      // The deterministic library variants already differ by hook family and
+      // treatment. Restore one instead of spending another model call.
+      hooks[index] = { ...scaffold.hookVariants[index] };
+      notes.push(`${hooks[index].hookId}: duplicate model hook copy; scaffold opening kept`);
+    }
+    seen.add(`${normalizedHook(hooks[index].openingText)}|${normalizedHook(hooks[index].openingVO)}`);
+  }
+  const plan: PlatformPlan = { ...scaffold, beats, hookVariants: hooks, notes, copySource: applied ? "llm" : "scaffold" };
   plan.scripts = buildScripts(plan);
   return { plan, applied };
 }
@@ -637,6 +652,8 @@ export interface PlanCampaignInput {
   now?: Date;
   /** Performance Agent bias from real results (performanceBias(projectId)); optional. */
   bias?: CreativeInputs["bias"];
+  /** Platform-specific score adjustments; overrides the shared bias for that platform. */
+  biasByPlatform?: Partial<Record<PlatformId, CreativeInputs["bias"]>>;
 }
 
 export const DEFAULT_PLAN_PLATFORMS: PlatformId[] = ["tiktok", "instagram_reels", "meta_feed"];
@@ -651,7 +668,7 @@ export async function planCampaign(input: PlanCampaignInput): Promise<CampaignPl
   const platforms = await Promise.all(
     ids.map(async (platform) => {
       const o = overrides[platform];
-      const scaffold = scaffoldPlatformPlan(input.brief, platform, goal, input.promo, runDate, { durationSec: input.durationSec, strictCompliance: input.strictCompliance, assets: input.assets, hookIds: o?.hookIds, endCardId: o?.endCardId, bias: input.bias });
+      const scaffold = scaffoldPlatformPlan(input.brief, platform, goal, input.promo, runDate, { durationSec: input.durationSec, strictCompliance: input.strictCompliance, assets: input.assets, hookIds: o?.hookIds, endCardId: o?.endCardId, bias: input.biasByPlatform?.[platform] ?? input.bias });
       const res = await writeCampaignScripts(scaffold, input.brief, { goal, promo: input.promo, runDate, strictCompliance: input.strictCompliance, llm: input.llm });
       if (res.source === "fallback") notes.push(`${platform}: copy pass failed, scaffold copy used (${clip(res.error, 100)})`);
       return res.plan;

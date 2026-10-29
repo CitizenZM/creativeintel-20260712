@@ -9,7 +9,7 @@
 import { z } from "zod";
 import { sampleSizeForLift } from "@/services/performance/stats";
 import type { CampaignPlan } from "./campaign-plan.types";
-import type { CampaignGoal, PlatformId } from "./types";
+import type { CampaignGoal } from "./types";
 
 export type PlatformFamily = "meta" | "tiktok" | "youtube" | "pinterest" | "snapchat";
 

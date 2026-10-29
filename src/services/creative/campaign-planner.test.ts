@@ -178,8 +178,21 @@ describe("writeCampaignScripts", () => {
   });
 
   it("rejects a rewritten visual that drops the product", async () => {
-    const res = await writeCampaignScripts(scaffold, brief, { goal: "promo", promo, runDate: BF, llm: async () => ({ beats: [{ i: 1, visual: "an empty beach at dusk", vo: "ok" }] }) });
+    const res = await writeCampaignScripts(scaffold, brief, { goal: "promo", promo, runDate: BF, llm: async () => ({ beats: [{ i: 1, visual: "an empty beach at dusk", vo: "ok" }], hooks: [{ hookId: scaffold.hookVariants[0].hookId, openingVisual: "an empty beach at dusk" }] }) });
     expect(res.plan.beats[1].visual).toBe(scaffold.beats[1].visual);
+    expect(res.plan.hookVariants[0].openingVisual).toBe(scaffold.hookVariants[0].openingVisual);
+  });
+
+  it("restores distinct hook recipes when one copy call repeats the same opening", async () => {
+    const llm = vi.fn(async () => ({ hooks: scaffold.hookVariants.map((hook) => ({
+      hookId: hook.hookId, openingText: "See the product differently", openingVO: "See the product differently",
+    })) }));
+    const res = await writeCampaignScripts(scaffold, brief, { goal: "promo", promo, runDate: BF, llm });
+    expect(llm).toHaveBeenCalledTimes(1);
+    expect(res.plan.hookVariants[0].openingText).toBe("See the product differently");
+    expect(res.plan.hookVariants.slice(1).map((hook) => hook.openingText)).toEqual(scaffold.hookVariants.slice(1).map((hook) => hook.openingText));
+    expect(res.plan.notes?.filter((note) => note.includes("duplicate model hook"))).toHaveLength(2);
+    expect(res.plan.scripts[1].beats[0].vo).toBe(scaffold.hookVariants[1].openingVO);
   });
 
   it("falls back to the scaffold copy when the model fails or returns nothing", async () => {
@@ -202,6 +215,24 @@ describe("writeCampaignScripts", () => {
     const strict = campaignCopyPrompts(scaffold, brief, { goal: "promo", promo, runDate: BF, strictCompliance: true });
     expect(strict.system).toMatch(/safe wording/);
     expect(JSON.parse(open.user).beats).toHaveLength(scaffold.beats.length);
+  });
+
+  it("does not pass unverified legacy quotes as evidence to campaign copy", () => {
+    const raw = JSON.parse(campaignCopyPrompts(scaffold, brief, { goal: "promo", promo, runDate: BF }).user);
+    expect(raw.verifiedFacts).toEqual([]);
+    expect(raw.facts).toBeUndefined();
+    expect(raw.hooks[0].text).toBeUndefined();
+    expect(raw.beats[0].vo).toBeUndefined();
+  });
+
+  it("retains planned copy when every selling point has matched evidence", () => {
+    const verified = structuredClone(brief);
+    for (const point of verified.sellingPoints) {
+      point.sourceEvidence = [{ type: "page_copy", quote: `${point.claim} ${point.benefit}`, verified: true }];
+    }
+    const raw = JSON.parse(campaignCopyPrompts(scaffold, verified, { goal: "promo", promo, runDate: BF }).user);
+    expect(raw.hooks[0].text).toBe(scaffold.hookVariants[0].openingText);
+    expect(raw.beats[0].vo).toBe(scaffold.beats[0].vo);
   });
 });
 
@@ -234,8 +265,8 @@ describe("plan → script writer", () => {
     const b1 = planBlock(plan, 1, { brief });
     expect(b0).toContain(`HOOK (0–1.5 s) = ${plan.hookVariants[0].hookId}`);
     expect(b1).toContain(`= ${plan.hookVariants[1].hookId}`);
-    expect(b0).toMatch(/PITCH: .*20% OFF THIS BLACK FRIDAY/);
-    expect(b0).toContain(`selling point: "${brief.sellingPoints[0].claim.slice(0, 40)}`);
+    expect(b0).not.toContain(`selling point: "${brief.sellingPoints[0].claim.slice(0, 40)}`);
+    expect(b0).toContain("draft hook copy withheld");
     const scaled = planBlock(plan, 0, { brief, targetSec: 30 });
     expect(scaled).toMatch(/30 s \(plan was 21 s; times rescaled\)/);
     expect(scaled).toMatch(/29–30 s CTA/);

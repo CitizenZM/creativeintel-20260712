@@ -69,6 +69,7 @@ export interface StoredBrief {
     priority?: number;
     priorityScore?: number;
     evidenceStrength?: string;
+    sourceEvidence?: { type?: string; quote?: string; location?: string; verified?: boolean; sourceUrl?: string }[];
     scores?: Record<string, number | undefined>;
   }[];
   objections?: { objection?: string; answer?: string; bustingVisual?: string }[];
@@ -85,6 +86,7 @@ export interface BriefPointView {
   overlayText?: string;
   device?: string;
   evidence?: string;
+  sourceEvidence: { type: string; quote: string; location?: string; sourceUrl?: string }[];
   /** 0–100 for the score bar. */
   scorePct: number;
 }
@@ -154,6 +156,8 @@ export function briefView(brief: StoredBrief | null | undefined): BriefView | nu
     overlayText: p.proofVisual?.overlayText?.trim() || undefined,
     device: p.proofVisual?.device?.trim() || undefined,
     evidence: p.evidenceStrength,
+    sourceEvidence: (p.sourceEvidence ?? []).filter((item) => item.verified === true && item.quote?.trim()).slice(0, 3)
+      .map((item) => ({ type: item.type ?? "source", quote: item.quote!.trim().slice(0, 260), location: item.location, sourceUrl: item.sourceUrl })),
     scorePct: Math.max(0, Math.min(100, Math.round(score * 100))),
   }));
   return {

@@ -148,3 +148,13 @@ the YouTube id in the card thumbnail (`i.ytimg.com/vi/<ID>/…`). Dates live onl
 on the creative detail page, so the playbook visits at most 10 of them, paced.
 A `google-hats-survey` iframe can overlay the page and swallow clicks, which is
 why filters are applied by URL rather than by clicking.
+
+## Multiple workers
+
+Set `WORKER_PROCESSES=3` and run `node pool.mjs` (the launchd `run.sh` also uses this supervisor). Each process has its own browser task space and state file; task claims are atomic on the server. The supervisor restarts failed processes after five seconds and drains on SIGTERM. Start conservatively; each replica consumes browser tabs and memory.
+
+Additional machines can run the same supervisor with `APP_URL` and `WORKER_TOKEN`; `WORKER_MACHINE_ID` overrides the hostname in replica identities. Browser credentials/profiles must be provisioned on each machine. Keep one process for sites that impose strict host pacing; per-host cooldown in a process does not coordinate browser traffic between machines.
+
+Research now saves phase checkpoints in `ResearchContinuation` and waits durably for worker callbacks. Waiting does not occupy a Vercel function. The queue consumer resumes crawl/discovery from cached results, then separately runs ranking and analysis. The recovery cron republishes interrupted research and render jobs.
+
+Deployment requires applying the `SharedLease` and `ResearchContinuation` SQL migrations before accepting research requests, then deploying the two `queue/v2beta` triggers in `vercel.json`. Vercel Queues authenticates the callback routes through its SDK; browser polling routes only read persisted state. An isolated PostgreSQL test is available in `dispatch.local-integration.test.ts`; it requires `RUN_LOCAL_PIPELINE_INTEGRATION=1` and a local verification database, never production. Normal unit tests skip it.

@@ -286,9 +286,11 @@ const JOB_STALE_AFTER_MS = 6 * 60 * 1000;
 export async function failStaleJobs(projectId: string) {
   // The project's own status has to come back with the job, or it sits on
   // RESEARCHING forever — 11 of 27 projects were stuck that way.
+  const durable = await prisma.researchContinuation.findMany({ where: { projectId, status: { in: ["queued", "waiting", "running"] }, createdAt: { gte: new Date(Date.now() - 2 * 60 * 60_000) } }, select: { jobId: true } });
   const { count } = await prisma.researchJob.updateMany({
     where: {
       projectId,
+      id: { notIn: durable.map((r) => r.jobId) },
       status: { in: ["pending", "running"] },
       createdAt: { lt: new Date(Date.now() - JOB_STALE_AFTER_MS) },
     },
