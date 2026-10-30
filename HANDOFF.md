@@ -5,3 +5,8 @@
 - 完成: feat/account-xark-sso pushed (e7a2bcb): Xark Accounts SSO — legacy host 301, account sign-in/up redirects, apps.creative gate, verified-email relink, owner claim, invitations. Based on origin/main to exclude 2 unpushed local-main commits containing .env.local.bak secrets (repo is PUBLIC).
 - 验证: vitest 1689 passed/2 skipped (175 files); tsc exit 0; build:check exit 0
 - 下一步: Barron: purge 2922258/958fe09 from local main before auto-sync pushes them to the public repo; set Vercel env; review/merge
+
+### 2026-10-29 17:14 · claude-opus-5-5
+- 完成: Xark Accounts SSO live on creative prod (a5a9109 on main)
+- 验证: vitest 1689 pass, tsc 0; 301/302 redirects; Barron session sees 12 projects
+- 下一步: Barron restores preview APP_DATABASE_URL; DB check for duplicate AppUser
