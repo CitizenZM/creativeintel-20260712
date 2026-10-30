@@ -60,15 +60,15 @@ describe("/api/settings/invitations", () => {
     expect(m.revokeInvitation).not.toHaveBeenCalled();
   });
 
-  it("emails a normalized address to /sign-up, notifying, with who invited", async () => {
+  it("emails a normalized address to account.xark.io/sign-up, granting creative member, with who invited", async () => {
     m.currentAppUser.mockResolvedValue(OWNER);
     const res = await post({ email: "  Affiliate@CellDigital.co " });
     expect(res.status).toBe(201);
     expect(m.createInvitation).toHaveBeenCalledWith({
       emailAddress: "affiliate@celldigital.co",
-      redirectUrl: "https://creative.xark.io/sign-up",
+      redirectUrl: "https://account.xark.io/sign-up?redirect_url=https%3A%2F%2Fcreative.account.xark.io%2F",
       notify: true,
-      publicMetadata: { invitedBy: "barronzuo@gmail.com" },
+      publicMetadata: { apps: { creative: "member" }, invitedBy: "barronzuo@gmail.com" },
     });
     expect((await res.json()).invitation).toMatchObject({ id: "inv_1", email: "affiliate@celldigital.co" });
   });
@@ -118,7 +118,11 @@ describe("/api/settings/invitations", () => {
   it("lists pending invitations and revokes by id", async () => {
     m.currentAppUser.mockResolvedValue(OWNER);
     m.getInvitationList.mockResolvedValue({
-      data: [{ id: "inv_1", emailAddress: "a@b.co", createdAt: 5, publicMetadata: { invitedBy: "barronzuo@gmail.com" } }],
+      data: [
+        { id: "inv_1", emailAddress: "a@b.co", createdAt: 5, publicMetadata: { apps: { creative: "member" }, invitedBy: "barronzuo@gmail.com" } },
+        // the shared Xark Accounts instance also holds other apps' invitations: not ours to show
+        { id: "inv_2", emailAddress: "c@d.co", createdAt: 6, publicMetadata: { apps: { portal: "client" }, invitedBy: "x" } },
+      ],
     });
     expect(await (await GET(new Request("https://creative.xark.io/api/settings/invitations"))).json()).toEqual({
       invitations: [{ id: "inv_1", email: "a@b.co", createdAt: 5, invitedBy: "barronzuo@gmail.com" }],
@@ -128,9 +132,9 @@ describe("/api/settings/invitations", () => {
     expect((await DELETE(new Request("http://x"), { params: Promise.resolve({ id: "../users" }) })).status).toBe(400);
   });
 
-  it("redirect URL follows AUTH_CANONICAL_HOST", () => {
-    expect(invitationRedirectUrl({ AUTH_CANONICAL_HOST: "app.example.com" } as unknown as NodeJS.ProcessEnv)).toBe(
-      "https://app.example.com/sign-up",
-    );
+  it("redirect URL is account sign-up, landing on AUTH_CANONICAL_HOST, under ACCOUNT_URL", () => {
+    expect(
+      invitationRedirectUrl({ AUTH_CANONICAL_HOST: "app.example.com", ACCOUNT_URL: "https://acc.example.com" } as unknown as NodeJS.ProcessEnv),
+    ).toBe("https://acc.example.com/sign-up?redirect_url=https%3A%2F%2Fapp.example.com%2F");
   });
 });

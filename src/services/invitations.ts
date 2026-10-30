@@ -1,11 +1,12 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import { z } from "zod";
+import { APP_KEY, accountSignUpUrl, appLandingUrl, parseApps } from "@/lib/auth/account";
 
 /**
- * Admin invitations (/settings/users → POST /api/settings/invitations). Clerk emails the invitee a
- * link to /sign-up carrying an invitation ticket: their email is pre-verified, they still tick the
- * Terms / Privacy consent box, and on first sign-in they get their own empty workspace like any
- * other member (src/services/app-user.ts). Sign-up stays open; an invitation is just a nudge.
+ * Admin invitations (/settings/users → POST /api/settings/invitations), on the shared Xark Accounts
+ * instance. Clerk emails the invitee a link to account.xark.io/sign-up carrying an invitation ticket
+ * and the `apps.creative = "member"` grant; after sign-up they land back here and, on first sign-in,
+ * get their own empty workspace like any other member (src/services/app-user.ts).
  */
 export const inviteSchema = z.object({ email: z.string().trim().toLowerCase().email().max(254) });
 
@@ -16,16 +17,16 @@ export interface PendingInvitation {
   invitedBy: string | null;
 }
 
-/** Where the invitation link lands: the canonical host's sign-up page. */
+/** Where the invitation link lands: Xark Accounts sign-up, returning to this app's landing page. */
 export function invitationRedirectUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const host = env.AUTH_CANONICAL_HOST?.trim() || "creative.xark.io";
-  return `https://${host}/sign-up`;
+  return accountSignUpUrl(appLandingUrl(env), env);
 }
 
 export async function listPendingInvitations(): Promise<PendingInvitation[]> {
   const client = await clerkClient();
   const { data } = await client.invitations.getInvitationList({ status: "pending", orderBy: "-created_at", limit: 100 });
-  return data.map((i) => ({
+  // The instance is shared by every Xark app: only list invitations that grant CreativeIntel.
+  return data.filter((i) => !!parseApps(i.publicMetadata?.apps)[APP_KEY]).map((i) => ({
     id: i.id,
     email: i.emailAddress,
     createdAt: i.createdAt,
@@ -39,7 +40,7 @@ export async function sendInvitation(email: string, invitedBy: string) {
     emailAddress: email,
     redirectUrl: invitationRedirectUrl(),
     notify: true,
-    publicMetadata: { invitedBy },
+    publicMetadata: { apps: { [APP_KEY]: "member" }, invitedBy },
   });
   return { id: invitation.id, email: invitation.emailAddress, status: invitation.status, createdAt: invitation.createdAt };
 }

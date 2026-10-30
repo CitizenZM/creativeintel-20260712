@@ -9,6 +9,8 @@ const ANN: Principal = { appUserId: "ann", role: "member", status: "active" };
 const BOB: Principal = { appUserId: "bob", role: "member", status: "active" };
 const NEW_MEMBER: Principal = { appUserId: null, role: "member", status: "active" };
 const BLOCKED: Principal = { appUserId: "ann", role: "member", status: "blocked" };
+/** The Xark Accounts `apps` claim of someone who may open CreativeIntel. */
+const CREATIVE = { creative: "member" };
 
 // Project P lives in Ann's workspace; "clegacy…" in the master admin's ownerless default workspace.
 const LEGACY = "clegacyprojectidxxxxxxxx";
@@ -20,7 +22,7 @@ function run(pathname: string, principal: Principal | null) {
   return {
     principalOf,
     projectTenant,
-    decision: decideAccess({ pathname, userId: principal ? "clerk_user" : null, principalOf, projectTenant }),
+    decision: decideAccess({ pathname, userId: principal ? "clerk_user" : null, apps: CREATIVE, principalOf, projectTenant }),
   };
 }
 
@@ -116,10 +118,10 @@ describe("decideAccess (proxy decision table)", () => {
       [boom, vi.fn()],
       [ok, boom],
     ] as const) {
-      expect(await decideAccess({ pathname: `/api/projects/${P}`, userId: "u", principalOf, projectTenant })).toBe(
+      expect(await decideAccess({ pathname: `/api/projects/${P}`, userId: "u", apps: CREATIVE, principalOf, projectTenant })).toBe(
         "unavailable",
       );
-      expect(await decideAccess({ pathname: `/projects/${P}`, userId: "u", principalOf, projectTenant })).toBe(
+      expect(await decideAccess({ pathname: `/projects/${P}`, userId: "u", apps: CREATIVE, principalOf, projectTenant })).toBe(
         "unavailable",
       );
     }
@@ -185,6 +187,7 @@ describe("shared projects — access levels", () => {
       method,
       search,
       userId: "clerk_amy",
+      apps: CREATIVE,
       principalOf: async () => AMY,
       projectTenant: async (_id, uid) => ({ ownerId: null, share: uid === "amy" ? share : null }),
     });
@@ -226,6 +229,7 @@ describe("shared projects — access levels", () => {
       pathname: `/api/projects/${P}`,
       method: "DELETE",
       userId: "u",
+      apps: CREATIVE,
       principalOf: async () => AMY,
       projectTenant: async () => ({ ownerId: "amy", share: null }),
     });
@@ -234,6 +238,7 @@ describe("shared projects — access levels", () => {
       pathname: `/api/projects/${P}/shares`,
       method: "POST",
       userId: "u",
+      apps: CREATIVE,
       principalOf: async () => ({ appUserId: "boss", role: "owner", status: "active" }),
       projectTenant: async () => ({ ownerId: "amy" }),
     });
@@ -244,5 +249,74 @@ describe("shared projects — access levels", () => {
     const res = deniedResponse("insufficient-api", new NextRequest("https://creative.xark.io/api/projects/x"));
     expect(res.status).toBe(403);
     expect((await res.json()).error).toMatch(/shared project/);
+  });
+});
+
+describe("Xark Accounts apps claim", () => {
+  const decide = (pathname: string, apps: Record<string, string>, principal: Principal = ANN) => {
+    const principalOf = vi.fn(async () => principal);
+    return {
+      principalOf,
+      decision: decideAccess({ pathname, userId: "clerk_user", apps, principalOf, projectTenant: async () => null }),
+    };
+  };
+
+  it("allows apps.creative (any role) and apps.account === super_admin", async () => {
+    expect(await decide("/", { creative: "member" }).decision).toBe("allow");
+    expect(await decide("/api/projects", { creative: "owner" }).decision).toBe("allow");
+    expect(await decide("/", { account: "super_admin" }).decision).toBe("allow");
+    expect(await decide("/api/projects", { account: "super_admin", portal: "client" }).decision).toBe("allow");
+  });
+
+  it("denies a signed-in user without the claim — page and API — before any lookup", async () => {
+    for (const apps of [{}, { portal: "client" }, { account: "admin" }] as Record<string, string>[]) {
+      const page = decide("/projects", apps);
+      expect(await page.decision).toBe("no-access-page");
+      expect(page.principalOf).not.toHaveBeenCalled();
+      expect(await decide("/api/projects", apps).decision).toBe("no-access-api");
+    }
+    // even the DB owner needs the claim
+    expect(await decide("/", {}, OWNER).decision).toBe("no-access-page");
+  });
+
+  it("signed-out users still go to sign-in / 401 whatever the claim", async () => {
+    const principalOf = vi.fn();
+    expect(await decideAccess({ pathname: "/", userId: null, apps: {}, principalOf, projectTenant: vi.fn() })).toBe("sign-in");
+    expect(await decideAccess({ pathname: "/api/x", userId: null, apps: {}, principalOf, projectTenant: vi.fn() })).toBe(
+      "unauthorized",
+    );
+  });
+
+  it("keeps the owner/member/blocked logic after the claim check", async () => {
+    expect(await decide("/settings/ai", { creative: "member" }).decision).toBe("forbidden-page");
+    expect(await decide("/api/projects", { creative: "member" }, BLOCKED).decision).toBe("blocked-api");
+    expect(await decide("/settings/ai", { account: "super_admin" }).decision).toBe("forbidden-page");
+  });
+
+  it("apps.creative === owner is an owner (admin areas, never blocked)", async () => {
+    expect(await decide("/settings/ai", { creative: "owner" }).decision).toBe("allow");
+    expect(await decide(`/api/projects/${P}`, { creative: "owner" }).decision).toBe("allow");
+    expect(await decide("/", { creative: "owner" }, BLOCKED).decision).toBe("allow");
+  });
+});
+
+describe("deniedResponse — Xark Accounts", () => {
+  const req = (path: string) => new NextRequest(`https://creative.account.xark.io${path}`);
+
+  it("sends a signed-out page to account.xark.io/sign-in with the full current URL (302)", () => {
+    const res = deniedResponse("sign-in", req("/projects/new?tab=a&x=1"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(
+      "https://account.xark.io/sign-in?redirect_url=" + encodeURIComponent("https://creative.account.xark.io/projects/new?tab=a&x=1"),
+    );
+  });
+
+  it("no claim: page → 302 account.xark.io/no-access?app=creative, API → 403", async () => {
+    const page = deniedResponse("no-access-page", req("/projects"));
+    expect(page.status).toBe(302);
+    expect(page.headers.get("location")).toBe("https://account.xark.io/no-access?app=creative");
+    const api = deniedResponse("no-access-api", req("/api/projects"));
+    expect(api.status).toBe(403);
+    expect(await api.json()).toEqual({ error: "No access to CreativeIntel" });
   });
 });

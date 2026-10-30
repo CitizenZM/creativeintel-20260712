@@ -14,6 +14,7 @@ async function loadProxy(env: Record<string, string>) {
     "CF_ACCESS_HOST",
     "AUTH_PROVIDER",
     "AUTH_CANONICAL_HOST",
+    "ACCOUNT_URL",
   ]) {
     vi.stubEnv(k, env[k] ?? "");
   }
@@ -73,13 +74,22 @@ describe("proxy — clerk", () => {
     expect(await res.json()).toEqual({ error: "Unauthorized" });
   });
 
-  it("redirects signed-out page loads to /sign-in with redirect_url", async () => {
+  it("redirects signed-out page loads to account.xark.io/sign-in with the full URL (302)", async () => {
     const proxy = await loadProxy({ ...CLERK });
-    const res = await proxy(`https://creative.xark.io/projects/acme-${ID}`);
-    expect([302, 307]).toContain(res.status);
+    const res = await proxy(`https://creative.account.xark.io/projects/acme-${ID}?tab=1`);
+    expect(res.status).toBe(302);
     const location = new URL(res.headers.get("location")!);
-    expect(location.pathname).toBe("/sign-in");
-    expect(location.searchParams.get("redirect_url")).toBe(`https://creative.xark.io/projects/acme-${ID}`);
+    expect(location.origin + location.pathname).toBe("https://account.xark.io/sign-in");
+    expect(location.searchParams.get("redirect_url")).toBe(`https://creative.account.xark.io/projects/acme-${ID}?tab=1`);
+  });
+
+  it("301s the old host creative.xark.io to creative.account.xark.io, keeping path + query", async () => {
+    const proxy = await loadProxy({ ...CLERK, AUTH_CANONICAL_HOST: "creative.account.xark.io" });
+    for (const p of [`/projects/acme-${ID}?tab=1`, "/api/projects?a=b", "/sign-in"]) {
+      const res = await proxy(`https://creative.xark.io${p}`);
+      expect(res.status, p).toBe(301);
+      expect(res.headers.get("location")).toBe(`https://creative.account.xark.io${p}`);
+    }
   });
 
   it("leaves the auth pages, health check and machine routes open (no CF Access check)", async () => {

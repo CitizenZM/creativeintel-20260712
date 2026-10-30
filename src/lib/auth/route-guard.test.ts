@@ -27,7 +27,7 @@ const req = (p: string, init: RequestInit & { actor?: string } = {}) => {
 describe("checkRouteAccess (in-handler second gate)", () => {
   beforeEach(() => {
     m.mode = "clerk";
-    m.auth.mockResolvedValue({ userId: "clerk_ann" });
+    m.auth.mockResolvedValue({ userId: "clerk_ann", sessionClaims: { apps: { creative: "member" } } });
     m.getPrincipal.mockResolvedValue({ appUserId: "ann", role: "member", status: "active" });
     m.getProjectTenant.mockResolvedValue({ ownerId: "ann" });
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -53,6 +53,13 @@ describe("checkRouteAccess (in-handler second gate)", () => {
     m.auth.mockResolvedValueOnce({ userId: null });
     expect((await checkRouteAccess(req(`/api/projects/${P}`)))?.status).toBe(401);
     expect(await checkRouteAccess(req(`/api/projects/${P}`))).toBeNull();
+  });
+
+  it("403 without the Xark Accounts apps.creative claim — the proxy's no-access rule, re-applied", async () => {
+    m.auth.mockResolvedValueOnce({ userId: "clerk_ann", sessionClaims: { apps: { portal: "client" } } });
+    const res = await checkRouteAccess(req("/api/projects"));
+    expect(res?.status).toBe(403);
+    expect(await res!.json()).toEqual({ error: "No access to CreativeIntel" });
   });
 
   it("re-applies tenancy, share levels and admin-only areas", async () => {
@@ -90,7 +97,7 @@ describe("checkRouteAccess (in-handler second gate)", () => {
 describe("withAccess — spend scope and budget refusals", () => {
   beforeEach(() => {
     m.mode = "clerk";
-    m.auth.mockResolvedValue({ userId: "clerk_ann" });
+    m.auth.mockResolvedValue({ userId: "clerk_ann", sessionClaims: { apps: { creative: "member" } } });
     m.getPrincipal.mockResolvedValue({ appUserId: "ann", role: "member", status: "active" });
     m.getProjectTenant.mockResolvedValue({ ownerId: "ann" });
   });

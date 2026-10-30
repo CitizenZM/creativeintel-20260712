@@ -88,3 +88,22 @@ export function canonicalRedirect(
   if (host.toLowerCase() === canonical) return null;
   return `https://${canonical}${pathname}${search}`;
 }
+
+/** Hosts this app used to live on (before Xark Accounts); they 301 to the canonical host. */
+const LEGACY_HOSTS = new Set(["creative.xark.io"]);
+
+/**
+ * Where a request on an old host goes (301, same path + query, API included), or null. Runs before
+ * any auth work. A no-op until AUTH_CANONICAL_HOST names the new host, so it can never loop.
+ */
+export function legacyHostRedirect(
+  host: string,
+  pathname: string,
+  search: string,
+  canonicalHost: string | undefined,
+): string | null {
+  const canonical = canonicalHost?.trim().toLowerCase();
+  const h = host.toLowerCase();
+  if (!canonical || h === canonical || !LEGACY_HOSTS.has(h)) return null;
+  return `https://${canonical}${pathname}${search}`;
+}

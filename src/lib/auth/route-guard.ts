@@ -4,6 +4,7 @@ import { selectAuthMode } from "./mode";
 import { decideAccess, deniedResponse } from "./gate";
 import { ACTOR_HEADER } from "./actor";
 import { projectIdFromPath } from "./paths";
+import { parseApps } from "./account";
 import { withSpendScope } from "@/services/ops/spend-scope";
 import { isBudgetExceeded } from "@/services/ops/budget-guard";
 import { getPrincipal, getProjectTenant } from "@/services/access";
@@ -25,8 +26,9 @@ export async function checkRouteAccess(request: Request): Promise<Response | nul
   if (selectAuthMode(process.env).mode !== "clerk") return null;
 
   let userId: string | null;
+  let claims: unknown;
   try {
-    userId = (await auth()).userId;
+    ({ userId, sessionClaims: claims } = await auth());
   } catch (err) {
     console.error("[auth] route reached without the Clerk proxy:", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -38,6 +40,7 @@ export async function checkRouteAccess(request: Request): Promise<Response | nul
     method: request.method,
     search: url.search,
     userId,
+    apps: parseApps((claims as { apps?: unknown } | null | undefined)?.apps),
     principalOf: getPrincipal,
     projectTenant: getProjectTenant,
   });
