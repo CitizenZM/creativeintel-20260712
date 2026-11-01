@@ -263,7 +263,7 @@ export default async function ContentPage({
       {excludedCount > 0 && (
         <p className="text-xs text-muted-foreground">
           {excludedCount} excluded ad{excludedCount !== 1 ? "s" : ""} hidden ·{" "}
-          <Link href={buildUrl({ excluded: showExcluded ? "" : "show" })} className="underline underline-offset-2">
+          <Link prefetch={false} href={buildUrl({ excluded: showExcluded ? "" : "show" })} className="underline underline-offset-2">
             {showExcluded ? "hide them" : "show them"}
           </Link>
         </p>
@@ -286,6 +286,7 @@ export default async function ContentPage({
             { col: "publishedAt", label: "Date" },
           ].map((s) => (
             <Link
+              prefetch={false}
               key={s.col}
               href={sortLink(s.col)}
               className={`px-2.5 py-1 rounded-md border transition-colors ${
@@ -311,6 +312,7 @@ export default async function ContentPage({
       <div className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs">
         <div className="flex items-center gap-2 flex-wrap">
           <Link
+            prefetch={false}
             href={buildUrl({ paid: "" })}
             className={`px-2.5 py-1 rounded-full border font-medium transition-colors ${
               paidOnly
@@ -321,6 +323,7 @@ export default async function ContentPage({
             Paid ads only ({paidTotal})
           </Link>
           <Link
+            prefetch={false}
             href={buildUrl({ paid: "all" })}
             className={`px-2.5 py-1 rounded-full border font-medium transition-colors ${
               !paidOnly
@@ -338,7 +341,7 @@ export default async function ContentPage({
           )}
         </div>
         {campaignScopeActive && (
-          <Link href={buildUrl({ platform: "all" })} className="font-medium hover:underline">
+          <Link prefetch={false} href={buildUrl({ platform: "all" })} className="font-medium hover:underline">
             Show all platforms
           </Link>
         )}
@@ -348,6 +351,7 @@ export default async function ContentPage({
       {competitors.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           <Link
+            prefetch={false}
             href={buildUrl({ owner: "" })}
             className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${
               !ownerFilter
@@ -360,6 +364,7 @@ export default async function ContentPage({
           {[["brand", ownerNames.get("brand")!] as const, ...competitors.map((c) => [c.id, c.name] as const)].map(
             ([id, name]) => (
               <Link
+                prefetch={false}
                 key={id}
                 href={buildUrl({ owner: ownerFilter === id ? "" : id })}
                 className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${
@@ -385,6 +390,7 @@ export default async function ContentPage({
           </p>
           {paidOnly && (
             <Link
+              prefetch={false}
               href={buildUrl({ paid: "all" })}
               className="mt-3 inline-block text-xs text-foreground underline underline-offset-2"
             >
@@ -427,6 +433,7 @@ export default async function ContentPage({
 
                   return (
                     <Link
+                      prefetch={false}
                       key={asset.id}
                       href={`/projects/${projectId}/insights/${asset.id}`}
                       className="group rounded-xl border border-border bg-card overflow-hidden hover:border-foreground/30 hover:shadow-md transition-all"

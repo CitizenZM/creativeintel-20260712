@@ -125,6 +125,8 @@ export default function CreativePage() {
   const [scripts, setScripts] = useState<ScriptData[]>([]);
   const [selectedScriptIds, setSelectedScriptIds] = useState<Set<string>>(new Set());
   const [storyboards, setStoryboards] = useState<Storyboard[]>([]);
+  // Boards whose missing frame images may generate: only ones just written, or on request.
+  const [autoGenerateBoards, setAutoGenerateBoards] = useState<Set<string>>(new Set());
   const [testMatrix, setTestMatrix] = useState<TestVariant[]>([]);
   const [expandedScript, setExpandedScript] = useState<string | null>(null);
 
@@ -405,6 +407,7 @@ export default function CreativePage() {
       if (failed && !job.result?.ids.length) throw new Error(failed);
       // Each new board is its script's active version; older ones are kept.
       const ids = new Set(job.result?.ids ?? []);
+      setAutoGenerateBoards((prev) => new Set([...prev, ...ids]));
       return (await reloadStoryboards()).filter((b) => ids.has(b.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Storyboard generation failed");
@@ -1237,6 +1240,15 @@ export default function CreativePage() {
                         ? {pendingCount}
                       </span>
                     )}
+                    {!autoGenerateBoards.has(storyboard.id) && storyboard.frames.some((f) => !f.imageUrl) && (
+                      <button
+                        type="button"
+                        onClick={() => setAutoGenerateBoards((prev) => new Set(prev).add(storyboard.id))}
+                        className="px-1.5 py-0.5 rounded border border-border font-semibold text-muted-foreground hover:text-foreground"
+                      >
+                        Generate {storyboard.frames.filter((f) => !f.imageUrl).length} missing images
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -1252,7 +1264,7 @@ export default function CreativePage() {
                       frame={frame}
                       storyboardId={storyboard.id}
                       projectId={projectId}
-                      autoLoad={true}
+                      autoLoad={autoGenerateBoards.has(storyboard.id)}
                       isLast={idx === storyboard.frames.length - 1}
                       undoCount={(storyboard.frameHistory ?? []).filter((h) => h.frameNumber === frame.frameNumber).length}
                       onUpdate={(frameNumber, updates) => {
