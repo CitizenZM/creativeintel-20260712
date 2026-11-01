@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { segmentStyle } from "./segment-styles";
+import { runFrameJob } from "./frame-job-queue";
 
 // ─── Transition effects catalogue ────────────────────────────────────────────
 
@@ -188,7 +189,7 @@ export function StoryboardFrameCard({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/studio/frames`, {
+      const res = await runFrameJob(() => fetch(`/api/projects/${projectId}/studio/frames`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -196,7 +197,7 @@ export function StoryboardFrameCard({
           style: "cinematic storyboard concept art",
           dimensions: "512x288",
         }),
-      });
+      }));
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Image generation failed (${res.status})`);
       if (!data.imageUrl) throw new Error("Image generation returned no image");
