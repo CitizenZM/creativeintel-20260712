@@ -208,7 +208,7 @@ describe("detectCronStaleness", () => {
       snap({
         heartbeats: [
           { name: "poll-video-jobs", lastRunAt: ago(4), runs: 10 },
-          { name: "hook-variants", lastRunAt: ago(20), runs: 10 },
+          { name: "hook-variants", lastRunAt: ago(100), runs: 10 },
           { name: "autopilot", lastRunAt: ago(3), runs: 10 },
           { name: "report-digest", lastRunAt: ago(60 * 24), runs: 1 },
         ],
@@ -221,7 +221,7 @@ describe("detectCronStaleness", () => {
   });
 
   it("goes critical after a long silence", () => {
-    const issues = detectCronStaleness(snap({ heartbeats: [{ name: "poll-video-jobs", lastRunAt: ago(120), runs: 1 }, { name: "hook-variants", lastRunAt: ago(1), runs: 1 }, { name: "autopilot", lastRunAt: ago(1), runs: 1 }, { name: "ops-health", lastRunAt: ago(1), runs: 1 }, { name: "report-digest", lastRunAt: ago(60), runs: 1 }] }));
+    const issues = detectCronStaleness(snap({ heartbeats: [{ name: "poll-video-jobs", lastRunAt: ago(150), runs: 1 }, { name: "hook-variants", lastRunAt: ago(1), runs: 1 }, { name: "autopilot", lastRunAt: ago(1), runs: 1 }, { name: "ops-health", lastRunAt: ago(1), runs: 1 }, { name: "report-digest", lastRunAt: ago(60), runs: 1 }] }));
     expect(issues).toHaveLength(1);
     expect(issues[0].severity).toBe("critical");
   });
@@ -232,14 +232,14 @@ describe("scanSnapshot / scanHealth", () => {
     const report = scanSnapshot(
       snap({
         activeRuns: [run({ status: "assembling", updatedAt: ago(10) })],
-        heartbeats: [{ name: "poll-video-jobs", lastRunAt: ago(20), runs: 1 }],
+        heartbeats: [{ name: "poll-video-jobs", lastRunAt: ago(40), runs: 1 }],
       })
     );
     expect(report.issues[0].severity).toBe("critical");
     expect(report.counts.critical).toBe(1);
     expect(report.counts.warning).toBe(1);
     expect(report.ok).toBe(false);
-    expect(report.heartbeats.find((h) => h.name === "poll-video-jobs")).toMatchObject({ stale: true, everyMin: 5 });
+    expect(report.heartbeats.find((h) => h.name === "poll-video-jobs")).toMatchObject({ stale: true, everyMin: 10 });
   });
 
   it("an empty system is healthy apart from crons not reporting yet", () => {

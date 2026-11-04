@@ -244,10 +244,10 @@ retries and concurrency limits are defined next to each client in `src/services/
 
 | Job | Schedule | Purpose |
 |---|---|---|
-| `poll-video-jobs` | every 5 min | Advance render runs and video jobs |
-| `hook-variants` | every 5 min | Render queued hook A/B variants and director reviews |
-| `autopilot` | every 5 min | Advance approved autopilot runs |
-| `ops-health` | every 10 min | Health scan and safe auto-recovery |
+| `poll-video-jobs` | every 10 min | Advance render runs and video jobs |
+| `hook-variants` | every 30 min | Render queued hook A/B variants and director reviews |
+| `autopilot` | every 10 min | Advance approved autopilot runs |
+| `ops-health` | every 30 min | Health scan and safe auto-recovery |
 | `report-digest` | Mondays 14:00 UTC | Weekly campaign digest (dry-run unless enabled) |
 
 **Local workers** (operator machine; HTTPS to the deployed app only, `x-worker-token`):

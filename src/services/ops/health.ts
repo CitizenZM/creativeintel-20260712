@@ -144,7 +144,7 @@ export interface HealthReport {
 }
 
 /** The crons in vercel.json and their schedule in minutes. */
-export const CRON_SCHEDULES: Record<string, number> = { "poll-video-jobs": 5, "hook-variants": 5, autopilot: 5, "ops-health": 10, "report-digest": 7 * 24 * 60 };
+export const CRON_SCHEDULES: Record<string, number> = { "poll-video-jobs": 10, "hook-variants": 30, autopilot: 10, "ops-health": 30, "report-digest": 7 * 24 * 60 };
 
 export const HEALTH_THRESHOLDS = {
   approvedNotStartedMin: 10,

@@ -10,7 +10,7 @@ export const maxDuration = 300;
  * Vercel Cron target — sweeps queued/processing/generating FalVideoJob rows
  * so video jobs keep progressing even if the client tab that started them
  * is closed (client polling alone previously left rows stuck forever).
- * Scheduled every 5 minutes via vercel.json.
+ * Scheduled every 10 minutes via vercel.json.
  */
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;

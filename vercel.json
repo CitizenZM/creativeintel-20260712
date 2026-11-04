@@ -5,19 +5,19 @@
   "crons": [
     {
       "path": "/api/cron/poll-video-jobs",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/cron/hook-variants",
-      "schedule": "2-59/5 * * * *"
+      "schedule": "7,37 * * * *"
     },
     {
       "path": "/api/cron/autopilot",
-      "schedule": "4-59/5 * * * *"
+      "schedule": "4-59/10 * * * *"
     },
     {
       "path": "/api/cron/ops-health",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/30 * * * *"
     },
     {
       "path": "/api/cron/report-digest",
