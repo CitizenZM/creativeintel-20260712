@@ -15,3 +15,8 @@
 - 完成: Cron cadence cut 42->16/hr (poll/autopilot 10m, hook-variants/ops-health 30m); CRON_SCHEDULES synced + sync test; f3ceb54 on main
 - 验证: vitest 1695 pass; tsc exit 0; mutation test fails on mismatch; prod dpl_7MUyxpyWaRondEaSTiBWSW4YexJS READY; project crons show new schedules
 - 下一步: Watch next Vercel invoice (Dec 3) for Fluid Provisioned Memory drop; consider disabling Observability Plus
+
+### 2026-11-06 12:30 · claude-opus-5-5
+- 完成: Worker idle backoff (cap 5 min) + hook-variants/ops-health hourly, PR #163 merged dcbc657 prod READY; 125 stale LibtvJob + 3 WorkerTask closed (reversible tag closed-stale-20261106)
+- 验证: node --test workers/idle-backoff.test.mjs 3/3 (old code fails 47 claims/2.5s); vitest 1695 pass; tsc 0; prod crons re-read; SQL queued/running=0
+- 下一步: Barron: on the operator Mac git pull + restart libtv/research/browser workers; transfer tcl-membership-v2 to a free org (needs affiliate@xark.io Supabase login)
