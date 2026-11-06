@@ -36,6 +36,8 @@ const WORKER_SITES = (process.env.WORKER_SITES || 'ai_studio')
   .map((s) => s.trim())
   .filter(Boolean);
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 20000);
+// Idle backoff (2026-11-06): empty claims double the wait up to this cap; a claimed job resets it.
+const MAX_IDLE_POLL_MS = Number(process.env.MAX_IDLE_POLL_MS || 5 * 60 * 1000);
 const HEARTBEAT_INTERVAL_MS = 60 * 1000;
 
 const WORKER_ID = `mac-browser-worker-${randomUUID().slice(0, 8)}`;
@@ -219,20 +221,24 @@ async function mainLoop() {
     process.exit(1);
   }
 
+  let idleWait = POLL_INTERVAL_MS;
   while (!shuttingDown) {
     let job = null;
     try {
       job = await claimJob();
     } catch (err) {
       logError('claim failed:', err.message || err);
-      await sleep(POLL_INTERVAL_MS);
+      await sleep(idleWait);
+      idleWait = Math.min(idleWait * 2, MAX_IDLE_POLL_MS);
       continue;
     }
 
     if (!job) {
-      await sleep(POLL_INTERVAL_MS);
+      await sleep(idleWait);
+      idleWait = Math.min(idleWait * 2, MAX_IDLE_POLL_MS);
       continue;
     }
+    idleWait = POLL_INTERVAL_MS;
 
     // Cap one job at a time by awaiting fully before looping back to claim.
     await processJob(job);
