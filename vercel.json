@@ -9,7 +9,7 @@
     },
     {
       "path": "/api/cron/hook-variants",
-      "schedule": "7,37 * * * *"
+      "schedule": "7 * * * *"
     },
     {
       "path": "/api/cron/autopilot",
@@ -17,7 +17,7 @@
     },
     {
       "path": "/api/cron/ops-health",
-      "schedule": "*/30 * * * *"
+      "schedule": "22 * * * *"
     },
     {
       "path": "/api/cron/report-digest",

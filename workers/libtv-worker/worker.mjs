@@ -12,7 +12,8 @@
 //   WORKER_TOKEN            required — sent as x-worker-token
 //   LIBTV_BIN               default "~/.libtv/libtv"
 //   LIBTV_RUNS_DIR          default "~/Projects/libtv-ad-studio/runs"
-//   POLL_INTERVAL_MS        default 20000
+//   POLL_INTERVAL_MS        default 20000 (first idle wait; doubles while idle)
+//   MAX_IDLE_POLL_MS        default 300000 — cap of the idle backoff
 //   CLOUDINARY_URL          (or CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET)
 //   BLOB_READ_WRITE_TOKEN   only if you happen to have it directly (dev);
 //                           otherwise the worker auto-fetches a scoped
@@ -61,6 +62,9 @@ const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
 // secret every API call is answered with an HTML login page.
 const VERCEL_BYPASS = process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '';
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 20000);
+// Idle backoff (2026-11-06): each empty claim doubles the wait up to this cap; a claimed run resets it.
+// A fixed 20 s poll kept a Vercel function instance warm all day (~4,300 claims/day with no work).
+const MAX_IDLE_POLL_MS = Number(process.env.MAX_IDLE_POLL_MS || 5 * 60 * 1000);
 const HEARTBEAT_INTERVAL_MS = 60 * 1000;
 const RUNS_DIR =
   process.env.LIBTV_RUNS_DIR || path.join(homedir(), 'Projects', 'libtv-ad-studio', 'runs');
@@ -642,21 +646,25 @@ async function mainLoop() {
     process.exit(1);
   }
 
+  let idleWait = POLL_INTERVAL_MS;
   while (!shuttingDown) {
     let payload = null;
     try {
       payload = await api.claim();
     } catch (err) {
       logError('claim failed:', err.message || err);
-      await sleep(POLL_INTERVAL_MS);
+      await sleep(idleWait);
+      idleWait = Math.min(idleWait * 2, MAX_IDLE_POLL_MS);
       continue;
     }
 
     if (!payload) {
       if (ONCE) break;
-      await sleep(POLL_INTERVAL_MS);
+      await sleep(idleWait);
+      idleWait = Math.min(idleWait * 2, MAX_IDLE_POLL_MS);
       continue;
     }
+    idleWait = POLL_INTERVAL_MS;
 
     const result = await processRun(payload);
     if (result.needsLogin) {

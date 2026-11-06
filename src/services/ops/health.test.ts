@@ -208,7 +208,7 @@ describe("detectCronStaleness", () => {
       snap({
         heartbeats: [
           { name: "poll-video-jobs", lastRunAt: ago(4), runs: 10 },
-          { name: "hook-variants", lastRunAt: ago(100), runs: 10 },
+          { name: "hook-variants", lastRunAt: ago(200), runs: 10 }, // hourly: stale after 3 × 60 min
           { name: "autopilot", lastRunAt: ago(3), runs: 10 },
           { name: "report-digest", lastRunAt: ago(60 * 24), runs: 1 },
         ],

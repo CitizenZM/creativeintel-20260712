@@ -14,6 +14,8 @@
 //   WORKER_KINDS     default "ad_library_fetch"
 //   POLL_INTERVAL_MS default 6000 — delay between claim attempts when idle;
 //                    kept short because browser_fetch tasks block a research run
+//   MAX_IDLE_POLL_MS default 300000 — the idle wait doubles up to this cap (was 60 s; 2026-11-06:
+//                    an idle worker kept a Vercel instance warm). Set lower while running research.
 //   EGO_BROWSER_BIN  default "ego-browser"
 //
 // Run: node worker.mjs   (see README.md for launchd setup)
@@ -40,7 +42,7 @@ const WORKER_KINDS =(process.env.WORKER_KINDS || 'ad_library_fetch,browser_fetch
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 6000);
 // Idle backoff: every empty claim doubles the wait up to this cap, so an idle
 // worker stops waking the database around the clock. Any task resets it.
-const MAX_IDLE_POLL_MS = Number(process.env.MAX_IDLE_POLL_MS || 60 * 1000);
+const MAX_IDLE_POLL_MS = Number(process.env.MAX_IDLE_POLL_MS || 5 * 60 * 1000);
 const HEARTBEAT_INTERVAL_MS = 60 * 1000;
 // Public sites get a breather between tasks so a queue burst never reads as a crawl.
 const COOLDOWN_MS = Number(process.env.TASK_COOLDOWN_MS || 15000);
