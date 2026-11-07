@@ -85,7 +85,9 @@ const progressOf = (st) => {
 
 /** run the pipeline as its own process group, report every tick, kill it when Xark says cancel */
 export async function runPipeline(runId, id, args) {
-  const child = spawn(process.execPath, args, { cwd: ROOT, detached: true, stdio: 'ignore' });
+  // a host Claude Code session's variables (CLAUDECODE, CLAUDE_CODE_*) make the pipeline's `claude -p` return an empty session
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^CLAUDE/.test(k)));
+  const child = spawn(process.execPath, args, { cwd: ROOT, detached: true, stdio: 'ignore', env });
   let exited = null; child.on('exit', (code) => { exited = code ?? 0; });
   let cancelled = false;
   while (exited === null) {
