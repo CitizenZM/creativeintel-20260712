@@ -23,5 +23,10 @@
       "path": "/api/cron/report-digest",
       "schedule": "0 14 * * 1"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "feat/adstudio-studio": false
+    }
+  }
 }
