@@ -25,3 +25,8 @@
 - 完成: Ad Studio second pass inside Xark Studio on local branch feat/adstudio-studio: AdStudioRun model, APIs, worker route, Studio panel (multi hook types x multi engines, max 6), adstudio-worker; storyboard never written
 - 验证: tsc 0, eslint clean, vitest 455 pass, worker 2/2; local Docker DB e2e: create/plan/copy-plan/approve/409/cancel/generate/spend OK; real pipeline plan 8/8 frames, est $1.01, $0.45 spent, no video
 - 下一步: Barron: gh auth login + claude /login; decide push/preview DB; then real generate test after approval
+
+### 2026-11-07 10:52 · claude-opus-5-5
+- 完成: Pushed feat/adstudio-studio (main untouched); stopped the Preview build that would have run prisma db push on the shared prod Neon DB (prod has no AdStudioRun table, read-only check); disabled Vercel builds for the branch; first real video end to end via local Xark (run completed, $1.69, ledger matches)
+- 验证: git ls-remote = HEAD; vercel ls no new deploy after push; ledger 0.4542+1.2357=1.6899=run actualUsd; final.mp4 23.7s 1080x1920
+- 下一步: Barron OK for prod prisma db push + merge; then deploy and test Blob upload; launchd for worker
