@@ -1,6 +1,6 @@
 # RUN-REPORT — creativeintel
 
-## 2026-11-07 · feat/adstudio-studio — Ad Studio inside Studio (local only, not pushed)
+## 2026-11-07 · feat/adstudio-studio — Ad Studio inside Studio (pushed as branch only; main untouched)
 Goal: the Studio storyboard is fed to the Ad Studio pipeline for a second pass (re-analysis, hook per picked hook type,
 generation per picked engine) without replacing or dropping any storyboard detail.
 
@@ -19,3 +19,13 @@ Verification (local Docker Postgres `localhost:55432`, `prisma db push --url` to
   storyboard → plan with 8/8 planned frames carried, hook "Tastes like chalk" locked, 9 shots, estimate $1.01
   (Seedance 1.5 Pro ×2 + Veo 3.1 Lite ×3), $0.45 spent on first frames; stopped at awaiting_approval; no video generated.
 - 1 setup failure found and recorded: CLI subscription login missing → `claude -p` "Not logged in".
+
+## 2026-11-07 push + first real video
+- Branch `feat/adstudio-studio` pushed to GitHub (main untouched). The push started a Vercel Preview build; Preview and Production share
+  the same Neon DATABASE_URL (checked by hashed host) and the build runs `prisma db push`, so the build was removed before it reached
+  the DB. Read-only check: production has no `AdStudioRun` table. `vercel.json` now sets
+  `git.deploymentEnabled["feat/adstudio-studio"] = false`; the next push created no deployment.
+- Real end-to-end video through Xark (local Docker DB, next dev, worker --once): approve 200 → SpendEntry video reserved →
+  worker generate → run `completed`, progress 100, actualUsd 1.6899, finalMp4Url/posterUrl set (local media base, no Blob).
+  Ledger: image 0.4542 + video 1.2357 (est 1.01) = 1.6899 = run actualUsd. Video 23.7 s 1080x1920 with audio.
+- Not done: Blob upload path (needs the deployed app), production `prisma db push` (needs Barron's OK), launchd plist for the worker.
