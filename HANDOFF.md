@@ -30,3 +30,8 @@
 - 完成: Pushed feat/adstudio-studio (main untouched); stopped the Preview build that would have run prisma db push on the shared prod Neon DB (prod has no AdStudioRun table, read-only check); disabled Vercel builds for the branch; first real video end to end via local Xark (run completed, $1.69, ledger matches)
 - 验证: git ls-remote = HEAD; vercel ls no new deploy after push; ledger 0.4542+1.2357=1.6899=run actualUsd; final.mp4 23.7s 1080x1920
 - 下一步: Barron OK for prod prisma db push + merge; then deploy and test Blob upload; launchd for worker
+
+### 2026-11-10 23:21 · claude-fable-5-2
+- 完成: Clerk azp fix: creative proxy authorizedParties now accepts https://portal.account.xark.io (PR #164 squash-merged c0ff48b, prod dpl_2dWbtoSKk7YWTwcg3ceJgwvWUVA5 Ready). client-portal JWKS 401 NOT fixed: Production CLERK_SECRET_KEY is a 14-char truncated value; no valid Xark Accounts production key exists locally or in readable Vercel envs
+- 验证: vitest 177 files/1696 tests pass, tsc rc=0; vercel deployment READY on c0ff48b; no azp traffic since 04:45Z so live log confirmation pending; client-portal: jwks kid comparison of all candidate keys = no match for ins_3LNY0DFM9cAcjqks3YXG4yOD3ck
+- 下一步: Barron: copy Secret key from Clerk app Xark Accounts > Production > API keys into Vercel client-portal Production CLERK_SECRET_KEY and redeploy; then re-check creative runtime logs for azp
