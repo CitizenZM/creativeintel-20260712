@@ -218,3 +218,11 @@ test('tick wiring: digest sent once a day, failure reported as an event', async 
   await tick({ call, now: at, home: failHome, strategist: null, local: async () => ({ projects: [], stages: [], runs: [] }), notify: async () => ({ ok: false, reason: 'no creds' }) });
   assert.ok(pub.events.some((e) => /digest NOT delivered: no creds/.test(e.summary)));
 });
+
+test('probes: python check uses the interpreter the pipeline resolves', async () => {
+  const { pipelinePython } = await import('../lib/probes.mjs');
+  assert.equal(await pipelinePython('/nonexistent'), 'python3');
+  const root = path.join(process.env.HOME, 'Projects', 'ad-studio-20261104');
+  const py = await pipelinePython(root);
+  assert.ok(typeof py === 'string' && py.length > 0);
+});
