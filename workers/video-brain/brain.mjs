@@ -24,6 +24,7 @@ import { scanRoots } from './lib/patterns.mjs';
 import { SEED, harvest, idOf, syncAll } from './lib/learn.mjs';
 import { pick, promptFor, runClaude, apply as applyStrategy } from './lib/strategist.mjs';
 import { readLocal } from './lib/local.mjs';
+import { buildDigest, digestDue, sendDigest } from './lib/digest.mjs';
 
 const argv = process.argv.slice(2);
 const flag = (k) => argv.includes(`--${k}`);
@@ -54,7 +55,7 @@ export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'h
   return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
 }
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = () => readLocal(ROOT), approveLocal = localApprove } = {}) {
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = () => readLocal(ROOT), approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest } = {}) {
   await mkdir(home, { recursive: true });
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
@@ -171,6 +172,16 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   for (const k of Object.keys(state.acted)) if (/^retry:/.test(k) && !k.endsWith(new Date(now).toISOString().slice(0, 10))) delete state.acted[k];
   await writeFile(stateFile, JSON.stringify(state));
   if (dryRun) return { ok: true, dryRun: true, snapshot, approvedNow };
+  // actions of the last 24 h for the daily digest
+  state.actions = [...(state.actions || []), ...events.filter((e) => ['decide', 'call', 'fix'].includes(e.kind)).map((e) => ({ at: e.at, kind: e.kind }))].filter((a) => now - Date.parse(a.at) < 86_400_000);
+  const day = notify && digestDue(state.digestDay, now);
+  if (day) {
+    const text = buildDigest(snapshot, state.actions);
+    const d = await notify(text).catch((e) => ({ ok: false, reason: e.message }));
+    events.push(ev('Brain', 'call', d.ok ? `daily digest sent to Barron (Feishu DM, read back: verified)` : `daily digest NOT delivered: ${d.reason || (d.reasons || []).join('; ')}`));
+    if (d.ok) state.digestDay = day;
+    await writeFile(stateFile, JSON.stringify(state));
+  }
   const pub = await call('publish', { snapshot });
   return { ok: !!pub.ok, verified: !!pub.verified, bytes: pub.bytes, error: pub.error, snapshot, approvedNow };
 }
