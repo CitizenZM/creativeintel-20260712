@@ -39,7 +39,7 @@ function isAuthorized(request: Request): boolean {
   return timingSafeEqual(expectedBuf, providedBuf);
 }
 
-const ALLOWED_PREFIXES = ["creativeintel/libtv/", "creativeintel/brand-kit/", "creativeintel/research/"];
+const ALLOWED_PREFIXES = ["creativeintel/libtv/", "creativeintel/brand-kit/", "creativeintel/research/", "creativeintel/adstudio/"];
 
 export async function POST(request: Request) {
   if (!isAuthorized(request)) {

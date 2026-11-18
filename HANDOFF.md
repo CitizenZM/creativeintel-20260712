@@ -20,3 +20,18 @@
 - 完成: Worker idle backoff (cap 5 min) + hook-variants/ops-health hourly, PR #163 merged dcbc657 prod READY; 125 stale LibtvJob + 3 WorkerTask closed (reversible tag closed-stale-20261106)
 - 验证: node --test workers/idle-backoff.test.mjs 3/3 (old code fails 47 claims/2.5s); vitest 1695 pass; tsc 0; prod crons re-read; SQL queued/running=0
 - 下一步: Barron: on the operator Mac git pull + restart libtv/research/browser workers; transfer tcl-membership-v2 to a free org (needs affiliate@xark.io Supabase login)
+
+### 2026-11-07 08:58 · claude-opus-5-5
+- 完成: Ad Studio second pass inside Xark Studio on local branch feat/adstudio-studio: AdStudioRun model, APIs, worker route, Studio panel (multi hook types x multi engines, max 6), adstudio-worker; storyboard never written
+- 验证: tsc 0, eslint clean, vitest 455 pass, worker 2/2; local Docker DB e2e: create/plan/copy-plan/approve/409/cancel/generate/spend OK; real pipeline plan 8/8 frames, est $1.01, $0.45 spent, no video
+- 下一步: Barron: gh auth login + claude /login; decide push/preview DB; then real generate test after approval
+
+### 2026-11-07 10:52 · claude-opus-5-5
+- 完成: Pushed feat/adstudio-studio (main untouched); stopped the Preview build that would have run prisma db push on the shared prod Neon DB (prod has no AdStudioRun table, read-only check); disabled Vercel builds for the branch; first real video end to end via local Xark (run completed, $1.69, ledger matches)
+- 验证: git ls-remote = HEAD; vercel ls no new deploy after push; ledger 0.4542+1.2357=1.6899=run actualUsd; final.mp4 23.7s 1080x1920
+- 下一步: Barron OK for prod prisma db push + merge; then deploy and test Blob upload; launchd for worker
+
+### 2026-11-10 23:21 · claude-fable-5-2
+- 完成: Clerk azp fix: creative proxy authorizedParties now accepts https://portal.account.xark.io (PR #164 squash-merged c0ff48b, prod dpl_2dWbtoSKk7YWTwcg3ceJgwvWUVA5 Ready). client-portal JWKS 401 NOT fixed: Production CLERK_SECRET_KEY is a 14-char truncated value; no valid Xark Accounts production key exists locally or in readable Vercel envs
+- 验证: vitest 177 files/1696 tests pass, tsc rc=0; vercel deployment READY on c0ff48b; no azp traffic since 04:45Z so live log confirmation pending; client-portal: jwks kid comparison of all candidate keys = no match for ins_3LNY0DFM9cAcjqks3YXG4yOD3ck
+- 下一步: Barron: copy Secret key from Clerk app Xark Accounts > Production > API keys into Vercel client-portal Production CLERK_SECRET_KEY and redeploy; then re-check creative runtime logs for azp

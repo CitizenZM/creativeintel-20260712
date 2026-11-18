@@ -4,6 +4,7 @@
  * Rows are matched to our versions through the A/B ad name we generate
  * (Brand_Script_20s_HookC[_4x5]).
  */
+import { adStudioHookOf } from "@/services/video-gen/adstudio-results";
 
 export interface PerfRow {
   platform: "meta" | "tiktok" | "other";
@@ -111,7 +112,7 @@ export function parseAdName(name: string): { hookStyle: string | null; format: s
       cta: b[7] ?? null,
     };
   }
-  const hook = /_Hook([QCP])(?:_|$)/i.exec(name)?.[1]?.toLowerCase() ?? null;
+  const hook = /_Hook([QCP])(?:_|$)/i.exec(name)?.[1]?.toLowerCase() ?? adStudioHookOf(name); // …_ASResult_E… (Ad Studio, adstudio-results.ts)
   const format = /_(4x5|1x1|16x9|9x16|15s|10s)(?:_|$)/i.exec(name)?.[1]?.toLowerCase() ?? (hook ? "9x16" : null);
   return { hookStyle: hook, format };
 }

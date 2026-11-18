@@ -6,6 +6,7 @@ import { Loader2, Palette } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StoryboardTimeline } from "@/components/studio/storyboard-timeline";
 import { LibtvRunPanel } from "@/components/studio/libtv-run-panel";
+import { AdStudioPanel } from "@/components/studio/adstudio-panel";
 import { SpendPanel, type SpendTarget } from "@/components/workbench/spend-panel";
 import { RunWorkbench } from "@/components/workbench/run-workbench";
 import { NextStepHint } from "@/components/layout/next-step-hint";
@@ -262,6 +263,8 @@ export default function StudioPage() {
             onRunsChanged={handleRunChanged}
             onPlanChange={setPlan}
           />
+
+          {process.env.NEXT_PUBLIC_ADSTUDIO === "1" && <AdStudioPanel projectId={projectId} storyboard={storyboard} />}
 
           {activeRun && <RunWorkbench projectId={projectId} runs={workbenchRuns} selectedRunId={activeRun.id} />}
           <SpendPanel projectId={projectId} targets={spendTargets} />
