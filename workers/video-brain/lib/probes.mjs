@@ -41,13 +41,23 @@ export async function pipelinePython(adStudioRoot) {
 }
 
 export const MIN_CREDITS_USD = 5;
+/** pure: spendable = min(account credit, key limit remaining) */
+export function balanceVerdict(account, keyInfo = {}) {
+  const keyLeft = keyInfo.limit != null && keyInfo.limit_remaining != null ? Number(keyInfo.limit_remaining) : null;
+  const left = keyLeft == null ? account : Math.min(account, keyLeft);
+  const detail = keyLeft == null ? `$${account.toFixed(2)} left` : `$${left.toFixed(2)} spendable (account $${account.toFixed(2)}, key ${keyInfo.limit_reset || ''} cap $${keyInfo.limit} with $${keyLeft.toFixed(2)} left)`;
+  if (left >= MIN_CREDITS_USD) return ok('openrouter balance', detail);
+  return bad('openrouter balance', `${detail}: video/keyframe calls fail with 402 - ${keyLeft != null && keyLeft < account ? 'raise the key limit on openrouter.ai/settings/keys' : 'top up credits'}`);
+}
 async function openrouterCredits(key) {
   if (!key) return bad('openrouter balance', 'no key');
   try {
     const r = await fetch('https://openrouter.ai/api/v1/credits', { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000) });
     if (!r.ok) return bad('openrouter balance', `HTTP ${r.status}`);
-    const d = (await r.json()).data || {}; const left = Number(d.total_credits || 0) - Number(d.total_usage || 0);
-    return left >= MIN_CREDITS_USD ? ok('openrouter balance', `$${left.toFixed(2)} left`) : bad('openrouter balance', `$${left.toFixed(2)} left (< $${MIN_CREDITS_USD}): video/keyframe calls fail with 402 - top up`);
+    const d = (await r.json()).data || {}; const account = Number(d.total_credits || 0) - Number(d.total_usage || 0);
+    // a key can carry its own monthly cap: OpenRouter answers 402 when the KEY's limit is spent even with account credit left
+    const k = await fetch('https://openrouter.ai/api/v1/key', { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000) }).then((x) => x.json()).then((j) => j.data || {}).catch(() => ({}));
+    return balanceVerdict(account, k);
   } catch (e) { return bad('openrouter balance', e.message); }
 }
 
