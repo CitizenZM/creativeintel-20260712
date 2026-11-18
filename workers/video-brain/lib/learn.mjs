@@ -36,7 +36,7 @@ export function harvest({ incidents, checks, now = new Date().toISOString(), bas
   for (const i of Object.values(incidents || {})) {
     if (i.count < 2 || i.status === 'resolved' || Date.parse(now) - Date.parse(i.lastSeen) > 7 * 86_400_000) continue;
     const rule = `Recurring failure (${i.kind}) "${i.signature}": ${i.runbook}`;
-    out.push({ id: idOf('incident', i.signature), at: now, who: 'brain', scope: i.kind === 'model' ? 'pipeline:generate' : 'global', rule, evidence: i.runs.slice(-5), status: i.count >= 3 ? 'confirmed' : 'candidate', promotedTo: null });
+    out.push({ id: idOf('incident', i.signature), at: now, who: 'brain', scope: `ops:${i.kind}`, rule, evidence: i.runs.slice(-5), status: i.count >= 3 ? 'confirmed' : 'candidate', promotedTo: null });
   }
   const failed = {};
   for (const c of Object.values(checks || {})) if (!c.renderedAt || c.renderedAt >= baseline) for (const f of c.fields || []) if (!f.pass) (failed[f.field] = failed[f.field] || []).push(c.runId);
