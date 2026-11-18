@@ -12,11 +12,14 @@ Dashboard: **creative.xark.io/brain** (admin only). Every 5 minutes (launchd `co
 | Gate | auto-approves runs waiting at the spend gate when the reservation (estimate × 1.3) ≤ $3 and today's brain approvals ≤ $20 and the estimate is < 24 h old; the server re-checks (`src/services/brain/policy.ts`) and logs `OpsEvent brain-auto-approve`; others wait on Barron (`waitingOn: budget`) | `lib/policy.mjs` |
 | Recover | retries transient failures once a day per run (max 2 brain retries; Ad Studio resumes from the failed step) | `lib/incidents.mjs` classify |
 | Verify (二次复查) | re-reads each finished video: HTTP 200 mp4, ffprobe duration 5–24.5 s, 9:16, h264, audio, −14 LUFS ±1.5, cost ≤ reservation, runtime = worker metrics | `lib/verify.mjs` |
+| Critic (second family) | ≤ 10/day: a 3x2 frame sheet of each probed finished video scored by `google/gemini-3.8-flash` via OpenRouter (first frame, product clarity, consistency, garbled text, sells + issues; ≈ $0.003); added as a check field; `VIDEO_BRAIN_CRITIC=0` off | `lib/critic.mjs` |
+| Batch productions | `acw-bf-videos/all-videos-by-product/INDEX.csv` rows join as finished runs (second check + critic) | `lib/batch.mjs` |
 | Incidents | failures grouped by normalised cause signature; runbook per kind; resolved after 72 h quiet, reopened on return | `lib/incidents.mjs` |
 | Probes (30 min) | OpenRouter balance (< $5 = fail: video calls 402), ffmpeg/ffprobe, faster-whisper, edge-tts, Ad Studio worker launchd + heartbeat, ego lite, OpenRouter `/videos/models` vs every routed model, disk, Ad Studio web | `lib/probes.mjs` |
 | Fix patterns (6 h) | searches Ad Studio, acw videos, motion repos, video-shotcraft and the video skills for patterns already fixed once (retired model routes, whisper initial_prompt, −16 LUFS masters, music fade-in at 0 s, `tee | head`) | `lib/patterns.mjs` |
 | Learn | seed (production rules) + harvested (recurring incidents, repeated check failures) + server edits → `LEARNINGS.md` marker block in each video skill (+ pointer in SKILL.md), `ad-studio/docs/LEARNINGS.md`, `ad-studio/data/brain-learnings.json` (confirmed rules go into the script prompt) | `lib/learn.mjs` |
 | Digest | once a day after 07:30 PT: Feishu DM to Barron's open_id only (Affiliate OS notifier: blocklist guard + read-back second check): what waits on him, failing probes, stalled projects the brain is pushing, actions of the last 24 h; `VIDEO_BRAIN_DIGEST=0` off | `lib/digest.mjs` |
+| Live board | `GET /api/brain` overlays the active AdStudioRun rows on every request, so /brain shows run state within one 10 s poll (snapshot itself is ≤ 5 min old) | `src/services/brain/live.ts` |
 | Publish | `AppSetting brain:snapshot` (+ `brain:events`, `brain:learnings`), then re-read and compare (second check of its own write) | `src/services/brain/store.ts` |
 
 ```bash

@@ -24,7 +24,10 @@ import { scanRoots } from './lib/patterns.mjs';
 import { SEED, harvest, idOf, syncAll } from './lib/learn.mjs';
 import { pick, promptFor, runClaude, apply as applyStrategy } from './lib/strategist.mjs';
 import { readLocal } from './lib/local.mjs';
+import { readBatches } from './lib/batch.mjs';
 import { buildDigest, digestDue, sendDigest } from './lib/digest.mjs';
+import { critique, withCritic, MAX_PER_DAY as CRITIC_PER_DAY } from './lib/critic.mjs';
+import { envKey } from './lib/probes.mjs';
 
 const argv = process.argv.slice(2);
 const flag = (k) => argv.includes(`--${k}`);
@@ -49,6 +52,13 @@ export function api(appUrl, token) {
 const readJSON = async (f, d) => { try { return JSON.parse(await readFile(f, 'utf8')); } catch { return d; } };
 const ev = (agent, kind, summary, projectId = null, ref = null) => ({ at: new Date().toISOString(), agent, kind, summary, projectId, ref });
 
+/** second-family critic with the Ad Studio OpenRouter key (null when no key) */
+export async function defaultCritic(video, durationSec) {
+  const key = process.env.OPENROUTER_API_KEY || (await envKey(path.join(ROOT, '.env.local'), 'OPENROUTER_API_KEY'));
+  if (!key) throw new Error('no OPENROUTER_API_KEY');
+  return critique(video, durationSec, key);
+}
+
 /** approve a local Ad Studio job at its spend gate (same caps; the local API books it in data/spend.json) */
 export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'http://127.0.0.1:5310') {
   const r = await fetch(`${base}/api/jobs/${encodeURIComponent(jobId)}/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ approve: true }), signal: AbortSignal.timeout(30_000) });
@@ -56,7 +66,7 @@ export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'h
   return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
 }
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = () => readLocal(ROOT), approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest } = {}) {
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic } = {}) {
   await mkdir(home, { recursive: true });
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
@@ -100,7 +110,15 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   for (const r of toCheck) {
     if (Date.now() - tickStart > CHECK_BUDGET_MS) { events.push(ev('QA Critic', 'wait', `second checks paused for this tick (time budget ${CHECK_BUDGET_MS / 1000}s); rest next tick`)); break; }
     try {
-      const c = await secondCheck(r);
+      let c = await secondCheck(r);
+      const day = new Date(now).toISOString().slice(0, 10);
+      state.criticDay = state.criticDay?.day === day ? state.criticDay : { day, n: 0 };
+      const dur = Number((c.fields.find((f) => f.field === 'duration')?.actual || '').replace(/[^0-9.]/g, ''));
+      if (critic && dur > 0 && state.criticDay.n < CRITIC_PER_DAY) {
+        state.criticDay.n += 1;
+        try { const cr = await critic(r.finalMp4Url || r.finalPath, dur); c = withCritic(c, cr); events.push(ev('QA Critic', 'check', `${cr.model} on ${r.id.slice(-6)}: avg ${cr.avg}${cr.scores.issues?.length ? ' — ' + cr.scores.issues[0] : ''}`, r.projectId, r.id)); }
+        catch (e) { log(`critic ${r.id}: ${e.message}`); }
+      }
       state.checks[r.id] = c;
       const bad = c.fields.filter((f) => !f.pass).map((f) => `${f.field} ${f.actual}`);
       events.push(ev('QA Critic', 'check', c.pass ? `second check passed: run ${r.id.slice(-6)} (${c.fields.length} fields)` : `second check FAILED run ${r.id.slice(-6)}: ${bad.join('; ')}`, r.projectId, r.id));

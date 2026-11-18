@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
+import { LIVE_STATUSES, overlayRuns } from "./live";
 import {
   BRAIN_KEYS, DEFAULT_POLICY, MAX_EVENTS, MAX_LEARNINGS, SNAPSHOT_MAX_BYTES, STALE_AFTER_SEC,
   type BrainEvent, type BrainLearning, type BrainPolicy, type BrainSnapshot, type BrainView,
@@ -45,9 +46,13 @@ export const getLearnings = () => read<BrainLearning[]>(BRAIN_KEYS.learnings, []
 export const getPolicy = async (): Promise<BrainPolicy> => ({ ...DEFAULT_POLICY, ...(await read<Partial<BrainPolicy>>(BRAIN_KEYS.policy, {})) });
 
 export async function getView(now = Date.now()): Promise<BrainView> {
-  const [snap, events, learnings] = await Promise.all([getSnapshot(), getEvents(), getLearnings()]);
+  const [snap, events, learnings, runs] = await Promise.all([
+    getSnapshot(), getEvents(), getLearnings(),
+    // live overlay: active Ad Studio runs re-read on every request (the snapshot is up to 5 minutes old)
+    prisma.adStudioRun.findMany({ where: { status: { in: [...LIVE_STATUSES] } }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, projectId: true, status: true, step: true, progress: true, estUsd: true, actualUsd: true, hookType: true, engine: true, updatedAt: true } }).catch(() => null),
+  ]);
   const v = viewOf(snap, now);
-  if (v.snapshot) v.snapshot = { ...v.snapshot, events: events.slice(0, 120), learnings };
+  if (v.snapshot) v.snapshot = { ...(runs ? overlayRuns(v.snapshot, runs, now) : v.snapshot), events: events.slice(0, 120), learnings };
   return v;
 }
 

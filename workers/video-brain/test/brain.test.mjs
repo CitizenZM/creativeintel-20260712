@@ -1,5 +1,5 @@
 // tests never message Barron or call the model
-process.env.VIDEO_BRAIN_DIGEST = '0'; process.env.VIDEO_BRAIN_STRATEGIST = '0';
+process.env.VIDEO_BRAIN_DIGEST = '0'; process.env.VIDEO_BRAIN_STRATEGIST = '0'; process.env.VIDEO_BRAIN_CRITIC = '0';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -139,7 +139,8 @@ test('tick wiring: approves within caps, retries transient, checks, syncs skills
   };
   const asked = [];
   const strategist = async (prompt) => { asked.push(prompt); return { hypothesis: 'h', nextAction: 'Write the insights brief', verifyHow: 'insights stage done', checkpointHours: 6, owner: 'Strategist' }; };
-  const r = await tick({ call, now, home, strategist });
+  const empty = async () => ({ projects: [], stages: [], runs: [] });
+  const r = await tick({ call, now, home, strategist, local: empty });
   assert.equal(r.ok, true);
   assert.deepEqual(calls.filter((c) => c.action === 'approve').map((c) => c.body.runId), ['small']);
   assert.deepEqual(calls.filter((c) => c.action === 'retry').map((c) => c.body.runId), ['fail']);
@@ -152,7 +153,7 @@ test('tick wiring: approves within caps, retries transient, checks, syncs skills
   assert.ok(JSON.parse(await readFile(path.join(adRoot, 'data', 'brain-learnings.json'), 'utf8')).rules.length > 0);
   // second tick: no duplicate approve/retry
   calls.length = 0;
-  await tick({ call, now: now + 60_000, home, strategist });
+  await tick({ call, now: now + 60_000, home, strategist, local: empty });
   assert.equal(calls.filter((c) => c.action === 'retry').length, 0);
   assert.equal(calls.filter((c) => c.action === 'approve').length, 0);
   assert.equal(asked.length, 1);
@@ -225,4 +226,26 @@ test('probes: python check uses the interpreter the pipeline resolves', async ()
   const root = path.join(process.env.HOME, 'Projects', 'ad-studio-20261104');
   const py = await pipelinePython(root);
   assert.ok(typeof py === 'string' && py.length > 0);
+});
+
+test('critic: frame picks, verdict, check fields', async () => {
+  const { picks, verdict, withCritic } = await import('../lib/critic.mjs');
+  assert.deepEqual(picks(3, 9), [0.05, 3, 6]);
+  assert.deepEqual(verdict({ first_frame: 7, product_clear: 7, consistency: 7, no_garbled_text: 7, sells: 7 }), { avg: 7, pass: true });
+  assert.equal(verdict({ first_frame: 9, product_clear: 9, consistency: 9, no_garbled_text: 3, sells: 9 }).pass, false);
+  const c = withCritic({ runId: 'r', pass: true, fields: [{ field: 'duration', pass: true }] }, { model: 'google/g', scores: { first_frame: 3, product_clear: 3, consistency: 3, no_garbled_text: 3, sells: 3, issues: ['x'] }, avg: 3, pass: false });
+  assert.equal(c.pass, false); assert.equal(c.fields[1].field, 'critic (g)'); assert.match(c.fields[1].actual, /x$/);
+});
+
+test('batch: CSV with quoted commas; INDEX rows become finished runs of one project', async () => {
+  const { parseCsv, readBatches } = await import('../lib/batch.mjs');
+  const rows = parseCsv('file,product,voice-over\r\na.mp4,grip,"Hi, ""friends"", 30% off"\nb.mp4,clip,x\n');
+  assert.equal(rows.length, 2); assert.equal(rows[0]['voice-over'], 'Hi, "friends", 30% off');
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const dir = await mkdtemp(path.join(tmpdir(), 'vb-batch-'));
+  await writeFile(path.join(dir, 'INDEX.csv'), 'file,product\nv1.mp4,grip\nmissing.mp4,clip\n'); await writeFile(path.join(dir, 'v1.mp4'), 'x');
+  const out = await readBatches([{ id: 't', name: 'T', brand: 'b', dir, index: 'INDEX.csv' }]);
+  assert.equal(out.projects.length, 1); assert.equal(out.runs.length, 2);
+  assert.ok(out.runs[0].finalPath.endsWith('v1.mp4')); assert.equal(out.runs[1].finalPath, null); assert.equal(out.runs[0].projectId, 'batch:t');
+  assert.deepEqual(approvals(out.runs, policy, 0, NOW), []);
 });
