@@ -9,11 +9,14 @@ import { NextRequest, type NextFetchEvent } from "next/server";
 const m = vi.hoisted(() => ({
   session: { userId: null as string | null, sessionClaims: {} as Record<string, unknown> },
   getPrincipal: vi.fn(),
+  clerkOptions: undefined as { authorizedParties?: string[] } | undefined,
 }));
 vi.mock("@clerk/nextjs/server", () => ({
   clerkMiddleware:
-    (cb: (auth: () => Promise<unknown>, req: NextRequest) => unknown) => (req: NextRequest) =>
-      cb(async () => m.session, req),
+    (cb: (auth: () => Promise<unknown>, req: NextRequest) => unknown, options?: { authorizedParties?: string[] }) => {
+      m.clerkOptions = options;
+      return (req: NextRequest) => cb(async () => m.session, req);
+    },
 }));
 vi.mock("@/services/access", () => ({ getPrincipal: m.getPrincipal, getProjectTenant: vi.fn(async () => null) }));
 
@@ -35,6 +38,13 @@ describe("proxy — Xark Accounts", () => {
   beforeEach(() => {
     m.session = { userId: null, sessionClaims: {} };
     m.getPrincipal.mockResolvedValue({ appUserId: "a1", role: "member", status: "active" });
+  });
+
+  it("accepts session tokens minted on this host or the portal (azp), and nowhere else", () => {
+    expect(m.clerkOptions?.authorizedParties).toEqual([
+      "https://creative.account.xark.io",
+      "https://portal.account.xark.io",
+    ]);
   });
 
   it("301s the old host to creative.account.xark.io, same path + query, before any auth", async () => {

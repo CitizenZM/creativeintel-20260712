@@ -13,6 +13,12 @@ export const APP_KEY = "creative";
 export const DEFAULT_ACCOUNT_URL = "https://account.xark.io";
 export const DEFAULT_CANONICAL_HOST = "creative.account.xark.io";
 const SUPER_ADMIN = "super_admin";
+/**
+ * Sibling apps on the shared instance whose session tokens may arrive here: sessions are shared
+ * across *.account.xark.io, so a token last minted on the portal carries the portal's origin as
+ * `azp` and comes back through the Clerk handshake. Exact origins we serve only — no wildcards.
+ */
+export const SIBLING_ORIGINS = ["https://portal.account.xark.io"];
 
 /** `apps` from the session claims: only string roles, e.g. { creative: "member", account: "super_admin" }. */
 export type Apps = Record<string, string>;
@@ -34,6 +40,11 @@ export function isCreativeOwnerClaim(apps: Apps): boolean {
 
 export function accountUrl(env: Env = process.env): string {
   return env.ACCOUNT_URL?.trim().replace(/\/+$/, "") || DEFAULT_ACCOUNT_URL;
+}
+
+/** Origins allowed as a session token's `azp`: this app's canonical host plus its siblings. */
+export function authorizedParties(canonicalHost: string): string[] {
+  return [`https://${canonicalHost}`, ...SIBLING_ORIGINS];
 }
 
 /** This app's landing page on its canonical host. */

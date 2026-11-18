@@ -14,21 +14,19 @@ async function lockProject(tx: Tx, projectId: string) {
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`spend:${projectId}`}))::text AS locked`;
 }
 
+// Queries inside an interactive transaction share one pg connection: run them one at a time
+// (concurrent client.query() on one client is deprecated in pg 8 and an error in pg 9).
 async function spentSum(tx: Tx, where: { projectId: string; runId?: string }): Promise<number> {
-  const [open, settled] = await Promise.all([
-    tx.spendEntry.aggregate({ where: { ...where, actualUsd: null }, _sum: { estUsd: true } }),
-    tx.spendEntry.aggregate({ where: { ...where, actualUsd: { not: null } }, _sum: { actualUsd: true } }),
-  ]);
+  const open = await tx.spendEntry.aggregate({ where: { ...where, actualUsd: null }, _sum: { estUsd: true } });
+  const settled = await tx.spendEntry.aggregate({ where: { ...where, actualUsd: { not: null } }, _sum: { actualUsd: true } });
   return round((open._sum.estUsd ?? 0) + (settled._sum.actualUsd ?? 0));
 }
 
 async function state(tx: Tx, projectId: string, runId?: string | null): Promise<{ project: BudgetState; run: BudgetState | null }> {
-  const [project, run, projectSpent, runSpent] = await Promise.all([
-    tx.project.findUnique({ where: { id: projectId }, select: { budgetUsd: true } }),
-    runId ? tx.libtvRun.findUnique({ where: { id: runId }, select: { approvedBudgetUsd: true } }) : null,
-    spentSum(tx, { projectId }),
-    runId ? spentSum(tx, { projectId, runId }) : 0,
-  ]);
+  const project = await tx.project.findUnique({ where: { id: projectId }, select: { budgetUsd: true } });
+  const run = runId ? await tx.libtvRun.findUnique({ where: { id: runId }, select: { approvedBudgetUsd: true } }) : null;
+  const projectSpent = await spentSum(tx, { projectId });
+  const runSpent = runId ? await spentSum(tx, { projectId, runId }) : 0;
   return {
     project: { budgetUsd: project?.budgetUsd ?? null, spentUsd: projectSpent },
     run: runId ? { budgetUsd: run?.approvedBudgetUsd ?? null, spentUsd: runSpent } : null,

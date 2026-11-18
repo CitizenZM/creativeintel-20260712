@@ -4,7 +4,7 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
 import { selectAuthMode } from "@/lib/auth/mode";
 import { decideAccess, deniedResponse } from "@/lib/auth/gate";
 import { canonicalRedirect, classifyPath, isApiPath, legacyHostRedirect, rewriteSluggedPath } from "@/lib/auth/paths";
-import { accountUrl, parseApps } from "@/lib/auth/account";
+import { accountUrl, authorizedParties, parseApps } from "@/lib/auth/account";
 import { getPrincipal, getProjectTenant } from "@/services/access";
 import { ACTOR_HEADER } from "@/lib/auth/actor";
 
@@ -56,7 +56,8 @@ function continueRequest(request: NextRequest, actorId: string | null = null): N
 const SIGN_IN_URL = `${accountUrl()}/sign-in`;
 const SIGN_UP_URL = `${accountUrl()}/sign-up`;
 // Production: creative.account.xark.io. Browsers on any other host are sent there (a production
-// Clerk instance can't issue sessions on the *.vercel.app aliases) and only it may present sessions.
+// Clerk instance can't issue sessions on the *.vercel.app aliases); only it and the sibling apps on
+// the shared instance (authorizedParties, src/lib/auth/account.ts) may present sessions.
 // The old host, creative.xark.io, 301s there before any auth work (legacyHostRedirect).
 const CANONICAL_HOST = process.env.AUTH_CANONICAL_HOST?.trim() || undefined;
 
@@ -85,7 +86,7 @@ const clerkGate =
         {
           signInUrl: SIGN_IN_URL,
           signUpUrl: SIGN_UP_URL,
-          ...(CANONICAL_HOST ? { authorizedParties: [`https://${CANONICAL_HOST}`] } : {}),
+          ...(CANONICAL_HOST ? { authorizedParties: authorizedParties(CANONICAL_HOST) } : {}),
         },
       )
     : null;
