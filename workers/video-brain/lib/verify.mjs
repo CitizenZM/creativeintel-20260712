@@ -3,6 +3,7 @@
 // audio present, −14 LUFS ±1.5, URL serves an mp4, spend ≤ reservation).
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { stat } from 'node:fs/promises';
 import { reserveUsd } from './policy.mjs';
 
 const pexec = promisify(execFile);
@@ -12,7 +13,8 @@ export const TARGETS = { maxSec: 24.5, minSec: 5, lufs: -14, lufsTol: 1.5, ratio
 export function compare(run, facts) {
   const f = [];
   const add = (field, expected, actual, pass, source) => f.push({ field, expected, actual: String(actual), pass: !!pass, source });
-  add('url', 'HTTP 200 video/mp4', facts.http ? `${facts.http.status} ${facts.http.type || ''}`.trim() : 'unreachable', facts.http?.status === 200 && /video|octet/.test(facts.http.type || ''), 'http');
+  if (facts.file) add('file', 'exists, > 0 bytes', facts.file.bytes ? `${(facts.file.bytes / 1e6).toFixed(1)} MB` : 'missing', facts.file.bytes > 0, 'fs');
+  else add('url', 'HTTP 200 video/mp4', facts.http ? `${facts.http.status} ${facts.http.type || ''}`.trim() : 'unreachable', facts.http?.status === 200 && /video|octet/.test(facts.http.type || ''), 'http');
   if (facts.probe) {
     const p = facts.probe;
     add('duration', `${TARGETS.minSec}–${TARGETS.maxSec} s`, `${p.duration.toFixed(2)} s`, p.duration >= TARGETS.minSec && p.duration <= TARGETS.maxSec, 'ffprobe');
@@ -25,12 +27,13 @@ export function compare(run, facts) {
   if (run.estUsd > 0 && run.actualUsd != null) add('cost', `≤ reservation $${reserve.toFixed(2)}`, `$${Number(run.actualUsd).toFixed(2)}`, run.actualUsd <= reserve + 0.01, 'db vs estimate');
   const rt = Number(run.metrics?.runtime ?? run.metrics?.duration ?? NaN);
   if (Number.isFinite(rt) && facts.probe) add('runtime matches report', `${rt.toFixed(2)} s (worker metrics)`, `${facts.probe.duration.toFixed(2)} s`, Math.abs(rt - facts.probe.duration) <= 0.5, 'metrics vs file');
-  return { runId: run.id, projectId: run.projectId, at: new Date().toISOString(), pass: f.every((x) => x.pass), fields: f };
+  return { runId: run.id, projectId: run.projectId, at: new Date().toISOString(), renderedAt: run.updatedAt ? new Date(run.updatedAt).toISOString() : null, pass: f.every((x) => x.pass), fields: f };
 }
 
 export async function probeUrl(url, { timeoutMs = 60_000 } = {}) {
   const facts = {};
-  try {
+  if (!/^https?:/.test(url)) { try { facts.file = { bytes: (await stat(url)).size }; } catch { facts.file = { bytes: 0 }; } }
+  else try {
     const r = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(20_000) });
     facts.http = { status: r.status, type: r.headers.get('content-type'), bytes: Number(r.headers.get('content-length') || 0) };
   } catch (e) { facts.http = null; facts.httpError = e.message; }
@@ -49,4 +52,4 @@ export async function probeUrl(url, { timeoutMs = 60_000 } = {}) {
   return facts;
 }
 
-export async function secondCheck(run) { return compare(run, await probeUrl(run.finalMp4Url)); }
+export async function secondCheck(run) { return compare(run, await probeUrl(run.finalMp4Url || run.finalPath)); }

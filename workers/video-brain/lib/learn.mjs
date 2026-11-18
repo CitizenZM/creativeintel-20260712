@@ -27,16 +27,19 @@ export const SEED = [
   L('global', 'Never claim audio quality was checked by ear: the model cannot listen; report measured numbers (LUFS, LU, ms).', ['OPERATOR-SKILL rule 6'], 'promoted', 'measure.mjs'),
 ];
 
+/** videos rendered before this pipeline baseline (2026-11-17 sync/loudness/hook fixes) are reported but not learned from */
+export const PIPELINE_BASELINE = process.env.VIDEO_BRAIN_BASELINE || '2026-11-17T20:00:00.000Z';
+
 /** new candidate/confirmed learnings from what the brain saw this tick */
-export function harvest({ incidents, checks, now = new Date().toISOString() }) {
+export function harvest({ incidents, checks, now = new Date().toISOString(), baseline = PIPELINE_BASELINE }) {
   const out = [];
   for (const i of Object.values(incidents || {})) {
-    if (i.count < 2 || i.status === 'resolved') continue;
+    if (i.count < 2 || i.status === 'resolved' || Date.parse(now) - Date.parse(i.lastSeen) > 7 * 86_400_000) continue;
     const rule = `Recurring failure (${i.kind}) "${i.signature}": ${i.runbook}`;
     out.push({ id: idOf('incident', i.signature), at: now, who: 'brain', scope: i.kind === 'model' ? 'pipeline:generate' : 'global', rule, evidence: i.runs.slice(-5), status: i.count >= 3 ? 'confirmed' : 'candidate', promotedTo: null });
   }
   const failed = {};
-  for (const c of Object.values(checks || {})) for (const f of c.fields || []) if (!f.pass) (failed[f.field] = failed[f.field] || []).push(c.runId);
+  for (const c of Object.values(checks || {})) if (!c.renderedAt || c.renderedAt >= baseline) for (const f of c.fields || []) if (!f.pass) (failed[f.field] = failed[f.field] || []).push(c.runId);
   for (const [field, runs] of Object.entries(failed)) {
     if (runs.length < 2) continue;
     out.push({ id: idOf('check', field), at: now, who: 'QA Critic', scope: 'pipeline:render', rule: `Second check: "${field}" failed on ${runs.length} finished videos; the pipeline's own QA passed them — tighten measure.mjs for ${field}.`, evidence: runs.slice(-5), status: runs.length >= 3 ? 'confirmed' : 'candidate', promotedTo: null });

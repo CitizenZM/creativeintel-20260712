@@ -35,6 +35,17 @@ async function openrouterVideo(adStudioRoot, key) {
   } catch (e) { return bad('openrouter video models', e.message); }
 }
 
+export const MIN_CREDITS_USD = 5;
+async function openrouterCredits(key) {
+  if (!key) return bad('openrouter balance', 'no key');
+  try {
+    const r = await fetch('https://openrouter.ai/api/v1/credits', { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000) });
+    if (!r.ok) return bad('openrouter balance', `HTTP ${r.status}`);
+    const d = (await r.json()).data || {}; const left = Number(d.total_credits || 0) - Number(d.total_usage || 0);
+    return left >= MIN_CREDITS_USD ? ok('openrouter balance', `$${left.toFixed(2)} left`) : bad('openrouter balance', `$${left.toFixed(2)} left (< $${MIN_CREDITS_USD}): video/keyframe calls fail with 402 - top up`);
+  } catch (e) { return bad('openrouter balance', e.message); }
+}
+
 export async function envKey(file, name) {
   try { const m = (await readFile(file, 'utf8')).match(new RegExp(`^${name}=(.*)$`, 'm')); return m ? m[1].replace(/^["']|["']$/g, '').trim() : null; } catch { return null; }
 }
@@ -49,6 +60,7 @@ export async function runProbes({ adStudioRoot, obs }) {
     cmd('adstudio worker (launchd)', 'launchctl', ['list', 'co.celldigital.adstudio-worker'], /"PID"/),
     cmd('ego lite (reference fetch)', 'zsh', ['-lc', 'command -v ego-browser && echo found'], /found/),
     openrouterVideo(adStudioRoot, key),
+    openrouterCredits(key),
     (async () => { try { const s = await statfs(adStudioRoot); const gb = (s.bavail * s.bsize) / 1e9; return gb > 20 ? ok('disk', `${gb.toFixed(0)} GB free`) : bad('disk', `${gb.toFixed(1)} GB free (< 20)`); } catch (e) { return bad('disk', e.message); } })(),
     (async () => { try { const r = await fetch('http://127.0.0.1:5310/', { signal: AbortSignal.timeout(8000) }); return r.status < 500 ? ok('ad-studio web :5310', `HTTP ${r.status}`) : bad('ad-studio web :5310', `HTTP ${r.status}`); } catch (e) { return bad('ad-studio web :5310', e.message); } })(),
   ]);

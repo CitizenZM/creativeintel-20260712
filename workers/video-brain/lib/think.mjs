@@ -18,7 +18,7 @@ const t = (d) => (d ? Date.parse(d) : 0);
 export function approvals(runs, policy, approvedTodayUsd, now) {
   let used = approvedTodayUsd; const out = [];
   for (const r of [...runs].filter((x) => x.status === 'awaiting_approval').sort((a, b) => t(a.updatedAt) - t(b.updatedAt))) {
-    const v = canAutoApprove(r, policy, used, now);
+    const v = r.managedBy === 'xark' ? { ok: false, reason: 'managed by Xark: approve or cancel it in Xark Studio' } : canAutoApprove(r, policy, used, now);
     out.push({ run: r, ...v });
     if (v.ok) used += v.reserveUsd;
   }
@@ -27,7 +27,7 @@ export function approvals(runs, policy, approvedTodayUsd, now) {
 
 /** failed runs the brain retries: transient cause, < 2 brain retries, failed within 24 h */
 export function retries(runs, now) {
-  return runs.filter((r) => r.status === 'failed' && r.retries < 2 && now - t(r.updatedAt) < 24 * H && classify(r.error).retry);
+  return runs.filter((r) => !r.local && r.status === 'failed' && r.retries < 2 && now - t(r.updatedAt) < 24 * H && classify(r.error).retry);
 }
 
 export function gatesOf(run, policy, approvedTodayUsd, now) {
@@ -56,7 +56,7 @@ export function tasksOf(obs, checks, now) {
     else if (r.status === 'failed' && now - t(r.updatedAt) < 7 * 24 * H) {
       const c = classify(r.error);
       recovery.push(task(r, 'fix', retrySet.has(r.id) ? 'retrying' : 'failed', c.retry ? 'Producer' : 'Doctor', [{ gate: 'cause', pass: c.retry, detail: `${c.kind}: ${c.runbook}` }, { gate: 'error', pass: false, detail: String(r.error || '').slice(0, 200) }]));
-    } else if (r.status === 'completed' && r.finalMp4Url && !checks[r.id] && now - t(r.updatedAt) < 14 * 24 * H) recovery.push(task(r, 'verify', 'verifying', 'QA Critic'));
+    } else if (r.status === 'completed' && (r.finalMp4Url || r.finalPath) && !checks[r.id] && now - t(r.updatedAt) < 14 * 24 * H) recovery.push(task(r, 'verify', 'verifying', 'QA Critic'));
   }
   return { queue, executing, recovery };
 }
@@ -92,7 +92,7 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
   }
 
   if (lastDone) {
-    const unchecked = done.filter((r) => r.finalMp4Url && !checks[r.id]);
+    const unchecked = done.filter((r) => (r.finalMp4Url || r.finalPath) && !checks[r.id]);
     if (unchecked.length) return { ...base, step: 'deliver', stage: 'verify', status: 'active', agent: 'QA Critic', doing: `second check of ${unchecked.length} finished video(s)`, nextAction: 'ffprobe + loudness + URL + cost reconcile', nextCheckpointAt: at(10 * M), verifyHow: 'every field of the check passes; a failing field opens a fix task' };
     const p = perf.find((x) => x.projectId === project.id);
     const doneAt = t(lastDone.updatedAt);
