@@ -74,13 +74,13 @@ model Workspace {
 /// "member". Sign-up is open: a member gets their own empty Workspace on first sign-in and can only
 /// ever reach workspaces they own (src/proxy.ts → src/lib/auth/gate.ts, src/services/workspace.ts).
 model AppUser {
-  id          String      @id @default(cuid())
-  clerkUserId String      @unique
-  email       String
-  name        String?
-  role        String      @default("member") // owner | member
+  id                  String         @id @default(cuid())
+  clerkUserId         String         @unique
+  email               String
+  name                String?
+  role                String         @default("member") // owner | member
   // active | blocked — an owner can block an account from /settings/users (pages → /blocked, API → 403).
-  status      String      @default("active")
+  status              String         @default("active")
   // A member's paid-AI allowance per calendar month (UTC), across all their projects
   // (src/services/ops/account-allowance.ts). Null = MEMBER_MONTHLY_ALLOWANCE_USD (default $1).
   // Admins (role owner) are never capped by it.
@@ -89,11 +89,11 @@ model AppUser {
   // legal-consent checkbox → user.legalAcceptedAt) and which version (src/lib/legal.ts).
   legalAcceptedAt     DateTime?
   legalVersion        String?
-  createdAt   DateTime    @default(now())
-  lastSeenAt  DateTime    @default(now())
-  projects    Project[]
-  workspaces  Workspace[]
-  sharedProjects ProjectShare[] @relation("ShareRecipient")
+  createdAt           DateTime       @default(now())
+  lastSeenAt          DateTime       @default(now())
+  projects            Project[]
+  workspaces          Workspace[]
+  sharedProjects      ProjectShare[] @relation("ShareRecipient")
 
   @@index([email])
 }
@@ -184,11 +184,11 @@ model IdempotencyKey {
 model Project {
   // Review state for setup fields (product, campaign) — see src/lib/field-status.ts.
   fieldStatus Json?
-  id        String        @id @default(cuid())
-  name      String
-  status    ProjectStatus @default(DRAFT)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  id          String        @id @default(cuid())
+  name        String
+  status      ProjectStatus @default(DRAFT)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   workspaceId    String?
   workspace      Workspace?    @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
@@ -198,13 +198,13 @@ model Project {
   brandProfileId String?
   brandProfile   BrandProfile? @relation(fields: [brandProfileId], references: [id], onDelete: SetNull)
 
-  brandName    String
-  brandUrl     String?
-  category     String?
-  campaignGoal String?
+  brandName           String
+  brandUrl            String?
+  category            String?
+  campaignGoal        String?
   // The creative intent that steers ranking, style picks and templates:
   // storytelling | conversion | hybrid (see src/lib/style-categories.ts).
-  goalType     String?
+  goalType            String?
   // What the last complete analysis was run over (see insights/reanalyze) —
   // Re-analyze skips work when nothing has changed since.
   analysisFingerprint String?
@@ -216,16 +216,16 @@ model Project {
   archivedAt DateTime?
 
   // Product definition — user-specified, foundational source of truth
-  productUrl        String? // specific product page URL (Amazon PDP, DTC page)
-  productName       String? // exact product name entered by user
-  productPageTitle  String? // scraped from productUrl
-  productPageImages Json? // [{url, alt, width?, height?}] real images from productUrl
-  productPageText   String? @db.Text // scraped product description from productUrl
-  productBrief      Json? // sp-1 product brief: ranked filmable selling points, keywords, objections, compliance (services/creative/product-brief.ts)
-  productBriefAt    DateTime?
-  campaignPlan      Json? // per-platform hooks, end card, beats and scripts (services/creative/campaign-plan.types.ts)
-  campaignPlanAt    DateTime?
-  userProductImages Json? // [{url, caption, uploadedAt}] user-uploaded reference photos
+  productUrl         String? // specific product page URL (Amazon PDP, DTC page)
+  productName        String? // exact product name entered by user
+  productPageTitle   String? // scraped from productUrl
+  productPageImages  Json? // [{url, alt, width?, height?}] real images from productUrl
+  productPageText    String?   @db.Text // scraped product description from productUrl
+  productBrief       Json? // sp-1 product brief: ranked filmable selling points, keywords, objections, compliance (services/creative/product-brief.ts)
+  productBriefAt     DateTime?
+  campaignPlan       Json? // per-platform hooks, end card, beats and scripts (services/creative/campaign-plan.types.ts)
+  campaignPlanAt     DateTime?
+  userProductImages  Json? // [{url, caption, uploadedAt}] user-uploaded reference photos
   // Set once a person has checked the product details (scraped details start
   // unconfirmed; every script and render is held to them).
   productConfirmedAt DateTime?
@@ -237,54 +237,54 @@ model Project {
   opportunityScore Float?
   topSignals       Json?
 
-  brand             Brand?
-  competitors       Competitor[]
-  contentAssets     ContentAsset[]
-  insights          Insight[]
-  narrativePatterns NarrativePattern[]
-  sellingPoints     SellingPoint[]
-  angles            Angle[]
-  jobs              Job[]
-  scripts           Script[]
-  storyboards       Storyboard[]
-  creativeVariants  CreativeVariant[]
-  previewAssets     PreviewAsset[]
-  researchJobs      ResearchJob[]
-  audienceProfile   AudienceProfile?
-  deepAnalysis      DeepAnalysis?
-  campaignSelection CampaignSelection?
-  renderJobs        RenderJob[]
-  videoReferences   VideoReference[]
-  falVideoJobs      FalVideoJob[]
-  brandKit          BrandKit?
-  adTeardowns       AdTeardown[]
-  competitorRollups CompetitorRollup[]
-  libtvRuns         LibtvRun[]
-  adStudioRuns      AdStudioRun[]
-  adPerformance     AdPerformance[]
-  perfElementMaps   PerfElementMap[] // Performance Agent: ad name → creative elements
-  testPlan          Json? // test-plan strategist: structure, phases, kill/scale rules, round-1 variants (services/creative/test-plan.ts)
-  testPlanAt        DateTime?
+  brand               Brand?
+  competitors         Competitor[]
+  contentAssets       ContentAsset[]
+  insights            Insight[]
+  narrativePatterns   NarrativePattern[]
+  sellingPoints       SellingPoint[]
+  angles              Angle[]
+  jobs                Job[]
+  scripts             Script[]
+  storyboards         Storyboard[]
+  creativeVariants    CreativeVariant[]
+  previewAssets       PreviewAsset[]
+  researchJobs        ResearchJob[]
+  audienceProfile     AudienceProfile?
+  deepAnalysis        DeepAnalysis?
+  campaignSelection   CampaignSelection?
+  renderJobs          RenderJob[]
+  videoReferences     VideoReference[]
+  falVideoJobs        FalVideoJob[]
+  brandKit            BrandKit?
+  adTeardowns         AdTeardown[]
+  competitorRollups   CompetitorRollup[]
+  libtvRuns           LibtvRun[]
+  adStudioRuns        AdStudioRun[]
+  adPerformance       AdPerformance[]
+  perfElementMaps     PerfElementMap[] // Performance Agent: ad name → creative elements
+  testPlan            Json? // test-plan strategist: structure, phases, kill/scale rules, round-1 variants (services/creative/test-plan.ts)
+  testPlanAt          DateTime?
   // Spend guard (services/ops/budget-guard.ts): the owner-approved cap for paid model calls, and the
   // running total of the SpendEntry ledger (open reservations at their estimate).
-  budgetUsd         Float?
-  spentUsd          Float?
-  imageAdSets       Json? // static image ad sets, latest first (services/image-ads/generate.ts): [{createdAt, items[{template, format, w, h, url}], skipped}]
+  budgetUsd           Float?
+  spentUsd            Float?
+  imageAdSets         Json? // static image ad sets, latest first (services/image-ads/generate.ts): [{createdAt, items[{template, format, w, h, url}], skipped}]
   // Auto-iteration agent (services/performance/iterate.ts): the proposed next test round — keep / kill /
   // explore / re-test, batch spec and cost. A proposal only; rendering it needs an explicit approval.
-  nextRound         Json?
-  nextRoundAt       DateTime?
+  nextRound           Json?
+  nextRoundAt         DateTime?
   // Creative Agent (services/creative/creative-agent.ts): the last 10 states before each chat edit
   // [{at, message, summary, plan?, storyboard?: {id, frames}}], newest last — popped by undo.
   creativeEditHistory Json?
   // Media-plan strategy agent (services/strategy/media-plan.ts): cross-platform budget allocation,
   // forecasts, weekly pacing, creative requirements, measurement plan and scenarios.
-  mediaPlan         Json?
-  mediaPlanAt       DateTime?
+  mediaPlan           Json?
+  mediaPlanAt         DateTime?
   // Scheduled report delivery (services/reports/delivery.ts): {enabled, channel, target, schedule}.
   // Disabled by default; sending also needs REPORT_DELIVERY_SEND=on.
-  reportDelivery    Json?
-  shares       ProjectShare[]
+  reportDelivery      Json?
+  shares              ProjectShare[]
 }
 
 model Brand {
@@ -409,8 +409,8 @@ model ContentAsset {
   rankInOwner    Int? // Top-N rank within its competitor (or brand) after ranking
   // User curation: excluded ads are hidden and never analysed; pinned ads are
   // always torn down and shown first.
-  excluded       Boolean @default(false)
-  pinned         Boolean @default(false)
+  excluded       Boolean   @default(false)
+  pinned         Boolean   @default(false)
 
   dataSource DataSource @default(OFFICIAL_API)
   rawData    Json?
@@ -848,7 +848,7 @@ model LibtvRun {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  jobs LibtvJob[]
+  jobs              LibtvJob[]
   // Spend guard: the USD this run may spend on paid calls (images, clips, QC, LLM); null = no run cap.
   approvedBudgetUsd Float?
 
@@ -1233,24 +1233,24 @@ model AiUsage {
 /// versions by the A/B ad name (Brand_Script_20s_HookC[_4x5]). Drives the
 /// learning loop: which hook styles win on hook rate and CTR.
 model AdPerformance {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   platform    String // meta | tiktok | youtube | other
-  source      String   @default("csv") // csv | meta-api | tiktok-api
+  source      String    @default("csv") // csv | meta-api | tiktok-api
   adName      String
   hookStyle   String? // q | c | p — parsed from the ad name
   format      String? // 9x16 | 4x5 | 1x1 | 16x9 | 15s | 10s
   dateFrom    DateTime?
   dateTo      DateTime?
-  impressions Int      @default(0)
-  views3s     Int      @default(0) // 3-second plays (Meta) / 2-second views (TikTok)
-  thruplays   Int      @default(0) // ThruPlays / 6-second views
-  clicks      Int      @default(0)
-  spend       Float    @default(0)
-  conversions Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  impressions Int       @default(0)
+  views3s     Int       @default(0) // 3-second plays (Meta) / 2-second views (TikTok)
+  thruplays   Int       @default(0) // ThruPlays / 6-second views
+  clicks      Int       @default(0)
+  spend       Float     @default(0)
+  conversions Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   perfRevenue Float? // purchase conversion value, for ROAS (Performance Agent)
 
   @@unique([projectId, platform, adName, dateFrom])
@@ -1283,24 +1283,24 @@ model PerfElementMap {
 /// same category ("structure library"). Scripts follow the structure, never
 /// the source's words, footage or brand.
 model AdStructure {
-  id             String   @id @default(cuid())
-  sourceProjectId String?
-  name           String
-  category       String?
-  goalType       String?
-  sourceTitle    String
-  sourceOwner    String?
-  sourceUrl      String?
-  sourceViews    Int?
-  hookType       String?
-  hookText       String?
-  durationSec    Float?
-  beats          Json // [{startSec, endSec, role, visual, onScreenText}]
-  proofDevices   Json?
-  whyItWorks     String?  @db.Text
-  timesUsed      Int      @default(0)
-  sourceTeardownId String? @unique
-  createdAt      DateTime @default(now())
+  id               String   @id @default(cuid())
+  sourceProjectId  String?
+  name             String
+  category         String?
+  goalType         String?
+  sourceTitle      String
+  sourceOwner      String?
+  sourceUrl        String?
+  sourceViews      Int?
+  hookType         String?
+  hookText         String?
+  durationSec      Float?
+  beats            Json // [{startSec, endSec, role, visual, onScreenText}]
+  proofDevices     Json?
+  whyItWorks       String?  @db.Text
+  timesUsed        Int      @default(0)
+  sourceTeardownId String?  @unique
+  createdAt        DateTime @default(now())
 
   @@index([category])
 }
@@ -1415,7 +1415,7 @@ model ReportDelivery {
 /// sha256 and content type here); files up to ARTIFACT_BLOB_MAX_BYTES (2 MB) also keep their bytes in
 /// ArtifactBlob so they survive the loss of blob storage. No FK to Project: history outlives a deletion.
 model ProjectArtifact {
-  id           String    @id @default(cuid())
+  id           String        @id @default(cuid())
   projectId    String
   // brief | plan | storyboard | script | keyframe | clip | master | variant | locale | cutdown | export |
   // image-ad | cover | report | voiceover | subtitles | contact-sheet | preview | packshot | logo |
@@ -1433,7 +1433,7 @@ model ProjectArtifact {
   // sha256 identifying the slot's value: of the URL for a file row, else of the content / bytes. One row
   // per distinct value of a slot — recording the same value again is a no-op.
   fingerprint  String
-  url          String?   @db.Text
+  url          String?       @db.Text
   contentType  String?
   bytes        Int?
   // sha256 of the file's bytes, once they have been read (null for a file not downloaded yet).
@@ -1442,7 +1442,7 @@ model ProjectArtifact {
   meta         Json?
   // When the source says it was produced (row createdAt is when it was archived).
   producedAt   DateTime?
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime      @default(now())
   blob         ArtifactBlob?
 
   @@unique([projectId, sourceKey, version])
@@ -1482,4 +1482,100 @@ model ProjectShare {
   @@unique([projectId, email])
   @@index([userId])
   @@index([email])
+}
+
+// ─── Video Brain (design ad-studio-20261104/docs/VIDEO-BRAIN-ARCHITECTURE-20261117.md §6) ───────────────────────────
+// Mirror of the AppSetting brain:* rows, written by src/services/brain/tables.ts when BRAIN_TABLES=1. Queryable history
+// (one row per loop / check / incident / learning / event). The AppSetting rows stay the board's source.
+
+model BrainLoop {
+  projectId        String    @id
+  name             String
+  brand            String?
+  step             String
+  stage            String
+  status           String // active | waiting | blocked | idle-defect | done
+  agent            String
+  doing            String    @db.Text
+  nextAction       String    @db.Text
+  nextCheckpointAt DateTime
+  verifyHow        String    @db.Text
+  waitingOn        String?
+  idleSince        DateTime?
+  runs             Json
+  spendUsd7d       Float     @default(0)
+  lastActivityAt   DateTime?
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status])
+  @@index([nextCheckpointAt])
+}
+
+model BrainEvent {
+  id        String   @id @default(cuid())
+  at        DateTime
+  agent     String
+  kind      String // think | decide | call | check | learn | fix | wait
+  projectId String?
+  summary   String   @db.Text
+  ref       String?
+
+  @@unique([at, summary])
+  @@index([projectId, at])
+  @@index([kind, at])
+}
+
+model BrainLearning {
+  id         String   @id // L<sha1(scope|rule)>
+  at         DateTime
+  who        String
+  scope      String
+  rule       String   @db.Text
+  evidence   Json
+  status     String // candidate | confirmed | promoted | retired
+  promotedTo String?
+  updatedAt  DateTime @updatedAt
+
+  @@index([status, scope])
+}
+
+model BrainCheck {
+  runId      String    @id
+  projectId  String
+  at         DateTime
+  renderedAt DateTime?
+  pass       Boolean
+  fields     Json
+  critic     Json?
+
+  @@index([projectId, at])
+  @@index([pass, at])
+}
+
+model BrainIncident {
+  signature String   @id
+  kind      String
+  count     Int
+  firstSeen DateTime
+  lastSeen  DateTime
+  status    String // open | resolved | reopened
+  runbook   String   @db.Text
+  sample    String   @db.Text
+  runs      Json
+
+  @@index([status, lastSeen])
+}
+
+model CraftItem {
+  id        String   @id // type:sourceRef
+  type      String // template | hook | endcard | shot | prompt | music | sfx | structure
+  sourceRef String
+  tags      Json?
+  timesUsed Int      @default(0)
+  wins      Int      @default(0)
+  losses    Int      @default(0)
+  avgScore  Float?
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
 }
