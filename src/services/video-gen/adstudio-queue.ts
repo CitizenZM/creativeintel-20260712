@@ -237,6 +237,7 @@ export const visualModeOf = (input: unknown): VisualMode => { const m = (input a
 
 /** a failed run may be retried this many times (the worker resumes at the failed step, so a plan already paid for is reused) */
 export const MAX_RETRIES = 3;
+export const MAX_RETRIES_FREE = 6;
 /** retry a failed run: a run that reached the approval gate goes back to "awaiting_approval" (the user approves the video spend
  *  again, a fresh reservation); one that failed while planning goes back to "queued". Conditional on still being failed. */
 export async function retryRun(projectId: string, runId: string) {
@@ -244,7 +245,9 @@ export async function retryRun(projectId: string, runId: string) {
   if (!run || run.projectId !== projectId) throw new AdStudioError("Run not found", 404);
   if (run.status !== "failed") throw new AdStudioError(`Only a failed run can be retried (this one is ${run.status})`, 409);
   const input = (run.input ?? {}) as Record<string, unknown>; const retries = Number(input.retries ?? 0);
-  if (retries >= MAX_RETRIES) throw new AdStudioError(`Already retried ${retries} times - start a new batch instead`, 409);
+  // a $0 budget-fallback run (slides, no model spend) may be retried more often: a retry costs nothing
+  const cap = input.fallback === "budget" ? MAX_RETRIES_FREE : MAX_RETRIES;
+  if (retries >= cap) throw new AdStudioError(`Already retried ${retries} times - start a new batch instead`, 409);
   const gated = !!run.estimate && run.estUsd > 0;
   const { count } = await prisma.adStudioRun.updateMany({
     where: { id: runId, status: "failed" },

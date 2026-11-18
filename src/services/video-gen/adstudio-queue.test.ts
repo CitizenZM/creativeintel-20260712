@@ -177,3 +177,14 @@ describe("budget fallback (Barron 2026-11-18: no model budget -> slides; budget 
     expect((await claimNext("mac-1"))?.input).toMatchObject({ visualMode: "video" });
   });
 });
+
+describe("retry cap for $0 budget-fallback runs", () => {
+  it("allows up to 6 retries for fallback slides, still 3 for paid runs", async () => {
+    put({ id: "f1", status: "failed", engine: "seedance2fast", estUsd: 0, input: { visualMode: "slides", fallback: "budget", retries: 3 } });
+    await expect(retryRun("p1", "f1")).resolves.toMatchObject({ status: "queued" });
+    put({ id: "f2", status: "failed", engine: "seedance2fast", estUsd: 0, input: { visualMode: "slides", fallback: "budget", retries: 6 } });
+    await expect(retryRun("p1", "f2")).rejects.toThrow(/Already retried 6/);
+    put({ id: "v1", status: "failed", engine: "kling3", estUsd: 0, input: { visualMode: "video", retries: 3 } });
+    await expect(retryRun("p1", "v1")).rejects.toThrow(/Already retried 3/);
+  });
+});
