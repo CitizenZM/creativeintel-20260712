@@ -50,3 +50,8 @@
 - 完成: Prod video-mode smoke NOT run: needs real spend (~$1.7) and a signed-in approval; project test path is free-only
 - 验证: read scripts/smoke.ts and docs; RUN-REPORT updated; no run created
 - 下一步: Barron: OK ~$2 spend or provide test-user session; then run, ffprobe, frame grid
+
+### 2026-11-18 01:24 · claude-opus-5-5
+- 完成: Video Brain live: daemon co.celldigital.video-brain (5-min ticks, verified publish), /api/worker/brain, /api/brain, admin page /brain; local Ad Studio jobs, strategist (claude -p), auto-approve caps $3/$20, second checks, incidents, probes, fix patterns, learnings synced to 6 skills, daily Feishu DM digest 07:30 PT; PRs #168-#171 merged
+- 验证: node --test workers/video-brain 21/21; vitest 365 pass; tsc 0; build:check 0; live ticks ok:true verified:true; prod route wrong-token 401
+- 下一步: Barron: sign in and open creative.xark.io/brain; confirm product details on 7 projects stuck at Setup; first production AdStudioRun will exercise server auto-approve
