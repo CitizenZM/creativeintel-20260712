@@ -60,3 +60,8 @@
 - 完成: Video Brain round 2: live run overlay on /api/brain, Gemini second-family critic (≤10/day), acw batch (81 videos) in the loop, rule changes via reviewable PRs on ad-studio (pipeline reads tracked brain-rules.json), launchd python bug found by probes and fixed (ad-studio 7c87048), daily Feishu DM digest; PRs #172-#174 merged
 - 验证: workers 26/26; vitest brain 11; build:check 0; live ticks ok/verified, 15 loops, 39 checks, 6 critic reviews, 11/11 probes green
 - 下一步: Barron: sign in to creative.xark.io/brain; confirm product details on 7 Setup-stalled projects; review rules PRs when they appear; approve real Brain* tables if wanted
+
+### 2026-11-18 02:38 · claude-opus-5-5
+- 完成: Final acceptance: worker 'view' action (#175) proves the live /brain payload (15 loops, 39 checks, 87 events, 16 learnings, 11/11 probes, live overlay); that exact payload rendered in the board; prod approve/retry routes 404 on unknown run against the real DB; first digest DM sent and read back (verified)
+- 验证: curl view 200; board render of prod payload: 10 sections, no fetch error; sendVerifiedDM ok+verified
+- 下一步: Barron: approve or decline real Brain* tables (production migration); act on the 8 items in the digest
