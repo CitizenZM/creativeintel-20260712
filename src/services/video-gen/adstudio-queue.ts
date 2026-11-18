@@ -157,14 +157,14 @@ export async function createBatch(input: CreateBatchInput) {
   const isRef = !!refUrlOf(input.storyboardId);
   if (workflow === "storyboard" && isRef) throw new AdStudioError("Pick a storyboard or script for this workflow");
   if (workflow !== "storyboard" && !isRef) throw new AdStudioError("Pick a reference video for this workflow");
+  const visualMode = visualModeOf({ visualMode: input.visualMode });
+  // video mode needs footage the worker can generate: the stock-photo remix engine would bring product photos back
+  if (visualMode === "video" && input.engines.some((e) => e === FREE_ENGINE)) throw new AdStudioError("Video mode needs an AI video engine - the stock remix uses product photos. Pick an engine, or choose Slides / Mixed.");
   const variants = planVariants(input.hookTypes, input.engines);
   const base = await buildInput(input.projectId, input.storyboardId);
   const plan = await prisma.project.findUnique({ where: { id: input.projectId }, select: { campaignPlan: true } });
   const { opening, endCard } = pickOpeningEnding(input, plan?.campaignPlan);
   const branding = cleanBranding(input.branding);
-  const visualMode = visualModeOf({ visualMode: input.visualMode });
-  // video mode needs footage the worker can generate: the stock-photo remix engine would bring product photos back
-  if (visualMode === "video" && input.engines.length && input.engines.every((e) => e === FREE_ENGINE)) throw new AdStudioError("Video mode needs an AI video engine - the stock remix uses product photos. Pick an engine, or choose Slides / Mixed.");
   const extra = { workflow, opening, endCard, format: isFormat(input.format) ? input.format : "auto", branding, visualMode };
   const batchId = randomUUID();
   const baseOffer = input.offer ?? (base.brandKit?.offerText ? { text: base.brandKit.offerText } : undefined);

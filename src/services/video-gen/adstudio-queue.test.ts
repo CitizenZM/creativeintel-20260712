@@ -28,7 +28,7 @@ vi.mock("./adstudio-context", () => ({ loadXarkContext: vi.fn() }));
 vi.mock("./adstudio-results", () => ({ saveReviewInsight: vi.fn() }));
 vi.mock("@/services/creative/library", () => ({ END_CARDS: [], hookById: () => null }));
 
-import { approveRun, cancelRun, claimNext, reportDone, reportFailed, reportGate, reportProgress, requeueStale, retryRun, MAX_RETRIES, STALE_MS } from "./adstudio-queue";
+import { approveRun, cancelRun, claimNext, createBatch, visualModeOf, reportDone, reportFailed, reportGate, reportProgress, requeueStale, retryRun, MAX_RETRIES, STALE_MS } from "./adstudio-queue";
 
 const put = (r: Row) => db.runs.set(r.id, { input: {}, estimate: null, projectId: "p1", engine: "kling3", estUsd: 1, actualUsd: null, spendEntryId: null, cancelRequested: false, workerId: null, heartbeatAt: null, planFromRunId: null, createdAt: new Date(), approvedAt: null, ...r });
 
@@ -133,5 +133,22 @@ describe("retry", () => {
     await expect(retryRun("p1", "r2")).rejects.toThrow(/Already retried/);
     put({ id: "r3", status: "failed", projectId: "other" });
     await expect(retryRun("p1", "r3")).rejects.toThrow(/not found/);
+  });
+});
+
+describe("visual mode", () => {
+  it("defaults to video; only known modes pass", () => {
+    expect(visualModeOf({})).toBe("video"); expect(visualModeOf(null)).toBe("video");
+    expect(visualModeOf({ visualMode: "slides" })).toBe("slides"); expect(visualModeOf({ visualMode: "x" })).toBe("video");
+  });
+  it("a slides run finishes from planning without a gate and books its key frames", async () => {
+    put({ id: "r1", status: "planning", engine: "kling3", estUsd: 0, input: { visualMode: "slides" } });
+    await expect(reportDone("r1", { finalMp4Url: "u", actualUsd: 0.36 })).resolves.toMatchObject({ status: "completed" });
+    expect(db.entries).toEqual([expect.objectContaining({ runId: "r1", kind: "image", actualUsd: 0.36 })]);
+    put({ id: "r2", status: "planning", engine: "kling3", estUsd: 0, input: { visualMode: "video" } });
+    await expect(reportDone("r2", { finalMp4Url: "u" })).rejects.toThrow(/done from status/); // video still needs approval
+  });
+  it("video mode refuses the stock-photo remix engine before anything is created", async () => {
+    await expect(createBatch({ projectId: "p1", storyboardId: "sb", hookTypes: ["pain"], engines: ["auto", "remix"], visualMode: "video" })).rejects.toThrow(/Video mode needs an AI video engine/);
   });
 });
