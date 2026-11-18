@@ -1,9 +1,10 @@
-# Status - creativeintel-20260712 (updated 2026-10-17)
+# Status - creativeintel-20260712 (updated 2026-11-18)
 
 ## Purpose
 AI-driven creative operations: research competitor ads → extract insights → generate campaign briefs → write scripts → render storyboards → produce platform-ready video and image ads with automated cost control and multi-LLM routing.
 
 ## Current state
+- **2026-11-18:** Video Brain — supervisor loop over Xark Studio + Ad Studio. Mac daemon `workers/video-brain` (launchd `co.celldigital.video-brain`, every 5 min): observe → think (per-project step/stage/next checkpoint/legal wait) → auto-approve within $3/run $20/day → retry transient failures → second check of finished videos (ffprobe/LUFS/URL/cost) → incidents → probes → fix-pattern scan → learnings synced to the video skills + Ad Studio script prompt → publish. Admin page `/brain`. Storage: AppSetting `brain:*` (no schema change). Design: ad-studio-20261104/docs/VIDEO-BRAIN-ARCHITECTURE-20261117.md.
 - **2026-10-12:** Full bilingual README (EN + 简体中文), architecture diagram, stack, config, accounts/sharing, cost control, ops, security.
 - **2026-10-12:** Conflict-safe writes for storyboard frames, field status, brand kit, image-ad sets, research steps (lost-update fix).
 - **2026-10-12:** Spend guard on every text/vision model call; paid fallback off by default; cost estimation for image engines.

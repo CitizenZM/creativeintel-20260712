@@ -14,5 +14,6 @@ describe("stageForPath", () => {
   it("returns null off the pipeline", () => {
     expect(stageForPath("/projects/x/library", "x")).toBeNull();
     expect(stageForPath("/status", "x")).toBeNull();
+    expect(stageForPath("/brain", "x")).toBeNull();
   });
 });
