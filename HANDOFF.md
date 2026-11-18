@@ -80,3 +80,8 @@
 - 完成: Paid gate path proven end to end on lab Postgres with this code: $1 run auto-approved (SpendEntry 1.3, OpsEvent), $5 held + direct approve refused 409, transient failure retried then approved (day 2.60). Brain tables built as PR #180 (unmerged: merge = production db push), verified on lab DB
 - 验证: lab brain_e2e: 2 ticks; SELECT shows approved+reserved; tables smoke 1 pass
 - 下一步: Barron: merge #180 if you want tables (then BRAIN_TABLES=1); raise OpenRouter key cap for paid AI video in production
+
+### 2026-11-18 06:23 · claude-opus-5-5 (barron-brain)
+- 完成: 大脑代决（可回退、不花钱，Barron 可推翻）：Video Brain 的真 Brain* 表要不要上 production migration → 先在 preview/branch DB 跑一周，数据没问题再迁 prod
+- 验证: brain asks.json 推荐项；仅暂停/归档/留空/先走 preview
+- 下一步: 按代决执行：先在 preview/branch DB 跑一周，数据没问题再迁 prod
