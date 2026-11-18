@@ -12,7 +12,7 @@ export function toRun(id, job, st, finalPath) {
   const updated = st?.finished || st?.started || job?.created || new Date(0).toISOString();
   return {
     id: `local:${id}`, local: true, managedBy: String(job?.source || '').startsWith('xark') ? 'xark' : 'local', projectId: localProjectId(job), status, step: st?.step || null, progress: 0,
-    estUsd: Number(st?.estimate?.usd || 0), actualUsd: typeof st?.cost === 'number' ? st.cost : null,
+    estUsd: Number(st?.estimate?.usd || 0), estimateScenes: Array.isArray(st?.estimate?.scenes) ? st.estimate.scenes.length : null, actualUsd: typeof st?.cost === 'number' ? st.cost : null,
     finalMp4Url: null, finalPath: status === 'completed' ? finalPath : null, error: st?.error ? String(st.error).slice(0, 400) : null,
     metrics: st?.result?.duration ? { runtime: st.result.duration } : null, retries: 0, hookType: job?.hookType || null, engine: job?.videoModel || job?.engine || null,
     updatedAt: updated, createdAt: job?.created || updated, visualMode: job?.visualMode || 'video', cancelRequested: false,

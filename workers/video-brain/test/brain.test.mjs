@@ -301,3 +301,10 @@ test('harvested incident learnings never reach the script prompt (rules PR #1 pr
   assert.deepEqual(h.map((l) => l.scope).sort(), ['ops:human', 'ops:model']);
   assert.deepEqual(JSON.parse(rulesFile(h)).rules, []);
 });
+
+test('cost check allows the pre-gate key frames (false failures on 2026-11-18: +$0.03..$0.55 over the clip reservation)', () => {
+  const ok = compare(run({ estUsd: 1.38, actualUsd: 1.73, estimateScenes: 6 }), { file: { bytes: 1 }, probe: { duration: 20, width: 1080, height: 1920, vcodec: 'h264', acodec: 'aac' } });
+  assert.equal(ok.fields.find((f) => f.field === 'cost').pass, true);
+  const over = compare(run({ estUsd: 1, actualUsd: 3, estimateScenes: 4 }), { file: { bytes: 1 }, probe: { duration: 20, width: 1080, height: 1920, vcodec: 'h264', acodec: 'aac' } });
+  assert.equal(over.fields.find((f) => f.field === 'cost').pass, false);
+});
