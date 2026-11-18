@@ -1,3 +1,5 @@
+// tests never message Barron or call the model
+process.env.VIDEO_BRAIN_DIGEST = '0'; process.env.VIDEO_BRAIN_STRATEGIST = '0';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -185,4 +187,34 @@ test('local Ad Studio jobs: state mapping, final file, xark-managed jobs never a
 test('second check of a local file: missing file fails the file field', () => {
   const c = compare(run({ id: 'local:x', estUsd: 0 }), { file: { bytes: 0 }, probeError: 'No such file' });
   assert.equal(c.pass, false); assert.deepEqual(c.fields.map((f) => f.field), ['file', 'probe']);
+});
+
+test('digest: due once per Pacific day after 07:30; lists what waits on Barron', async () => {
+  const { digestDue, buildDigest } = await import('../lib/digest.mjs');
+  assert.equal(digestDue(null, Date.parse('2026-11-18T15:00:00Z')), null); // 07:00 PT
+  assert.equal(digestDue(null, Date.parse('2026-11-18T15:45:00Z')), '2026-11-18'); // 07:45 PT
+  assert.equal(digestDue('2026-11-18', Date.parse('2026-11-18T20:00:00Z')), null);
+  const text = buildDigest({ at: '2026-11-18T15:45:00Z', spend: { todayUsd: 1, capUsd: 20 }, loops: [{ name: 'TCL QM7L', status: 'idle-defect', step: 'setup', nextAction: 'Confirm product details', agent: 'Researcher' }, { name: 'Nike', status: 'idle-defect', step: 'insights', nextAction: 'Run teardown', agent: 'Strategist' }], probes: [{ name: 'openrouter balance', ok: false, detail: '$1 left' }], incidents: [], checks: [] }, [{ at: 'x', kind: 'decide' }]);
+  assert.match(text, /需要你（1）:\n- TCL QM7L: Confirm product details/);
+  assert.match(text, /openrouter balance: \$1 left/); assert.match(text, /Nike @insights/); assert.match(text, /creative\.xark\.io\/brain/);
+  assert.ok(!/@/.test(text.replace(/@\w+:/g, '').replace(/@insights|@setup/g, '')), 'no e-mail addresses');
+});
+
+test('tick wiring: digest sent once a day, failure reported as an event', async () => {
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-dig-'));
+  await writeFile(path.join(home, 'state.json'), JSON.stringify({ checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, probesAt: '2026-11-18T16:00:00.000Z', patternsAt: '2026-11-18T16:00:00.000Z', syncHash: 'x' }));
+  const { tick } = await import('../brain.mjs?digest');
+  const sent = [];
+  const notify = async (t) => { sent.push(t); return { ok: true }; };
+  let pub;
+  const call = async (a, b = {}) => a === 'observe' ? { status: 200, policy, learnings: [], spend: { autoApprovedTodayUsd: 0, byProject7d: {} }, perf: [], heartbeats: [], projects: [], stages: [], runs: [] } : a === 'publish' ? ((pub = b.snapshot), { status: 200, ok: true, verified: true }) : { status: 200 };
+  const at = Date.parse('2026-11-18T16:00:00Z');
+  await tick({ call, now: at, home, strategist: null, local: async () => ({ projects: [], stages: [], runs: [] }), notify });
+  await tick({ call, now: at + 300_000, home, strategist: null, local: async () => ({ projects: [], stages: [], runs: [] }), notify });
+  assert.equal(sent.length, 1);
+  const failHome = await mkdtemp(path.join(tmpdir(), 'vb-dig2-'));
+  await writeFile(path.join(failHome, 'state.json'), JSON.stringify({ checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, probesAt: '2026-11-18T16:00:00.000Z', patternsAt: '2026-11-18T16:00:00.000Z', syncHash: 'x' }));
+  await tick({ call, now: at, home: failHome, strategist: null, local: async () => ({ projects: [], stages: [], runs: [] }), notify: async () => ({ ok: false, reason: 'no creds' }) });
+  assert.ok(pub.events.some((e) => /digest NOT delivered: no creds/.test(e.summary)));
 });

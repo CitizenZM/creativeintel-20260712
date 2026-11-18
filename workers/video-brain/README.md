@@ -16,6 +16,7 @@ Dashboard: **creative.xark.io/brain** (admin only). Every 5 minutes (launchd `co
 | Probes (30 min) | OpenRouter balance (< $5 = fail: video calls 402), ffmpeg/ffprobe, faster-whisper, edge-tts, Ad Studio worker launchd + heartbeat, ego lite, OpenRouter `/videos/models` vs every routed model, disk, Ad Studio web | `lib/probes.mjs` |
 | Fix patterns (6 h) | searches Ad Studio, acw videos, motion repos, video-shotcraft and the video skills for patterns already fixed once (retired model routes, whisper initial_prompt, −16 LUFS masters, music fade-in at 0 s, `tee | head`) | `lib/patterns.mjs` |
 | Learn | seed (production rules) + harvested (recurring incidents, repeated check failures) + server edits → `LEARNINGS.md` marker block in each video skill (+ pointer in SKILL.md), `ad-studio/docs/LEARNINGS.md`, `ad-studio/data/brain-learnings.json` (confirmed rules go into the script prompt) | `lib/learn.mjs` |
+| Digest | once a day after 07:30 PT: Feishu DM to Barron's open_id only (Affiliate OS notifier: blocklist guard + read-back second check): what waits on him, failing probes, stalled projects the brain is pushing, actions of the last 24 h; `VIDEO_BRAIN_DIGEST=0` off | `lib/digest.mjs` |
 | Publish | `AppSetting brain:snapshot` (+ `brain:events`, `brain:learnings`), then re-read and compare (second check of its own write) | `src/services/brain/store.ts` |
 
 ```bash
