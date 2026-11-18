@@ -293,3 +293,11 @@ test('free candidates: only funds failures, no product made yet, not local/batch
   assert.deepEqual(freeCandidates([L('a')], runs, { a: new Date(NOW - H).toISOString() }, NOW), []);
   assert.deepEqual(freeCandidates([L('a', { runs: { active: 0, done: 1, failed: 1 } }), L('local:x', { runs: { active: 0, done: 0, failed: 0 } })], runs, {}, NOW), []);
 });
+
+test('harvested incident learnings never reach the script prompt (rules PR #1 proposed a 402 ops failure as a script rule)', async () => {
+  const { harvest } = await import('../lib/learn.mjs');
+  const { rulesFile } = await import('../lib/rules-pr.mjs');
+  const h = harvest({ incidents: { s: { signature: 'openrouter 402 balance', kind: 'human', count: 3, status: 'open', runbook: 'top up', runs: ['a', 'b', 'c'], lastSeen: new Date().toISOString() }, m: { signature: 'model gone', kind: 'model', count: 3, status: 'open', runbook: 'fallback', runs: ['x', 'y', 'z'], lastSeen: new Date().toISOString() } }, checks: {} });
+  assert.deepEqual(h.map((l) => l.scope).sort(), ['ops:human', 'ops:model']);
+  assert.deepEqual(JSON.parse(rulesFile(h)).rules, []);
+});
