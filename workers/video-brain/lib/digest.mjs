@@ -25,6 +25,8 @@ export function buildDigest(snap, events24h = []) {
   if (failedProbes.length) { lines.push('', '能力体检失败:'); for (const p of failedProbes) lines.push(`- ${p.name}: ${p.detail}`); }
   if (stalled.length) { lines.push('', `大脑在推进的停滞项目（${stalled.length}）:`); for (const l of stalled.slice(0, 6)) lines.push(`- ${l.name} @${l.step}: ${l.nextAction}`); }
   if (badChecks.length) lines.push('', `近 7 天成片二次复查未通过 ${badChecks.length} 条`);
+  if (snap.budget?.out) lines.push('', `模型预算用尽：新任务自动做成 $0 幻灯片视频（${snap.budget.detail || ''}）`);
+  if (!snap.budget?.out && snap.upgradable?.length) lines.push('', `可升级为纯视频（需你在 Studio 批准）: ${snap.upgradable.length} 条预算期间的幻灯片视频`);
   if (snap.rulesPr?.url) lines.push('', `待你审的规则 PR（合并=生效，关闭=否决）: ${snap.rulesPr.url}`);
   lines.push('', `过去 24 h 大脑执行 ${did.length} 个动作（批准/重试/修复）`, '详情: https://creative.xark.io/brain');
   return lines.join('\n');

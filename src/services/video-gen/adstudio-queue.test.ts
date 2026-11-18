@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const h = vi.hoisted(() => {
   type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-  const db = { runs: new Map<string, Row>(), entries: [] as Row[], ledger: { reserve: vi.fn(), settle: vi.fn() } };
+  const db = { runs: new Map<string, Row>(), entries: [] as Row[], ledger: { reserve: vi.fn(), settle: vi.fn() }, settings: new Map<string, unknown>() };
 const match = (r: Row, where: Row) => Object.entries(where).every(([k, v]) => {
   if (v && typeof v === "object" && "in" in v) return (v.in as unknown[]).includes(r[k]);
   if (v && typeof v === "object" && "lt" in v) return r[k] != null && r[k] < v.lt;
@@ -22,7 +22,7 @@ const runs = {
 });
 const { db, runs } = h;
 
-vi.mock("@/lib/db", () => ({ prisma: { adStudioRun: h.runs, spendEntry: { create: async ({ data }: Row) => { h.db.entries.push(data); return data; } } } }));
+vi.mock("@/lib/db", () => ({ prisma: { adStudioRun: h.runs, appSetting: { findUnique: async ({ where }: Row) => (h.db.settings.has(where.key) ? { value: h.db.settings.get(where.key) } : null) }, spendEntry: { create: async ({ data }: Row) => { h.db.entries.push(data); return data; } } } }));
 vi.mock("@/services/ops/budget-guard", () => ({ spendLedger: async () => h.db.ledger }));
 vi.mock("./adstudio-context", () => ({ loadXarkContext: vi.fn() }));
 vi.mock("./adstudio-results", () => ({ saveReviewInsight: vi.fn() }));
@@ -33,7 +33,7 @@ import { approveRun, cancelRun, claimNext, createBatch, visualModeOf, reportDone
 const put = (r: Row) => db.runs.set(r.id, { input: {}, estimate: null, projectId: "p1", engine: "kling3", estUsd: 1, actualUsd: null, spendEntryId: null, cancelRequested: false, workerId: null, heartbeatAt: null, planFromRunId: null, createdAt: new Date(), approvedAt: null, ...r });
 
 beforeEach(() => {
-  db.runs.clear(); db.entries.length = 0; vi.clearAllMocks();
+  db.runs.clear(); db.entries.length = 0; db.settings.clear(); vi.clearAllMocks();
   db.ledger.reserve.mockResolvedValue({ id: "sp1" });
 });
 
@@ -150,5 +150,30 @@ describe("visual mode", () => {
   });
   it("video mode refuses the stock-photo remix engine before anything is created", async () => {
     await expect(createBatch({ projectId: "p1", storyboardId: "sb", hookTypes: ["pain"], engines: ["auto", "remix"], visualMode: "video" })).rejects.toThrow(/Video mode needs an AI video engine/);
+  });
+});
+
+describe("budget fallback (Barron 2026-11-18: no model budget -> slides; budget back -> video)", () => {
+  it("probe reports the cap: a queued video run is planned as $0 slides and marked fallback budget; budget back: video", async () => {
+    db.settings.set("brain:budget", { out: true, detail: "key cap $0.50 left", at: new Date().toISOString() });
+    put({ id: "q1", status: "queued", engine: "seedance2fast", input: { visualMode: "video" } });
+    const c = await claimNext("mac-1");
+    expect(c?.input).toMatchObject({ visualMode: "slides", fallback: "budget", zeroCost: true, requestedVisualMode: "video" });
+    expect(db.runs.get("q1")!.input).toMatchObject({ visualMode: "slides", fallback: "budget" }); // the record shows why
+    db.settings.set("brain:budget", { out: false, at: new Date().toISOString() });
+    put({ id: "q2", status: "queued", engine: "seedance2fast", input: { visualMode: "video" }, createdAt: new Date(Date.now() + 1) });
+    const d = await claimNext("mac-1");
+    expect(d?.runId).toBe("q2");
+    expect(d?.input).toMatchObject({ visualMode: "video" });
+    expect((d?.input as Row).fallback).toBeUndefined();
+  });
+  it("is off when brain:policy.budgetFallback is false, ignores a stale state, and leaves the free remix alone", async () => {
+    const { applyBudgetMode, budgetOut } = await import("./adstudio-budget");
+    expect(budgetOut({ out: true, at: new Date(Date.now() - 7 * 3_600_000).toISOString() })).toBe(false);
+    expect(applyBudgetMode({ visualMode: "video" }, true, true, "remix").changed).toBe(false);
+    db.settings.set("brain:budget", { out: true, at: new Date().toISOString() });
+    db.settings.set("brain:policy", { budgetFallback: false });
+    put({ id: "q3", status: "queued", engine: "kling3", input: { visualMode: "video" } });
+    expect((await claimNext("mac-1"))?.input).toMatchObject({ visualMode: "video" });
   });
 });

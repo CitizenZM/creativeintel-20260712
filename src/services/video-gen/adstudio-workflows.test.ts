@@ -49,7 +49,7 @@ describe("opening (H01–H35) and ending (E01–E12)", () => {
   });
   it("wiring: batch stores workflow/opening/endCard/format, worker route serves end cards, panel posts the picks, free runs can finish from planning", () => {
     const q = readFileSync("src/services/video-gen/adstudio-queue.ts", "utf8");
-    expect(q).toMatch(/input: json\(\{ \.\.\.base, \.\.\.extra,/);
+    expect(q).toMatch(/input: json\((applyBudgetMode\()?\{ \.\.\.base, \.\.\.extra,/);
     expect(q).toMatch(/const freeRun = r\.engine === FREE_ENGINE \|\| visualModeOf\(r\.input\) === "slides";/); expect(q).toMatch(/r\.status === "planning" && freeRun/); // only free runs (remix or slides), not any run with no estimate yet
     expect(readFileSync("src/app/api/worker/adstudio/route.ts", "utf8")).toMatch(/case "endcard":\s+return NextResponse\.json\(await renderRunEndCard/);
     expect(readFileSync("src/components/studio/adstudio-panel.tsx", "utf8")).toMatch(/storyboardId: activeId, workflow, hookTypes: pickHooks, engines: pickEngines, notes, openingId, endCardId, endCardTheme: endTheme, format/);

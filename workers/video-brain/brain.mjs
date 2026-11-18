@@ -16,7 +16,7 @@ import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { think, approvals, retries, batchCandidates, fundsRetries, freeCandidates } from './lib/think.mjs';
+import { think, approvals, retries, batchCandidates, fundsRetries } from './lib/think.mjs';
 import { aggregate } from './lib/incidents.mjs';
 import { secondCheck } from './lib/verify.mjs';
 import { runProbes } from './lib/probes.mjs';
@@ -132,22 +132,27 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   state.incidents = aggregate(state.incidents, obs.runs.filter((r) => r.status === 'failed'), now);
   if (Object.keys(state.incidents).length > before) events.push(ev('Doctor', 'think', `${Object.keys(state.incidents).length - before} new incident signature(s)`));
 
-  // funds back (balance probe green again after failing) → retry what failed for lack of funds
-  const fundsNow = !(state.probes || []).some((p) => p.name === 'openrouter balance' && !p.ok);
-  if (fundsNow && state.fundsWereOut && !dryRun) {
-    for (const r of fundsRetries(obs.runs, now)) {
-      const out = await call('retry', { runId: r.id, why: 'brain: provider balance restored' });
-      events.push(ev('Producer', 'call', out.ok ? `funds restored: retried run ${r.id.slice(-6)} → ${out.status}` : `retry after funds refused ${r.id.slice(-6)}: ${out.error}`, r.projectId, r.id));
-    }
-  }
-  state.fundsWereOut = !fundsNow;
-
   // PROBES + PATTERNS (slower cadence)
   if (!state.probesAt || now - Date.parse(state.probesAt) > PROBE_EVERY_MS) {
     const prev = Object.fromEntries((state.probes || []).map((p) => [p.name, p.ok]));
     state.probes = await runProbes({ adStudioRoot: ROOT, obs });
     state.probesAt = new Date(now).toISOString();
     for (const p of state.probes) if (prev[p.name] !== p.ok) events.push(ev('Doctor', 'check', `capability ${p.name}: ${p.ok ? 'OK' : 'FAIL'} — ${p.detail}`));
+  }
+
+  // BUDGET (Barron 2026-11-18): the platform plans every new/queued run as $0 slides while the model budget is out, video when back
+  const balance = (state.probes || []).find((p) => p.name === 'openrouter balance');
+  const budgetOut = !!balance && !balance.ok;
+  if (!dryRun) {
+    const r = await call('budget', { out: budgetOut, detail: balance?.detail || '' });
+    if (state.budgetOut !== budgetOut) events.push(ev('Producer', 'decide', budgetOut ? `model budget out (${balance?.detail}): new and queued runs are planned as $0 slides (fallback: budget)` : 'model budget back: new runs are video again; slides made during the outage are listed as "can upgrade to video"'));
+    if (r.ok) state.budgetOut = budgetOut;
+  }
+  // runs that failed only for lack of funds are retried once: while the budget is out they come back as $0 slides, after it as video
+  for (const r of dryRun ? [] : fundsRetries(obs.runs, now)) {
+    const key = `fundsretry:${r.id}`; if (state.acted[key]) continue; state.acted[key] = 'tried';
+    const out = await call('retry', { runId: r.id, why: budgetOut ? 'brain: model budget out - re-plan as $0 slides' : 'brain: model budget restored' });
+    events.push(ev('Producer', 'call', out.ok ? `retried run ${r.id.slice(-6)} that failed for lack of funds → ${out.status}${budgetOut ? ' (will be $0 slides)' : ''}` : `retry refused ${r.id.slice(-6)}: ${out.error}`, r.projectId, r.id));
   }
   if (!state.patternsAt || now - Date.parse(state.patternsAt) > PATTERN_EVERY_MS) {
     state.patterns = await scanRoots(PATTERN_ROOTS);
@@ -192,17 +197,15 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   }
   // ACT 3 — push: a ready storyboard with nothing produced gets one Ad Studio variant (it stops at the spend gate)
   state.batched = state.batched || {};
-  const noFunds = (state.probes || []).find((p) => p.name === 'openrouter balance' && !p.ok);
-  if (noFunds) events.push(ev('Producer', 'wait', `no new paid work: ${noFunds.detail}; free stock-remix videos only`));
-  state.batchedFree = state.batchedFree || {};
-  const pool = noFunds ? state.batchedFree : state.batched;
-  const cands = noFunds ? freeCandidates(t.loops, obs.runs, pool, now) : batchCandidates(t.loops, pool, now);
-  for (const l of cands) {
-    pool[l.projectId] = new Date(now).toISOString();
+  for (const l of batchCandidates(t.loops, state.batched, now)) {
+    state.batched[l.projectId] = new Date(now).toISOString();
     if (dryRun) { events.push(ev('Producer', 'decide', `[dry-run] would start an Ad Studio batch for ${l.name}`, l.projectId)); continue; }
-    const r = await call('batch', { projectId: l.projectId, why: noFunds ? 'storyboard ready; paid key capped, free stock remix meanwhile' : 'storyboard ready, nothing produced', ...(noFunds ? { mode: 'free' } : {}) });
-    events.push(ev('Producer', 'call', r.ok ? `started an Ad Studio batch for ${l.name} (${noFunds ? 'free stock remix, no spend' : '1 variant, Seedance 2.0 Fast; spend waits at the gate'}) · re-read: queued` : `batch not started for ${l.name}: ${r.reason || r.error || r.status}`, l.projectId, r.runs?.[0]?.id || null));
+    const r = await call('batch', { projectId: l.projectId, why: 'storyboard ready, nothing produced' });
+    events.push(ev('Producer', 'call', r.ok ? `started an Ad Studio batch for ${l.name} (${budgetOut ? '$0 slides: model budget out' : '1 variant, Seedance 2.0 Fast; spend waits at the gate'}) · re-read: queued` : `batch not started for ${l.name}: ${r.reason || r.error || r.status}`, l.projectId, r.runs?.[0]?.id || null));
   }
+  // slides made during a budget outage: "can upgrade to video" (a paid re-run needs approval; never automatic)
+  const upgradable = obs.runs.filter((r) => !r.local && r.status === 'completed' && r.fallback === 'budget');
+  for (const r of upgradable) t.recovery.push({ id: r.id, projectId: r.projectId, kind: 'followup', title: `可升级为视频 (budget-fallback slides) · ${r.hookType || ''}`, status: budgetOut ? 'queued' : 'gated', step: null, progress: 100, estUsd: 0, actualUsd: r.actualUsd ?? null, gates: [{ gate: 'upgrade to video', pass: !budgetOut, detail: budgetOut ? 'model budget still out' : 'budget back: approve a video re-run in Studio' }], agent: 'Barron', updatedAt: new Date(r.updatedAt).toISOString() });
   t.loops = applyStrategy(t.loops, Object.fromEntries(Object.entries(state.strategy).filter(([, m]) => m.out)), now);
   for (const l of t.loops) {
     const k = `${l.step}|${l.stage}|${l.status}`;
@@ -221,7 +224,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     checks: Object.values(state.checks).sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 40),
     recovery: t.recovery,
     incidents: Object.values(state.incidents).sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : -1)).slice(0, 40),
-    probes: state.probes, patterns: state.patterns.slice(0, 100), learnings, events, rulesPr: state.rulesPr?.url ? state.rulesPr : null,
+    probes: state.probes, patterns: state.patterns.slice(0, 100), learnings, events, rulesPr: state.rulesPr?.url ? state.rulesPr : null, budget: { out: budgetOut, detail: balance?.detail || null }, upgradable: upgradable.map((r) => ({ runId: r.id, projectId: r.projectId })),
   };
   // prune local state
   for (const k of Object.keys(state.acted)) if (/^retry:/.test(k) && !k.endsWith(new Date(now).toISOString().slice(0, 10))) delete state.acted[k];
