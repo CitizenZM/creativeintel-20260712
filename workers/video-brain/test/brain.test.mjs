@@ -102,8 +102,9 @@ test('probes: routed models parsed from the real generate.mjs; missing detection
 });
 
 test('learn: harvest recurring incidents + repeated check failures; marker block is idempotent', async () => {
-  const h = harvest({ incidents: { s: { signature: 's', kind: 'model', count: 3, status: 'open', runbook: 'rb', runs: ['a', 'b', 'c'] } }, checks: { a: { runId: 'a', fields: [{ field: 'loudness', pass: false }] }, b: { runId: 'b', fields: [{ field: 'loudness', pass: false }] } } });
+  const h = harvest({ incidents: { s: { signature: 's', kind: 'model', count: 3, status: 'open', runbook: 'rb', runs: ['a', 'b', 'c'], lastSeen: new Date().toISOString() }, stale: { signature: 'z', kind: 'code', count: 5, status: 'open', runbook: 'rb', runs: ['x'], lastSeen: '2026-01-01T00:00:00.000Z' } }, checks: { a: { runId: 'a', renderedAt: '2026-11-18T01:00:00.000Z', fields: [{ field: 'loudness', pass: false }] }, b: { runId: 'b', fields: [{ field: 'loudness', pass: false }] }, old1: { runId: 'old1', renderedAt: '2026-11-05T00:00:00.000Z', fields: [{ field: 'duration', pass: false }] }, old2: { runId: 'old2', renderedAt: '2026-11-06T00:00:00.000Z', fields: [{ field: 'duration', pass: false }] } } });
   assert.equal(h.length, 2); assert.equal(h[0].status, 'confirmed');
+  assert.ok(!h.some((l) => /duration/.test(l.rule)), 'videos from before the pipeline baseline are not learned from');
   const dir = await mkdtemp(path.join(tmpdir(), 'vb-'));
   const f = path.join(dir, 'L.md'); await writeFile(f, '# keep me\n');
   const block = renderBlock([...SEED, ...h], 'T');
@@ -166,4 +167,22 @@ test('strategist: picks stalled/measuring projects once a day, capped; applies o
   assert.equal(out.nextAction, 'n'); assert.equal(out.agent, 'Director'); assert.equal(Date.parse(out.nextCheckpointAt), NOW + 5 * H);
   assert.equal(apply([{ projectId: 'a', nextAction: 'x' }], memo, NOW + 30 * H)[0].nextAction, 'x');
   assert.match(promptFor({ projectId: 'a', name: 'P', step: 'insights', status: 'idle-defect', nextAction: 'x' }, { stages: [], runs: [], perf: [] }, []), /Project: P/);
+});
+
+test('local Ad Studio jobs: state mapping, final file, xark-managed jobs never auto-approved', async () => {
+  const { toRun, localProjectId } = await import('../lib/local.mjs');
+  const done = toRun('j1', { projectId: '20261105-ms1z7', hookType: 'pain', created: ago(50) }, { state: 'done', finished: ago(48), cost: 2.2, estimate: { usd: 1.9 }, result: { duration: 21.4 } }, '/x/final.mp4');
+  assert.equal(done.status, 'completed'); assert.equal(done.finalPath, '/x/final.mp4'); assert.equal(done.projectId, 'local:20261105-ms1z7'); assert.equal(done.metrics.runtime, 21.4);
+  const xk = toRun('xk-1', { source: 'xark', projectId: 'xark' }, { state: 'approval', started: ago(1), estimate: { usd: 1 } }, null);
+  assert.equal(xk.status, 'awaiting_approval'); assert.equal(xk.managedBy, 'xark'); assert.equal(localProjectId({ source: 'xark' }), 'local:xark-lab');
+  const own = toRun('j2', { projectId: 'p' }, { state: 'approval', started: ago(1), estimate: { usd: 1 } }, null);
+  assert.deepEqual(approvals([xk, own], policy, 0, NOW).map((a) => a.ok), [false, true]);
+  assert.match(approvals([xk], policy, 0, NOW)[0].reason, /Xark Studio/);
+  assert.equal(retries([{ ...toRun('j3', {}, { state: 'failed', error: 'fetch failed', finished: ago(1) }, null) }], NOW).length, 0);
+  assert.equal(classify('OpenRouter 402: This request requires at least $1.00 in balance').kind, 'human');
+});
+
+test('second check of a local file: missing file fails the file field', () => {
+  const c = compare(run({ id: 'local:x', estUsd: 0 }), { file: { bytes: 0 }, probeError: 'No such file' });
+  assert.equal(c.pass, false); assert.deepEqual(c.fields.map((f) => f.field), ['file', 'probe']);
 });

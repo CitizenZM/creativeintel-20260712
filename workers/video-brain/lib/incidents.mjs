@@ -16,7 +16,7 @@ export function signatureOf(error) {
 
 const RUNBOOKS = [
   { re: /filter|safety|moderat|content policy/, kind: 'model', runbook: 'provider safety filter: Director rewrites the scene prompt; no blind retry', retry: false },
-  { re: /budget|spend cap|allowance|insufficient|credit/, kind: 'human', runbook: 'budget/credit: needs Barron or a cap change', retry: false },
+  { re: /budget|spend cap|allowance|insufficient|credit|balance|\b402\b/, kind: 'human', runbook: 'budget/credit/provider balance: top up (OpenRouter credits) or raise the cap - Barron', retry: false },
   { re: /product page url|setup first|no frames|storyboard not found|project not found/, kind: 'data', runbook: 'project data missing: complete the Setup/Studio step', retry: false },
   { re: /cancel/, kind: 'human', runbook: 'cancelled by a person: no action', retry: false },
   { re: /not found|no endpoints|unknown model|retired|deprecated|unavailable/, kind: 'model', runbook: 'model gone: pipeline falls back (generate.mjs GONE); probe flags the route to update; brain retries once', retry: true },

@@ -23,6 +23,7 @@ import { runProbes } from './lib/probes.mjs';
 import { scanRoots } from './lib/patterns.mjs';
 import { SEED, harvest, idOf, syncAll } from './lib/learn.mjs';
 import { pick, promptFor, runClaude, apply as applyStrategy } from './lib/strategist.mjs';
+import { readLocal } from './lib/local.mjs';
 
 const argv = process.argv.slice(2);
 const flag = (k) => argv.includes(`--${k}`);
@@ -46,13 +47,26 @@ export function api(appUrl, token) {
 const readJSON = async (f, d) => { try { return JSON.parse(await readFile(f, 'utf8')); } catch { return d; } };
 const ev = (agent, kind, summary, projectId = null, ref = null) => ({ at: new Date().toISOString(), agent, kind, summary, projectId, ref });
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude } = {}) {
+/** approve a local Ad Studio job at its spend gate (same caps; the local API books it in data/spend.json) */
+export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'http://127.0.0.1:5310') {
+  const r = await fetch(`${base}/api/jobs/${encodeURIComponent(jobId)}/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ approve: true }), signal: AbortSignal.timeout(30_000) });
+  const back = await fetch(`${base}/api/jobs/${encodeURIComponent(jobId)}`, { signal: AbortSignal.timeout(30_000) }).then((x) => x.json()).catch(() => null);
+  return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
+}
+
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = () => readLocal(ROOT), approveLocal = localApprove } = {}) {
   await mkdir(home, { recursive: true });
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
   const events = [];
   const obs = await call('observe');
   if (obs.status !== 200 || !Array.isArray(obs.projects)) throw new Error(`observe: HTTP ${obs.status} ${obs.error || ''}`);
+  // local Ad Studio jobs join the observation (Xark-managed xk-* jobs are grouped as the lab project)
+  const loc = await local().catch((e) => { log(`local jobs: ${e.message}`); return { projects: [], stages: [], runs: [] }; });
+  obs.projects = [...obs.projects, ...loc.projects]; obs.stages = [...obs.stages, ...loc.stages]; obs.runs = [...obs.runs, ...loc.runs];
+  const today = new Date(now).toISOString().slice(0, 10);
+  state.localApproved = state.localApproved?.day === today ? state.localApproved : { day: today, usd: 0 };
+  obs.spend.autoApprovedTodayUsd = (obs.spend.autoApprovedTodayUsd || 0) + state.localApproved.usd;
 
   // ACT 1 — gate: approve within the autonomy caps (server re-checks); never wait silently on our own gate
   let approvedNow = 0;
@@ -61,7 +75,9 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     if (state.acted[key] === 'approved') continue;
     if (!a.ok) { if (!state.acted[key]) { events.push(ev('Producer', 'wait', `run ${a.run.id.slice(-6)} held at the gate: ${a.reason}`, a.run.projectId, a.run.id)); state.acted[key] = 'held'; } continue; }
     if (dryRun) { events.push(ev('Producer', 'decide', `[dry-run] would approve ${a.run.id.slice(-6)} ($${a.reserveUsd})`, a.run.projectId, a.run.id)); continue; }
-    const r = await call('approve', { runId: a.run.id, why: `brain: reservation $${a.reserveUsd} within caps` });
+    const r = a.run.local ? await approveLocal(a.run.id.replace(/^local:/, '')).catch((e) => ({ ok: false, error: e.message })) : await call('approve', { runId: a.run.id, why: `brain: reservation $${a.reserveUsd} within caps` });
+    if (r.ok && a.run.local) state.localApproved.usd += a.reserveUsd;
+    if (r.ok) obs.spend.autoApprovedTodayUsd = (obs.spend.autoApprovedTodayUsd || 0) + a.reserveUsd; // this tick's approvals count in the snapshot
     events.push(ev('Producer', 'decide', r.ok ? `auto-approved run ${a.run.id.slice(-6)} · reserve $${a.reserveUsd} · re-read: approved` : `approve refused for ${a.run.id.slice(-6)}: ${r.reason || r.error}`, a.run.projectId, a.run.id));
     if (r.ok) approvedNow += 1;
     state.acted[key] = r.ok ? 'approved' : 'refused';
@@ -77,7 +93,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   }
 
   // VERIFY — second check of finished videos (a few per tick, newest first)
-  const toCheck = obs.runs.filter((r) => r.status === 'completed' && r.finalMp4Url && !state.checks[r.id]).slice(0, CHECKS_PER_TICK);
+  const toCheck = obs.runs.filter((r) => r.status === 'completed' && (r.finalMp4Url || r.finalPath) && !state.checks[r.id]).slice(0, CHECKS_PER_TICK);
   for (const r of toCheck) {
     try {
       const c = await secondCheck(r);
