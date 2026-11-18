@@ -35,6 +35,11 @@ async function openrouterVideo(adStudioRoot, key) {
   } catch (e) { return bad('openrouter video models', e.message); }
 }
 
+/** python the Ad Studio pipeline resolves (falls back to python3 if the pipeline predates the resolver) */
+export async function pipelinePython(adStudioRoot) {
+  try { const m = await import(path.join(adStudioRoot, 'pipeline', 'lib.mjs')); return m.PYTHON || 'python3'; } catch { return 'python3'; }
+}
+
 export const MIN_CREDITS_USD = 5;
 async function openrouterCredits(key) {
   if (!key) return bad('openrouter balance', 'no key');
@@ -55,14 +60,15 @@ export async function runProbes({ adStudioRoot, obs }) {
   const res = await Promise.all([
     cmd('ffmpeg', 'ffmpeg', ['-version'], /ffmpeg version/),
     cmd('ffprobe', 'ffprobe', ['-version'], /ffprobe version/),
-    cmd('whisper (word timing)', 'python3', ['-c', 'import faster_whisper; print("faster-whisper ok")'], /ok/),
-    cmd('edge-tts (voice)', 'python3', ['-c', 'import edge_tts; print("edge-tts ok")'], /ok/),
+    // the interpreter the pipeline itself resolves (pipeline/lib.mjs PYTHON) under this process's PATH = the worker's PATH
+    pipelinePython(adStudioRoot).then((py) => cmd('whisper (word timing)', py, ['-c', 'import faster_whisper; print("faster-whisper ok")'], /ok/)),
+    pipelinePython(adStudioRoot).then((py) => cmd('edge-tts (voice)', py, ['-c', 'import edge_tts; print("edge-tts ok")'], /ok/)),
     cmd('adstudio worker (launchd)', 'launchctl', ['list', 'co.celldigital.adstudio-worker'], /"PID"/),
     cmd('ego lite (reference fetch)', 'zsh', ['-lc', 'command -v ego-browser && echo found'], /found/),
     openrouterVideo(adStudioRoot, key),
     openrouterCredits(key),
     (async () => { try { const s = await statfs(adStudioRoot); const gb = (s.bavail * s.bsize) / 1e9; return gb > 20 ? ok('disk', `${gb.toFixed(0)} GB free`) : bad('disk', `${gb.toFixed(1)} GB free (< 20)`); } catch (e) { return bad('disk', e.message); } })(),
-    (async () => { try { const r = await fetch('http://127.0.0.1:5310/', { signal: AbortSignal.timeout(8000) }); return r.status < 500 ? ok('ad-studio web :5310', `HTTP ${r.status}`) : bad('ad-studio web :5310', `HTTP ${r.status}`); } catch (e) { return bad('ad-studio web :5310', e.message); } })(),
+    (async () => { try { const r = await fetch('http://127.0.0.1:5310/', { signal: AbortSignal.timeout(25_000) }); return r.status < 500 ? ok('ad-studio web :5310', `HTTP ${r.status}`) : bad('ad-studio web :5310', `HTTP ${r.status}`); } catch (e) { return bad('ad-studio web :5310', e.message); } })(),
   ]);
   const hb = (obs.heartbeats || []).filter((h) => /adstudio/i.test(h.workerId)).sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))[0];
   const age = hb ? (Date.now() - Date.parse(hb.lastSeenAt)) / 60000 : null;
