@@ -61,3 +61,16 @@ test('tick wiring: budget back → budget posted as in, 402 failures retried onc
   assert.deepEqual(budgets, [false, false]);
   assert.equal(snap.upgradable.length, 1); assert.equal(snap.recovery.find((t) => t.id === 'slides1').gates[0].pass, true);
 });
+
+test('tick wiring: budget out → a $0 budget-fallback slides run that failed transiently (render browser timeout) is retried; a paid one is not', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-slidesretry-'));
+  const now = Date.now();
+  await writeFile(path.join(home, 'state.json'), JSON.stringify({ checks: {}, incidents: {}, probes: [{ name: 'openrouter balance', ok: false, detail: '$0.50' }], patterns: [], loopStatus: {}, acted: {}, probesAt: new Date(now).toISOString(), patternsAt: new Date(now).toISOString(), syncHash: 'x', batched: { p9: new Date(now).toISOString() } }));
+  const { tick } = await import('../brain.mjs?slidesretry');
+  const err = 'remotion exited 1: TimeoutError: Timed out after 25000 ms while trying to connect to the browser!';
+  const runs = [{ id: 'slides', projectId: 'p9', status: 'failed', fallback: 'budget', visualMode: 'slides', error: err, retries: 1, updatedAt: new Date(now - 600_000).toISOString(), estUsd: 0 }, { id: 'paid', projectId: 'p9', status: 'failed', fallback: null, error: err, retries: 0, updatedAt: new Date(now - 600_000).toISOString(), estUsd: 1 }];
+  const retried = [];
+  const call = async (a, b = {}) => { if (a === 'retry') retried.push(b.runId); if (a === 'observe') return { status: 200, policy: { autoApprove: true, maxRunUsd: 3, maxDayUsd: 20, maxRunAgeH: 24 }, learnings: [], spend: { autoApprovedTodayUsd: 0, byProject7d: {} }, perf: [], heartbeats: [], projects: [], stages: [], runs }; if (a === 'publish') return { status: 200, ok: true, verified: true }; return { status: 200, ok: true }; };
+  await tick({ call, now, home, local: async () => ({ projects: [], stages: [], runs: [] }) });
+  assert.deepEqual(retried, ['slides']);
+});

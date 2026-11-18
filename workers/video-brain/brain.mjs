@@ -97,7 +97,8 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   }
   // ACT 2 — recover: retry transient failures once per run per day
   const fundsOk = !(state.probes || []).some((p) => p.name === 'openrouter balance' && !p.ok);
-  for (const r of fundsOk ? retries(obs.runs, now) : []) {
+  // while the budget is out only $0 work is retried: budget-fallback slides (no model spend)
+  for (const r of retries(obs.runs, now).filter((x) => fundsOk || x.fallback === 'budget')) {
     const key = `retry:${r.id}:${new Date(now).toISOString().slice(0, 10)}`;
     if (state.acted[key]) continue;
     state.acted[key] = 'tried';
