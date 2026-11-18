@@ -65,6 +65,7 @@ export function jobOf(run) {
     productUrl: p.productUrl, siteUrl: br.linkUrl || p.brandUrl || kit.landingUrl || '', logoUrl: br.logoUrl || undefined, productImages: br.productImageUrl ? [br.productImageUrl] : undefined, brandName: p.brandName, goal: p.campaignGoal || 'drive purchases', notes: i.notes || '',
     offerText: o.text || kit.offerText || '', offerWas: o.was ?? undefined, offerNow: o.now ?? undefined, offerCode: o.code || '',
     visualMode: ['video', 'slides', 'mixed'].includes(i.visualMode) ? i.visualMode : 'video', // asked in Studio before generation
+    ...(i.zeroCost ? { zeroCost: true } : {}), ...(i.fallback ? { fallback: i.fallback } : {}), // budget fallback: $0 slides (adstudio-budget.ts)
     voice: 'auto', music: 'auto', format: i.format || 'auto', engine: remix ? 'remix' : 'generate', videoModel: remix ? undefined : run.engine, budget: BUDGET, approved: false,
     audioProfile: i.soundProfile, pitch: true, maxScenes: 6, created: new Date().toISOString(), ...opening,
   };

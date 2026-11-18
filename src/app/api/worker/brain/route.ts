@@ -8,6 +8,7 @@
  *   { action: "approve", runId, why }                       -> brain auto-approval within policy (server re-checks the caps)
  *   { action: "retry", runId, why }                         -> retry a failed run (Ad Studio retryRun, max 3)
  *   { action: "batch", projectId, why, mode? }  mode "free" = stock remix (no spend)                     -> start ONE Ad Studio variant from the newest storyboard (no spend: it stops at the gate)
+ *   { action: "budget", out, detail }                       -> model budget state from the brain probe (adstudio-budget.ts); re-read
  *   { action: "learn", learning }                           -> { ok, count }
  *   { action: "events", events }                            -> { ok }
  */
@@ -20,6 +21,7 @@ import { canAutoApprove } from "@/services/brain/policy";
 import { pacificDayStart } from "@/services/brain/observe";
 import { AdStudioError, approveRun, createBatch, reserveUsd, retryRun } from "@/services/video-gen/adstudio-queue";
 import { BRAIN_BATCH, BRAIN_BATCH_FREE, pickBatch } from "@/services/brain/batch";
+import { BUDGET_KEY, setBudget } from "@/services/video-gen/adstudio-budget";
 import type { BrainEvent, BrainLearning, BrainSnapshot } from "@/services/brain/contract";
 
 export const dynamic = "force-dynamic";
@@ -88,6 +90,13 @@ export async function POST(request: Request) {
         await prisma.opsEvent.create({ data: { action: "brain-batch", targetType: "run", targetId: back[0]?.id ?? null, projectId: body.projectId, ok: back.length > 0, detail: { storyboardId: pick.storyboardId, why: String(body.why || "") } as never } });
         return NextResponse.json({ ok: back.length === out.runs.length && back.every((r) => r.status === "queued"), batchId: out.batchId, runs: back });
       }
+      case "budget": {
+        if (typeof body.out !== "boolean") return NextResponse.json({ error: "out (boolean) required" }, { status: 400 });
+        const state = { out: body.out, detail: String(body.detail || "").slice(0, 300), at: new Date().toISOString() };
+        await setBudget(state);
+        const back = await prisma.appSetting.findUnique({ where: { key: BUDGET_KEY } });
+        return NextResponse.json({ ok: (back?.value as { at?: string } | null)?.at === state.at, state });
+      }
       case "learn": {
         const l = body.learning as BrainLearning | undefined;
         if (!l || typeof l.id !== "string" || typeof l.rule !== "string") return NextResponse.json({ error: "learning {id, rule} required" }, { status: 400 });
@@ -100,7 +109,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, count: ev.length });
       }
       default:
-        return NextResponse.json({ error: 'action must be one of "observe" | "view" | "publish" | "approve" | "retry" | "batch" | "learn" | "events"' }, { status: 400 });
+        return NextResponse.json({ error: 'action must be one of "observe" | "view" | "publish" | "approve" | "retry" | "batch" | "budget" | "learn" | "events"' }, { status: 400 });
     }
   } catch (err) {
     if (err instanceof AdStudioError) return NextResponse.json({ ok: false, error: err.message }, { status: err.status });

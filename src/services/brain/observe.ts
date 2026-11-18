@@ -63,6 +63,7 @@ export async function observe(now = new Date()) {
       ...r,
       retries: Number((input as { retries?: number } | null)?.retries ?? 0),
       visualMode: (input as { visualMode?: string } | null)?.visualMode ?? "video",
+      fallback: (input as { fallback?: string } | null)?.fallback ?? null,
       estimateModel: (estimate as { model?: string } | null)?.model ?? null,
       estimateScenes: Array.isArray((estimate as { scenes?: unknown[] } | null)?.scenes) ? (estimate as { scenes: unknown[] }).scenes.length : null,
     })),

@@ -16,6 +16,7 @@ import { END_CARDS, hookById } from "@/services/creative/library";
 import { loadXarkContext } from "./adstudio-context";
 import { framesFromScript, scriptIdOf } from "./adstudio-script-frames";
 import { saveReviewInsight } from "./adstudio-results";
+import { applyBudgetMode, budgetContext } from "./adstudio-budget";
 
 export const STALE_MS = 120_000;
 /** the only engine that finishes without an approval stop (stock footage, no spend) */
@@ -170,6 +171,8 @@ export async function createBatch(input: CreateBatchInput) {
   const baseOffer = input.offer ?? (base.brandKit?.offerText ? { text: base.brandKit.offerText } : undefined);
   // typed coupon code / text win over the brand kit's offer
   const offer = branding.couponCode || branding.couponText ? { ...baseOffer, ...(branding.couponCode ? { code: branding.couponCode } : {}), ...(branding.couponText ? { text: branding.couponText } : {}) } : baseOffer;
+  // budget fallback: while the Video Brain says the model budget is out, plan as $0 slides (adstudio-budget.ts)
+  const budget = await budgetContext();
   return prisma.$transaction(async (tx) => {
     const leaders = new Map<string, string>();
     const runs = [];
@@ -182,7 +185,7 @@ export async function createBatch(input: CreateBatchInput) {
           hookType: v.hookType,
           engine: v.engine,
           planFromRunId: v.leader ? null : leaders.get(v.hookType) ?? null,
-          input: json({ ...base, ...extra, offer: offer ?? null, notes: input.notes ?? "", soundProfile: v.soundProfile }),
+          input: json(applyBudgetMode({ ...base, ...extra, offer: offer ?? null, notes: input.notes ?? "", soundProfile: v.soundProfile }, budget.out, budget.enabled, v.engine).input),
           createdById: input.createdById ?? null,
         },
       });
@@ -324,7 +327,13 @@ export async function claimNext(workerId: string) {
 const lease = (workerId: string) => `${workerId.slice(0, 80)}#${randomUUID().slice(0, 8)}`;
 
 async function claimed(id: string, phase: ClaimPhase) {
-  const r = await prisma.adStudioRun.findUniqueOrThrow({ where: { id } });
+  let r = await prisma.adStudioRun.findUniqueOrThrow({ where: { id } });
+  if (phase !== "generate") {
+    // a run queued before the budget ran out is planned as $0 slides too (the record shows it: input.fallback = "budget")
+    const budget = await budgetContext();
+    const b = applyBudgetMode((r.input ?? {}) as Record<string, unknown>, budget.out, budget.enabled, r.engine);
+    if (b.changed) r = await prisma.adStudioRun.update({ where: { id }, data: { input: json(b.input) } });
+  }
   return { runId: r.id, phase, hookType: r.hookType, engine: r.engine, planFromRunId: r.planFromRunId, input: r.input, claim: r.workerId, estUsd: r.estUsd, reserveUsd: reserveUsd(r.estUsd) };
 }
 

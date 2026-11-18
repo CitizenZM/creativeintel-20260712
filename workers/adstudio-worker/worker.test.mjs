@@ -111,3 +111,11 @@ test('visual mode from Studio reaches the job; anything unknown means video', ()
   assert.equal(jobOf({ ...run, input: { ...run.input, visualMode: 'slides' } }).visualMode, 'slides');
   assert.equal(jobOf({ ...run, input: { ...run.input, visualMode: 'nope' } }).visualMode, 'video');
 });
+
+test('budget fallback: a slides run marked zeroCost tells Ad Studio to build $0 key frames', () => {
+  const base = { runId: 'cbudget1', hookType: 'keep', engine: 'seedance2fast', input: { storyboard: { id: 'sb', frames: [] }, project: { productUrl: 'https://x/p' } } };
+  const j = jobOf({ ...base, input: { ...base.input, visualMode: 'slides', fallback: 'budget', zeroCost: true } });
+  assert.equal(j.visualMode, 'slides'); assert.equal(j.zeroCost, true); assert.equal(j.fallback, 'budget');
+  const v = jobOf(base);
+  assert.equal(v.visualMode, 'video'); assert.equal(v.zeroCost, undefined);
+});
