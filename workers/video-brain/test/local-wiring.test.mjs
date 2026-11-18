@@ -37,6 +37,7 @@ test('tick wiring: local Ad Studio jobs join the loops; own jobs approved via th
   assert.equal(published.loops.length, 2);
   assert.ok(published.events.some((e) => /managed by Xark/.test(e.summary)));
   assert.equal(published.spend.autoApprovedTodayUsd, 1.3);
+  assert.ok(!calls.includes('batch'), 'local projects never get a server batch');
   // local finished videos get the second check too (regression: only URL runs were checked)
   assert.equal(published.checks.length, 1); assert.equal(published.checks[0].runId, 'local:done1'); assert.equal(published.checks[0].pass, false);
   // the critic only runs when the file probed (no duration for a missing file)
