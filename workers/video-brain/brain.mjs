@@ -96,7 +96,8 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     state.acted[key] = r.ok ? 'approved' : 'refused';
   }
   // ACT 2 — recover: retry transient failures once per run per day
-  for (const r of retries(obs.runs, now)) {
+  const fundsOk = !(state.probes || []).some((p) => p.name === 'openrouter balance' && !p.ok);
+  for (const r of fundsOk ? retries(obs.runs, now) : []) {
     const key = `retry:${r.id}:${new Date(now).toISOString().slice(0, 10)}`;
     if (state.acted[key]) continue;
     state.acted[key] = 'tried';
@@ -181,7 +182,9 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   }
   // ACT 3 — push: a ready storyboard with nothing produced gets one Ad Studio variant (it stops at the spend gate)
   state.batched = state.batched || {};
-  for (const l of batchCandidates(t.loops, state.batched, now)) {
+  const noFunds = (state.probes || []).find((p) => p.name === 'openrouter balance' && !p.ok);
+  if (noFunds) events.push(ev('Producer', 'wait', `no new paid work: ${noFunds.detail}`));
+  for (const l of noFunds ? [] : batchCandidates(t.loops, state.batched, now)) {
     state.batched[l.projectId] = new Date(now).toISOString();
     if (dryRun) { events.push(ev('Producer', 'decide', `[dry-run] would start an Ad Studio batch for ${l.name}`, l.projectId)); continue; }
     const r = await call('batch', { projectId: l.projectId, why: 'storyboard ready, nothing produced' });

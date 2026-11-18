@@ -276,3 +276,11 @@ test('batch candidates: Xark project at studio with no runs, one per tick, 24 h 
   assert.deepEqual(batchCandidates([L('a'), L('b')], { a: new Date(NOW - H).toISOString() }, NOW).map((l) => l.projectId), ['b']);
   assert.deepEqual(batchCandidates([L('local:x'), L('batch:y'), L('c', { step: 'setup' }), L('d', { runs: { active: 0, done: 1, failed: 0 } })], {}, NOW), []);
 });
+
+test('balance: the key cap counts, not just account credit (402 on 2026-11-18 with $94 on the account, $0.50 on the key)', async () => {
+  const { balanceVerdict } = await import('../lib/probes.mjs');
+  const v = balanceVerdict(94.89, { limit: 60, limit_remaining: 0.497, limit_reset: 'monthly' });
+  assert.equal(v.ok, false); assert.match(v.detail, /raise the key limit/);
+  assert.equal(balanceVerdict(94.89, { limit: null, limit_remaining: null }).ok, true);
+  assert.equal(balanceVerdict(2, {}).ok, false);
+});
