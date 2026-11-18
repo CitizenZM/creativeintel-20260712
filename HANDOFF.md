@@ -55,3 +55,8 @@
 - 完成: Video Brain live: daemon co.celldigital.video-brain (5-min ticks, verified publish), /api/worker/brain, /api/brain, admin page /brain; local Ad Studio jobs, strategist (claude -p), auto-approve caps $3/$20, second checks, incidents, probes, fix patterns, learnings synced to 6 skills, daily Feishu DM digest 07:30 PT; PRs #168-#171 merged
 - 验证: node --test workers/video-brain 21/21; vitest 365 pass; tsc 0; build:check 0; live ticks ok:true verified:true; prod route wrong-token 401
 - 下一步: Barron: sign in and open creative.xark.io/brain; confirm product details on 7 projects stuck at Setup; first production AdStudioRun will exercise server auto-approve
+
+### 2026-11-18 02:28 · claude-opus-5-5
+- 完成: Video Brain round 2: live run overlay on /api/brain, Gemini second-family critic (≤10/day), acw batch (81 videos) in the loop, rule changes via reviewable PRs on ad-studio (pipeline reads tracked brain-rules.json), launchd python bug found by probes and fixed (ad-studio 7c87048), daily Feishu DM digest; PRs #172-#174 merged
+- 验证: workers 26/26; vitest brain 11; build:check 0; live ticks ok/verified, 15 loops, 39 checks, 6 critic reviews, 11/11 probes green
+- 下一步: Barron: sign in to creative.xark.io/brain; confirm product details on 7 Setup-stalled projects; review rules PRs when they appear; approve real Brain* tables if wanted
