@@ -35,6 +35,7 @@ const SKILLS_DIR = process.env.VIDEO_BRAIN_SKILLS_DIR || path.join(homedir(), '.
 export const SKILLS = ['ad-studio', 'video-shotcraft', 'hypit', 'video-use', 'video-ads-playbook', 'proposal-content-video'];
 const PATTERN_ROOTS = [path.join(ROOT, 'pipeline'), path.join(ROOT, 'renderer', 'src'), path.join(homedir(), 'Projects', 'acw-bf-videos-20261116'), path.join(homedir(), 'Projects', 'motion-video-editing-repos-20261101'), path.join(homedir(), 'Projects', 'video short craft'), ...SKILLS.map((s) => path.join(SKILLS_DIR, s))];
 const PROBE_EVERY_MS = 30 * 60_000, PATTERN_EVERY_MS = 6 * 3_600_000, CHECKS_PER_TICK = 3;
+export const CHECK_BUDGET_MS = Number(process.env.VIDEO_BRAIN_CHECK_BUDGET_MS || 120_000);
 const log = (m) => console.error(`[video-brain ${new Date().toISOString().slice(11, 19)}] ${m}`);
 
 export function api(appUrl, token) {
@@ -95,7 +96,9 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
 
   // VERIFY — second check of finished videos (a few per tick, newest first)
   const toCheck = obs.runs.filter((r) => r.status === 'completed' && (r.finalMp4Url || r.finalPath) && !state.checks[r.id]).slice(0, CHECKS_PER_TICK);
+  const tickStart = Date.now();
   for (const r of toCheck) {
+    if (Date.now() - tickStart > CHECK_BUDGET_MS) { events.push(ev('QA Critic', 'wait', `second checks paused for this tick (time budget ${CHECK_BUDGET_MS / 1000}s); rest next tick`)); break; }
     try {
       const c = await secondCheck(r);
       state.checks[r.id] = c;
