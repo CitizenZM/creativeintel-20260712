@@ -64,6 +64,7 @@ export async function observe(now = new Date()) {
       retries: Number((input as { retries?: number } | null)?.retries ?? 0),
       visualMode: (input as { visualMode?: string } | null)?.visualMode ?? "video",
       estimateModel: (estimate as { model?: string } | null)?.model ?? null,
+      estimateScenes: Array.isArray((estimate as { scenes?: unknown[] } | null)?.scenes) ? (estimate as { scenes: unknown[] }).scenes.length : null,
     })),
     perf: perf.map((p) => ({ projectId: p.projectId, rows: p._count, lastDateTo: p._max.dateTo, lastUpdatedAt: p._max.updatedAt, ...p._sum })),
     spend: { todayUsd: Number(spendToday._sum.actualUsd ?? 0) || Number(spendToday._sum.estUsd ?? 0), todayEstUsd: Number(spendToday._sum.estUsd ?? 0), autoApprovedTodayUsd, byProject7d: Object.fromEntries(spend7d.map((s) => [s.projectId, Number(s._sum.estUsd ?? 0)])) },

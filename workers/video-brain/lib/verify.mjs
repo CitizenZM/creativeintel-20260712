@@ -9,6 +9,10 @@ import { reserveUsd } from './policy.mjs';
 const pexec = promisify(execFile);
 export const TARGETS = { maxSec: 24.5, minSec: 5, lufs: -14, lufsTol: 1.5, ratio: 9 / 16, ratioTol: 0.02 };
 
+export const KF_USD = 0.04;
+/** key frames generated before the gate: two A/B sets of one per scene (6 scenes when unknown) */
+export const keyframeAllowance = (scenes) => +(((Number(scenes) > 0 ? Number(scenes) : 6) * 2 * KF_USD)).toFixed(2);
+
 /** pure comparison from probe facts */
 export function compare(run, facts) {
   const f = [];
@@ -23,8 +27,10 @@ export function compare(run, facts) {
     add('audio track', 'present', p.acodec || 'none', !!p.acodec, 'ffprobe');
   } else add('probe', 'readable mp4', facts.probeError || 'not probed', false, 'ffprobe');
   if (facts.lufs != null) add('loudness', `${TARGETS.lufs} LUFS ±${TARGETS.lufsTol}`, `${facts.lufs.toFixed(1)} LUFS`, Math.abs(facts.lufs - TARGETS.lufs) <= TARGETS.lufsTol, 'ffmpeg ebur128');
-  const reserve = reserveUsd(run.estUsd || 0);
-  if (run.estUsd > 0 && run.actualUsd != null) add('cost', `≤ reservation $${reserve.toFixed(2)}`, `$${Number(run.actualUsd).toFixed(2)}`, run.actualUsd <= reserve + 0.01, 'db vs estimate');
+  // the reservation covers clips (estimate x 1.3); key frames (A/B, $0.04 each) are generated BEFORE the gate and booked apart
+  const allowance = keyframeAllowance(run.estimateScenes);
+  const cap = reserveUsd(run.estUsd || 0) + allowance;
+  if (run.estUsd > 0 && run.actualUsd != null) add('cost', `≤ clip reservation + key frames $${cap.toFixed(2)}`, `$${Number(run.actualUsd).toFixed(2)}`, run.actualUsd <= cap + 0.01, 'db vs estimate');
   const rt = Number(run.metrics?.runtime ?? run.metrics?.duration ?? NaN);
   if (Number.isFinite(rt) && facts.probe) add('runtime matches report', `${rt.toFixed(2)} s (worker metrics)`, `${facts.probe.duration.toFixed(2)} s`, Math.abs(rt - facts.probe.duration) <= 0.5, 'metrics vs file');
   return { runId: run.id, projectId: run.projectId, at: new Date().toISOString(), renderedAt: run.updatedAt ? new Date(run.updatedAt).toISOString() : null, pass: f.every((x) => x.pass), fields: f };
