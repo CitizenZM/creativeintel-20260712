@@ -25,6 +25,7 @@ import { SEED, harvest, idOf, syncAll } from './lib/learn.mjs';
 import { pick, promptFor, runClaude, apply as applyStrategy } from './lib/strategist.mjs';
 import { readLocal } from './lib/local.mjs';
 import { readBatches } from './lib/batch.mjs';
+import { proposeRules } from './lib/rules-pr.mjs';
 import { buildDigest, digestDue, sendDigest } from './lib/digest.mjs';
 import { critique, withCritic, MAX_PER_DAY as CRITIC_PER_DAY } from './lib/critic.mjs';
 import { envKey } from './lib/probes.mjs';
@@ -66,7 +67,7 @@ export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'h
   return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
 }
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic } = {}) {
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s) => proposeRules(ROOT, l, s) } = {}) {
   await mkdir(home, { recursive: true });
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
@@ -156,6 +157,15 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     events.push(ev('Librarian', 'learn', `learnings synced (${learnings.length}) → ${synced.length} targets`));
   }
   for (const l of learnings) l.syncedTo = synced;
+  // rules that change the script prompt go through a PR on the Ad Studio repo (Barron merges or vetoes)
+  if (rulesPr && !dryRun && (!state.rulesCheckedAt || now - Date.parse(state.rulesCheckedAt) > 3_600_000)) {
+    state.rulesCheckedAt = new Date(now).toISOString();
+    try {
+      const r = await rulesPr(learnings, state.rulesPr || {});
+      if (r.action === 'opened') { state.rulesPr = { hash: r.hash, url: r.url }; events.push(ev('Librarian', 'learn', `rules PR opened for the script prompt: ${r.url}`)); }
+      else if (r.action === 'none') state.rulesPr = {};
+    } catch (e) { log(`rules PR: ${e.message}`); events.push(ev('Librarian', 'learn', `rules PR failed: ${String(e.message).slice(0, 160)}`)); }
+  }
 
   // THINK (rules first; the strategist model only for stalled or measuring projects, once a day each)
   const t = think(obs, state.checks, now);
@@ -187,7 +197,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     checks: Object.values(state.checks).sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 40),
     recovery: t.recovery,
     incidents: Object.values(state.incidents).sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : -1)).slice(0, 40),
-    probes: state.probes, patterns: state.patterns.slice(0, 100), learnings, events,
+    probes: state.probes, patterns: state.patterns.slice(0, 100), learnings, events, rulesPr: state.rulesPr?.url ? state.rulesPr : null,
   };
   // prune local state
   for (const k of Object.keys(state.acted)) if (/^retry:/.test(k) && !k.endsWith(new Date(now).toISOString().slice(0, 10))) delete state.acted[k];

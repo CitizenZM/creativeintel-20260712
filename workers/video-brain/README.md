@@ -20,6 +20,7 @@ Dashboard: **creative.xark.io/brain** (admin only). Every 5 minutes (launchd `co
 | Learn | seed (production rules) + harvested (recurring incidents, repeated check failures) + server edits → `LEARNINGS.md` marker block in each video skill (+ pointer in SKILL.md), `ad-studio/docs/LEARNINGS.md`, `ad-studio/data/brain-learnings.json` (confirmed rules go into the script prompt) | `lib/learn.mjs` |
 | Digest | once a day after 07:30 PT: Feishu DM to Barron's open_id only (Affiliate OS notifier: blocklist guard + read-back second check): what waits on him, failing probes, stalled projects the brain is pushing, actions of the last 24 h; `VIDEO_BRAIN_DIGEST=0` off | `lib/digest.mjs` |
 | Live board | `GET /api/brain` overlays the active AdStudioRun rows on every request, so /brain shows run state within one 10 s poll (snapshot itself is ≤ 5 min old) | `src/services/brain/live.ts` |
+| Rules PR | hourly: confirmed script-side learnings vs Ad Studio `origin/main:pipeline/brain-rules.json` (the only rules the script prompt reads); a difference → throw-away worktree, rule tests, one PR per content hash on CitizenZM/ad-studio-20261104; Barron merges (live) or closes (veto); listed in the digest; `VIDEO_BRAIN_RULES_PR=0` off | `lib/rules-pr.mjs` |
 | Publish | `AppSetting brain:snapshot` (+ `brain:events`, `brain:learnings`), then re-read and compare (second check of its own write) | `src/services/brain/store.ts` |
 
 ```bash
