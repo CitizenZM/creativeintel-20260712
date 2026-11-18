@@ -16,7 +16,7 @@ import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { think, approvals, retries, batchCandidates, fundsRetries } from './lib/think.mjs';
+import { think, approvals, retries, batchCandidates, fundsRetries, freeCandidates } from './lib/think.mjs';
 import { aggregate } from './lib/incidents.mjs';
 import { secondCheck } from './lib/verify.mjs';
 import { runProbes } from './lib/probes.mjs';
@@ -193,12 +193,15 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   // ACT 3 — push: a ready storyboard with nothing produced gets one Ad Studio variant (it stops at the spend gate)
   state.batched = state.batched || {};
   const noFunds = (state.probes || []).find((p) => p.name === 'openrouter balance' && !p.ok);
-  if (noFunds) events.push(ev('Producer', 'wait', `no new paid work: ${noFunds.detail}`));
-  for (const l of noFunds ? [] : batchCandidates(t.loops, state.batched, now)) {
-    state.batched[l.projectId] = new Date(now).toISOString();
+  if (noFunds) events.push(ev('Producer', 'wait', `no new paid work: ${noFunds.detail}; free stock-remix videos only`));
+  state.batchedFree = state.batchedFree || {};
+  const pool = noFunds ? state.batchedFree : state.batched;
+  const cands = noFunds ? freeCandidates(t.loops, obs.runs, pool, now) : batchCandidates(t.loops, pool, now);
+  for (const l of cands) {
+    pool[l.projectId] = new Date(now).toISOString();
     if (dryRun) { events.push(ev('Producer', 'decide', `[dry-run] would start an Ad Studio batch for ${l.name}`, l.projectId)); continue; }
-    const r = await call('batch', { projectId: l.projectId, why: 'storyboard ready, nothing produced' });
-    events.push(ev('Producer', 'call', r.ok ? `started an Ad Studio batch for ${l.name} (1 variant, Seedance 2.0 Fast; spend waits at the gate) · re-read: queued` : `batch not started for ${l.name}: ${r.reason || r.error || r.status}`, l.projectId, r.runs?.[0]?.id || null));
+    const r = await call('batch', { projectId: l.projectId, why: noFunds ? 'storyboard ready; paid key capped, free stock remix meanwhile' : 'storyboard ready, nothing produced', ...(noFunds ? { mode: 'free' } : {}) });
+    events.push(ev('Producer', 'call', r.ok ? `started an Ad Studio batch for ${l.name} (${noFunds ? 'free stock remix, no spend' : '1 variant, Seedance 2.0 Fast; spend waits at the gate'}) · re-read: queued` : `batch not started for ${l.name}: ${r.reason || r.error || r.status}`, l.projectId, r.runs?.[0]?.id || null));
   }
   t.loops = applyStrategy(t.loops, Object.fromEntries(Object.entries(state.strategy).filter(([, m]) => m.out)), now);
   for (const l of t.loops) {

@@ -5,10 +5,14 @@
  */
 export const BRAIN_BATCH = { hookTypes: ["keep"], engines: ["seedance2fast"], visualMode: "video", openingId: "auto", endCardId: "auto" } as const;
 export const BRAIN_BATCH_COOLDOWN_MS = 24 * 3_600_000;
+/** free mode while the provider balance is out: stock remix (no AI video, no spend, no approval step) */
+export const BRAIN_BATCH_FREE = { hookTypes: ["keep"], engines: ["remix"], visualMode: "mixed", openingId: "auto", endCardId: "auto" } as const;
+/** a run that failed only for lack of provider funds does not count against the cooldown */
+export const FUNDS_FAILURE = /\b402\b|balance|credit/i;
 
 export interface BatchFacts {
   storyboards: { id: string; frames: unknown; createdAt: Date }[];
-  runs: { status: string; createdAt: Date }[];
+  runs: { status: string; createdAt: Date; error?: string | null }[];
   productUrl: string | null;
 }
 
@@ -16,7 +20,7 @@ export interface BatchFacts {
 export function pickBatch(f: BatchFacts, now = Date.now()): { ok: true; storyboardId: string } | { ok: false; reason: string } {
   if (!f.productUrl) return { ok: false, reason: "no product page URL (Setup)" };
   if (f.runs.some((r) => ["queued", "planning", "awaiting_approval", "approved", "generating"].includes(r.status))) return { ok: false, reason: "a run is already in progress" };
-  if (f.runs.some((r) => now - new Date(r.createdAt).getTime() < BRAIN_BATCH_COOLDOWN_MS)) return { ok: false, reason: "a batch was started in the last 24 h" };
+  if (f.runs.some((r) => now - new Date(r.createdAt).getTime() < BRAIN_BATCH_COOLDOWN_MS && !(r.status === "failed" && FUNDS_FAILURE.test(r.error ?? "")))) return { ok: false, reason: "a batch was started in the last 24 h" };
   const sb = [...f.storyboards].filter((s) => Array.isArray(s.frames) && s.frames.length > 0).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
   if (!sb) return { ok: false, reason: "no storyboard with frames" };
   return { ok: true, storyboardId: sb.id };

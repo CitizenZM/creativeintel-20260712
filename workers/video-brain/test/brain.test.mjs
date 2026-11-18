@@ -284,3 +284,12 @@ test('balance: the key cap counts, not just account credit (402 on 2026-11-18 wi
   assert.equal(balanceVerdict(94.89, { limit: null, limit_remaining: null }).ok, true);
   assert.equal(balanceVerdict(2, {}).ok, false);
 });
+
+test('free candidates: only funds failures, no product made yet, not local/batch, 24 h cooldown', async () => {
+  const { freeCandidates } = await import('../lib/think.mjs');
+  const L = (id, o = {}) => ({ projectId: id, step: 'produce', runs: { active: 0, done: 0, failed: 1 }, ...o });
+  const runs = [{ projectId: 'a', status: 'failed', error: 'OpenRouter 402 balance' }, { projectId: 'b', status: 'failed', error: 'TypeError x' }];
+  assert.deepEqual(freeCandidates([L('b'), L('a')], runs, {}, NOW).map((l) => l.projectId), ['a']);
+  assert.deepEqual(freeCandidates([L('a')], runs, { a: new Date(NOW - H).toISOString() }, NOW), []);
+  assert.deepEqual(freeCandidates([L('a', { runs: { active: 0, done: 1, failed: 1 } }), L('local:x', { runs: { active: 0, done: 0, failed: 0 } })], runs, {}, NOW), []);
+});
