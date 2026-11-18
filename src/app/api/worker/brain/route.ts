@@ -3,6 +3,7 @@
  *
  * POST body (one of):
  *   { action: "observe" }                                   -> Observation (read-only DB gather)
+ *   { action: "view" }                                      -> exactly what GET /api/brain serves the /brain page (read-only)
  *   { action: "publish", snapshot }                         -> { ok, bytes, events, learnings } then re-read (second check)
  *   { action: "approve", runId, why }                       -> brain auto-approval within policy (server re-checks the caps)
  *   { action: "retry", runId, why }                         -> retry a failed run (Ad Studio retryRun, max 3)
@@ -13,7 +14,7 @@ import { NextResponse } from "next/server";
 import { hasWorkerToken } from "@/lib/worker-token";
 import { prisma } from "@/lib/db";
 import { observe } from "@/services/brain/observe";
-import { addLearning, appendEvents, getPolicy, getSnapshot, publish } from "@/services/brain/store";
+import { addLearning, appendEvents, getPolicy, getSnapshot, getView, publish } from "@/services/brain/store";
 import { canAutoApprove } from "@/services/brain/policy";
 import { pacificDayStart } from "@/services/brain/observe";
 import { AdStudioError, approveRun, reserveUsd, retryRun } from "@/services/video-gen/adstudio-queue";
@@ -37,6 +38,8 @@ export async function POST(request: Request) {
     switch (body.action) {
       case "observe":
         return NextResponse.json(await observe());
+      case "view":
+        return NextResponse.json(await getView());
       case "publish": {
         const snap = body.snapshot as BrainSnapshot | undefined;
         if (!snap || snap.v !== 1 || typeof snap.at !== "string") return NextResponse.json({ error: "snapshot v1 required" }, { status: 400 });
@@ -79,7 +82,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, count: ev.length });
       }
       default:
-        return NextResponse.json({ error: 'action must be one of "observe" | "publish" | "approve" | "retry" | "learn" | "events"' }, { status: 400 });
+        return NextResponse.json({ error: 'action must be one of "observe" | "view" | "publish" | "approve" | "retry" | "learn" | "events"' }, { status: 400 });
     }
   } catch (err) {
     if (err instanceof AdStudioError) return NextResponse.json({ ok: false, error: err.message }, { status: err.status });
