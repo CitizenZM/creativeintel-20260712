@@ -40,3 +40,8 @@
 - 完成: Production Ad Studio worker started: launchd co.celldigital.adstudio-worker, token in ~/.config/adstudio-worker/prod.env (600), checkout on main c42f2e8
 - 验证: token probe 404 Run not found (auth+table ok), wrong token 401, claude CLI ok, worker alive, claim no error
 - 下一步: Barron: sign in and run one storyboard through Studio > Ad Studio to see key frames at approval
+
+### 2026-11-17 21:08 · claude-opus-5-5
+- 完成: PR #167 merged (dcce8b4): picture mode video/slides/mixed; prod deploy success; worker restarted on main
+- 验证: Vercel success; prod API 401 unauth; worker PID running
+- 下一步: Barron: test one video-mode run in Studio
