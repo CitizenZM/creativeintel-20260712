@@ -1,5 +1,5 @@
 // tests never message Barron or call the model
-process.env.VIDEO_BRAIN_DIGEST = '0'; process.env.VIDEO_BRAIN_STRATEGIST = '0'; process.env.VIDEO_BRAIN_CRITIC = '0';
+process.env.VIDEO_BRAIN_DIGEST = '0'; process.env.VIDEO_BRAIN_STRATEGIST = '0'; process.env.VIDEO_BRAIN_RULES_PR = '0'; process.env.VIDEO_BRAIN_CRITIC = '0';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -248,4 +248,23 @@ test('batch: CSV with quoted commas; INDEX rows become finished runs of one proj
   assert.equal(out.projects.length, 1); assert.equal(out.runs.length, 2);
   assert.ok(out.runs[0].finalPath.endsWith('v1.mp4')); assert.equal(out.runs[1].finalPath, null); assert.equal(out.runs[0].projectId, 'batch:t');
   assert.deepEqual(approvals(out.runs, policy, 0, NOW), []);
+});
+
+test('rules PR: only confirmed script-side learnings; one PR per content hash; none when main matches', async () => {
+  const { rulesFile, plan, hashOf, proposeRules } = await import('../lib/rules-pr.mjs');
+  const L = [{ id: 'L2', status: 'confirmed', scope: 'pipeline:script', rule: 'b' }, { id: 'L1', status: 'confirmed', scope: 'global', rule: 'a' }, { id: 'L3', status: 'candidate', scope: 'global', rule: 'c' }, { id: 'L4', status: 'confirmed', scope: 'ops:launchd', rule: 'd' }];
+  const f = rulesFile(L); assert.deepEqual(JSON.parse(f).rules.map((r) => r.id), ['L1', 'L2']);
+  assert.equal(plan(f, f).action, 'none');
+  assert.equal(plan('{"rules":[]}', f).action, 'open');
+  assert.equal(plan('{"rules":[]}', f, { hash: hashOf(f), url: 'u' }).action, 'pending');
+  // wiring with a fake shell: worktree → test → commit → push → gh pr create, worktree removed
+  const cmds = [];
+  const { mkdir, readFile } = await import('node:fs/promises');
+  let wt;
+  const sh = async (cmd, args) => { cmds.push([cmd, ...args].join(' ')); if (args[2] === 'show') return { stdout: '{"rules":[]}' }; if (args[2] === 'worktree' && args[3] === 'add') { wt = args[7]; await mkdir(path.join(wt, 'pipeline'), { recursive: true }); } if (cmd === 'gh') return { stdout: 'https://github.com/x/pull/9\n' }; return { stdout: '' }; };
+  const r = await proposeRules('/repo', L, {}, { sh });
+  assert.equal(r.action, 'opened'); assert.equal(r.url, 'https://github.com/x/pull/9');
+  assert.deepEqual(JSON.parse(await readFile(path.join(wt, 'pipeline', 'brain-rules.json'), 'utf8')).rules.map((x) => x.id), ['L1', 'L2']);
+  const order = ['worktree add', 'node --test', 'commit', 'push', 'gh pr create', 'worktree remove'].map((k) => cmds.findIndex((c) => c.includes(k)));
+  assert.ok(order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])), order.join(','));
 });
