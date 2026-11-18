@@ -65,3 +65,8 @@
 - 完成: Final acceptance: worker 'view' action (#175) proves the live /brain payload (15 loops, 39 checks, 87 events, 16 learnings, 11/11 probes, live overlay); that exact payload rendered in the board; prod approve/retry routes 404 on unknown run against the real DB; first digest DM sent and read back (verified)
 - 验证: curl view 200; board render of prod payload: 10 sections, no fetch error; sendVerifiedDM ok+verified
 - 下一步: Barron: approve or decline real Brain* tables (production migration); act on the 8 items in the digest
+
+### 2026-11-18 02:58 · claude-opus-5-5
+- 完成: Brain now pushes: started a real production Ad Studio batch for TCL Analysis (#176); it failed at script with OpenRouter 402 because the Ad Studio key's own monthly cap ($60) has $0.50 left (account $94.89). Probe fixed to read the key cap (#177); no new paid work while short; 402 failures auto-retried when funds return (#178); Barron DM'd (verified)
+- 验证: workers 31/31; prod run cmwm03l8i…gslpetbu queued→planning→failed(402) observed; probe live: '$0.50 spendable … raise the key limit'
+- 下一步: Barron: raise the OpenRouter key limit (openrouter.ai/settings/keys) — then the brain retries TCL/biggreenorganic runs, gate auto-approves ≤$3, second check + critic run on the result
