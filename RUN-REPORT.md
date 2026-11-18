@@ -39,3 +39,8 @@ product (`auto:<k>`), learning-loop weights, run id in ad names, worker updates.
 - Panel stays behind `NEXT_PUBLIC_ADSTUDIO=1` (set for Production at go-live).
 - Verification on this branch: `tsc --noEmit` 0; `vitest run` 1754 passed / 2 skipped (gallery test now asserts no reference clip ships);
   worker `node --test` 12/12; eslint on changed Ad Studio paths 0 errors. Files main changed since the branch point were not overwritten.
+
+## 2026-11-17 · Production Ad Studio worker started
+- launchd `co.celldigital.adstudio-worker` (KeepAlive) runs `workers/adstudio-worker/worker.mjs` from this checkout (now on `main` c42f2e8); env from `~/.config/adstudio-worker/prod.env` (chmod 600: APP_URL https://creative.account.xark.io, production WORKER_TOKEN, AD_STUDIO_ROOT); log `~/Library/Logs/adstudio-worker.log`.
+- Checks: token probe → 404 "Run not found" (auth ok, prod `AdStudioRun` table queried), wrong token → 401; Claude CLI answers with a login environment (pipeline subscription mode works); worker process alive, first claim returned no run and logged no error.
+- Spend still only after a user approves a run in Studio (reservation = estimate × 1.3).
