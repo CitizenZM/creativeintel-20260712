@@ -8,6 +8,7 @@ import { ReportsCard } from "@/components/workbench/reports-card";
 import { ImageAdsGallery } from "@/components/workbench/image-ads-gallery";
 import { AskTheData, TestPlanPanel } from "@/components/workbench/performance-tools";
 import { isPlayable } from "@/components/studio/types";
+import { adStudioAdName } from "@/services/video-gen/adstudio-results";
 import { Download, ExternalLink, Film, FileText, Clapperboard } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ const RUN_GROUPS: { id: string; label: string; match: (r: RunLike) => boolean }[
 
 export default async function DeliverPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const [runs, scripts, storyboards] = await Promise.all([
+  const [runs, scripts, storyboards, adStudio, project] = await Promise.all([
     prisma.libtvRun.findMany({
       where: { projectId },
       orderBy: [{ isFinal: "desc" }, { createdAt: "desc" }],
@@ -45,6 +46,14 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
       orderBy: { createdAt: "desc" },
       select: { id: true, title: true, scriptId: true, totalDuration: true, frameSeconds: true },
     }),
+    // P4: finished Ad Studio videos (services/video-gen/adstudio-results.ts)
+    prisma.adStudioRun.findMany({
+      where: { projectId, status: "completed", finalMp4Url: { not: null } },
+      orderBy: { updatedAt: "desc" },
+      take: 30,
+      select: { id: true, storyboardId: true, hookType: true, engine: true, finalMp4Url: true, posterUrl: true, review: true, actualUsd: true, plan: true, input: true, updatedAt: true },
+    }),
+    prisma.project.findUnique({ where: { id: projectId }, select: { brandName: true } }),
   ]);
 
   const delivered = runs.filter((r) => r.masterMp4Url);
@@ -89,6 +98,50 @@ export default async function DeliverPage({ params }: { params: Promise<{ projec
       <ImageAdsGallery projectId={projectId} />
 
       <SpendPanel projectId={projectId} targets={spendTargets} runLabels={runLabels} />
+
+      {adStudio.length > 0 && (
+        <section data-testid="deliver-adstudio">
+          <h3 className="flex items-center gap-2 text-sm font-semibold mb-1">
+            <Film className="h-4 w-4" /> Ad Studio videos <span className="text-xs font-normal text-muted-foreground">{adStudio.length}</span>
+          </h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            Upload each under the ad name shown, so imported Meta/TikTok results are matched to its hook type and steer the next suggestion.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {adStudio.map((r) => {
+              const input = (r.input ?? {}) as { storyboard?: { title?: string } };
+              const plan = (r.plan ?? {}) as { durationS?: number };
+              const scores = ((r.review ?? {}) as { scores?: Record<string, number> }).scores ?? {};
+              const name = adStudioAdName({ brand: project?.brandName, title: input.storyboard?.title, durationSec: plan.durationS, hookType: r.hookType, engine: r.engine, runId: r.id });
+              return (
+                <div key={r.id} className="rounded-lg border border-border bg-card overflow-hidden">
+                  <div className="aspect-[9/16] max-h-64 bg-black">
+                    <video src={r.finalMp4Url ?? undefined} poster={r.posterUrl ?? undefined} controls playsInline preload="metadata" className="h-full w-full object-contain" />
+                  </div>
+                  <div className="p-3 space-y-1.5 text-[11px]">
+                    <p className="text-sm font-semibold truncate">{input.storyboard?.title ?? r.storyboardId}</p>
+                    <p className="text-muted-foreground">{r.hookType} hook · {r.engine} · ${(r.actualUsd ?? 0).toFixed(2)}</p>
+                    {Object.keys(scores).length > 0 && (
+                      <p className="text-muted-foreground">{Object.entries(scores).map(([k, v]) => `${k} ${v}`).join(" · ")}</p>
+                    )}
+                    <p className="font-mono break-all rounded bg-muted px-1.5 py-1" title="Ad name for Meta / TikTok">{name}</p>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {r.finalMp4Url && (
+                        <a href={r.finalMp4Url} className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 font-medium hover:bg-muted">
+                          <Download className="h-3 w-3" /> Video
+                        </a>
+                      )}
+                      <Link href={`/projects/${projectId}/studio#adstudio`} className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 font-medium hover:bg-muted">
+                        Open in Studio →
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section>
         <h3 className="flex items-center gap-2 text-sm font-semibold mb-3">

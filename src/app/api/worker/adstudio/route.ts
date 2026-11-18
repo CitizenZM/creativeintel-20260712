@@ -3,13 +3,16 @@
  * header `x-worker-token` vs env WORKER_TOKEN, constant-time. No database credentials reach the Mac.
  *
  * POST body (one of):
- *   { action: "claim",    workerId }                                   -> { run: {runId, phase, hookType, engine, planFromRunId, input} | null }
+ *   { action: "claim",    workerId }                                   -> { run: {runId, phase, hookType, engine, planFromRunId, input, claim, estUsd, reserveUsd} | null }
+ *   Every later report carries `claim` (the lease id from the claim); a report from an older claim of the same run is refused.
  *   { action: "progress", workerId, runId, step?, progress?, log?, plan?, storyboardAB? }   -> { cancel }
  *   { action: "gate",     workerId, runId, estimate, plan?, storyboardAB?, preUsd?, log? } -> { cancel }
  *   { action: "done",     workerId, runId, finalMp4Url, posterUrl?, review?, metrics?, autofix?, plan?, actualUsd?, log? }
  *   { action: "failed",   workerId, runId, error, cancelled?, actualUsd?, log? }
+ *   { action: "endcard",  workerId, runId }  -> { endCard: {id, theme, hideButton, layers: [{png (base64), y, delaySec, durSec, anim, role}]} | null }
  */
 import { NextResponse } from "next/server";
+import { renderRunEndCard } from "@/services/video-gen/adstudio-endcard";
 import { timingSafeEqual } from "node:crypto";
 import { recordWorkerSeen } from "@/services/worker-tasks";
 import { ADSTUDIO_WORKER_PREFIX } from "@/services/video-gen/adstudio-worker-status";
@@ -50,8 +53,10 @@ export async function POST(request: Request) {
         return NextResponse.json(await reportDone(body.runId, body as never));
       case "failed":
         return NextResponse.json(await reportFailed(body.runId, String(body.error || "failed"), body));
+      case "endcard":
+        return NextResponse.json(await renderRunEndCard(body.runId));
       default:
-        return NextResponse.json({ error: 'action must be one of "claim" | "progress" | "gate" | "done" | "failed"' }, { status: 400 });
+        return NextResponse.json({ error: 'action must be one of "claim" | "progress" | "gate" | "done" | "failed" | "endcard"' }, { status: 400 });
     }
   } catch (err) {
     if (err instanceof AdStudioError) return NextResponse.json({ error: err.message }, { status: err.status });

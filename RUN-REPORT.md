@@ -29,3 +29,13 @@ Verification (local Docker Postgres `localhost:55432`, `prisma db push --url` to
   worker generate → run `completed`, progress 100, actualUsd 1.6899, finalMp4Url/posterUrl set (local media base, no Blob).
   Ledger: image 0.4542 + video 1.2357 (est 1.01) = 1.6899 = run actualUsd. Video 23.7 s 1080x1920 with audio.
 - Not done: Blob upload path (needs the deployed app), production `prisma db push` (needs Barron's OK), launchd plist for the worker.
+
+## 2026-11-17 · release/adstudio — Ad Studio goes live (Barron: "最新的这个版本可以上线")
+Brings the lab's Ad Studio work (xark-adstudio-lab-20261107, Nov 7-17) onto main: storyboard/reference workflows, hook and
+end-card gallery (our own example ads only - third-party reference clips are kept out of public/), branding fields, context
+pack, claim lease + reserve-then-approve + safe cancel, key frames / warnings / full cost at approval, Retry, sound profile per
+product (`auto:<k>`), learning-loop weights, run id in ad names, worker updates.
+- Schema: additive only (`AdStudioRun` + `Project.adStudioRuns`); the build's `prisma db push` creates the table.
+- Panel stays behind `NEXT_PUBLIC_ADSTUDIO=1` (set for Production at go-live).
+- Verification on this branch: `tsc --noEmit` 0; `vitest run` 1754 passed / 2 skipped (gallery test now asserts no reference clip ships);
+  worker `node --test` 12/12; eslint on changed Ad Studio paths 0 errors. Files main changed since the branch point were not overwritten.

@@ -19,6 +19,7 @@ export const ADSTUDIO_HOOK_TYPES = [
 ] as const;
 
 export const ADSTUDIO_ENGINES = [
+  { id: "remix", label: "Stock remix · free", note: "Stock footage + your product photos, fast cuts. No AI video, no cost — finishes without an approval step" },
   { id: "auto", label: "Auto · best model per shot type", note: "Veo 3.1 Lite for people and product, Seedance 1.5 Pro for b-roll (2026-11-06 bake-off)" },
   { id: "veo31lite", label: "Veo 3.1 Lite", note: "1080p" },
   { id: "veo31fast", label: "Veo 3.1 Fast", note: "720p" },
@@ -47,14 +48,16 @@ export interface VariantPlan {
   engine: AdStudioEngine;
   /** the first engine of each hook type writes the plan; the others copy it */
   leader: boolean;
-  soundProfile: (typeof ADSTUDIO_SOUND_PROFILES)[number];
+  /** "auto:<k>": the Mac worker picks the k-th sound profile that fits the product (ad-studio pipeline/audio.mjs pickProfile) */
+  soundProfile: (typeof ADSTUDIO_SOUND_PROFILES)[number] | `auto:${number}`;
 }
 
 export class AdStudioPickError extends Error {}
 
 /**
  * Hook types × engines, in pick order. Each hook type gets its own sound profile (the same plan keeps the same
- * sound across engines, so an engine comparison only differs in the footage).
+ * sound across engines, so an engine comparison only differs in the footage). The worker chooses the profiles that fit the
+ * product (2026-11-17: a fixed rotation gave every single-hook batch the same hip-hop bed, skincare included).
  */
 export function planVariants(hookTypes: string[], engines: string[]): VariantPlan[] {
   const hooks = [...new Set(hookTypes)].filter((h) => HOOK_IDS.has(h)) as AdStudioHookType[];
@@ -71,7 +74,7 @@ export function planVariants(hookTypes: string[], engines: string[]): VariantPla
       hookType,
       engine,
       leader: e === 0,
-      soundProfile: ADSTUDIO_SOUND_PROFILES[h % ADSTUDIO_SOUND_PROFILES.length],
+      soundProfile: `auto:${h}` as const,
     }))
   );
 }
@@ -86,3 +89,36 @@ export const PLAN_READY = ["awaiting_approval", "approved", "generating", "compl
 /** states the worker owns and must heartbeat */
 export const WORKER_STATES = ["planning", "generating"];
 export const ACTIVE_STATES = ["queued", "planning", "awaiting_approval", "approved", "generating"];
+
+/** what the batch starts from (Ad Studio pipeline: source "xark" = storyboard/script, "xark-ref" = a reference video) */
+export const ADSTUDIO_WORKFLOWS = [
+  { id: "storyboard", label: "Optimise storyboard / script", note: "Second pass on a Studio storyboard or a Creative script: every planned selling point kept, hook rewritten" },
+  { id: "reference", label: "Imitate a reference", note: "A competitor ad or any TikTok / Instagram link becomes the template; Xark's research supplies product, brand, cast and setting" },
+  { id: "replace", label: "Imitate + replace", note: "Keeps the reference's shots, order, timing and camera; swaps only product, keywords, selling point and offer. You see the replace list before any spend" },
+] as const;
+export type AdStudioWorkflow = (typeof ADSTUDIO_WORKFLOWS)[number]["id"];
+export const isWorkflow = (v: unknown): v is AdStudioWorkflow => ADSTUDIO_WORKFLOWS.some((w) => w.id === v);
+
+/** Ad Studio imitation formats (pipeline/script.mjs SPEC_SCHEMA format) */
+export const ADSTUDIO_FORMATS = [
+  { id: "auto", label: "AI decides from the source" },
+  { id: "product_lock", label: "Product lock · background swaps" },
+  { id: "interview", label: "Street interview Q&A" },
+  { id: "testimonial", label: "Documentary / testimonial" },
+  { id: "single_scene", label: "Single scene, styled props" },
+  { id: "montage", label: "Fast-cut montage" },
+] as const;
+export const isFormat = (v: unknown) => ADSTUDIO_FORMATS.some((f) => f.id === v);
+
+/**
+ * House hook library (services/creative/library.ts HOOKS, H01–H35) → the Ad Studio opening style that can be
+ * enforced on shot 1 (pipeline/hooks.mjs HOOK_STYLES). Hooks not listed go to Ad Studio as a written brief only.
+ */
+export const OPENING_STYLE: Record<string, string> = {
+  H01: "product_hero", H02: "product_hero", H03: "product_hero", H04: "product_hero", H05: "product_hero", H06: "product_hero", H16: "product_hero", H19: "product_hero",
+  H14: "cap_bold", H15: "text_slab", H25: "text_slab", H27: "text_slab", H30: "cap_bold", H32: "text_slab",
+  H17: "ai_talk", H18: "ai_talk", H07: "ai_talk",
+  H23: "broll_open", H34: "broll_open",
+  H28: "punch", H12: "whip",
+};
+export const END_CARD_THEMES = ["brand", "dark", "light", "festive"] as const;

@@ -18,7 +18,7 @@ APP_URL=https://creative.account.xark.io WORKER_TOKEN=… node worker.mjs
 
 | Env | Default | |
 |---|---|---|
-| `APP_URL` | `https://creative.account.xark.io` | |
+| `APP_URL` | required (no default) | production `https://creative.account.xark.io`, lab `http://localhost:3200` |
 | `WORKER_TOKEN` | — | Required. Same token as the libtv-worker |
 | `VERCEL_AUTOMATION_BYPASS_SECRET` | — | Needed if Deployment Protection is on |
 | `AD_STUDIO_ROOT` | `~/Projects/ad-studio-20261104` | |
