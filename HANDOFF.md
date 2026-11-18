@@ -75,3 +75,8 @@
 - 完成: End-to-end production acceptance: brain started a free stock-remix batch for TCL Analysis (#179, paid key capped) → worker script/voice/render/review → completed video on Vercel Blob in 7 min → brain second check PASS (200 mp4, 23.33 s, 1080x1920, h264, aac, -14.0 LUFS)
 - 验证: run cmwm0tra5000008lbzt62l6wa queued 11:11 → completed 11:18; view checks pass:true; workers 32/32
 - 下一步: Barron: raise OpenRouter key cap (paid AI-video path + gate auto-approve then run automatically); decide on Brain* tables
+
+### 2026-11-18 03:25 · claude-opus-5-5
+- 完成: Paid gate path proven end to end on lab Postgres with this code: $1 run auto-approved (SpendEntry 1.3, OpsEvent), $5 held + direct approve refused 409, transient failure retried then approved (day 2.60). Brain tables built as PR #180 (unmerged: merge = production db push), verified on lab DB
+- 验证: lab brain_e2e: 2 ticks; SELECT shows approved+reserved; tables smoke 1 pass
+- 下一步: Barron: merge #180 if you want tables (then BRAIN_TABLES=1); raise OpenRouter key cap for paid AI video in production
