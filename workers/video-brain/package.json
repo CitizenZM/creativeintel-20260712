@@ -1,0 +1,9 @@
+{
+  "name": "video-brain",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Video Brain supervisor loop for Xark Studio + Ad Studio (design: ad-studio-20261104/docs/VIDEO-BRAIN-ARCHITECTURE-20261117.md).",
+  "main": "brain.mjs",
+  "scripts": { "start": "node brain.mjs", "test": "node --test test/*.test.mjs" }
+}

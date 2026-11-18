@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Cpu, LayoutGrid, FolderKanban, Plus, Sparkles, Library } from "lucide-react";
+import { Activity, Brain, Cpu, LayoutGrid, FolderKanban, Plus, Sparkles, Library } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { StageRail } from "@/components/layout/stage-rail";
@@ -17,6 +17,7 @@ const navItems = [
   // Platform-wide (admin only — src/lib/auth/gate.ts keeps members out of them too).
   { href: "/settings/ai", label: "AI engines", icon: Cpu, adminOnly: true },
   { href: "/status", label: "System status", icon: Activity, adminOnly: true },
+  { href: "/brain", label: "Video Brain", icon: Brain, adminOnly: true },
 ];
 
 export function Sidebar({ account, isAdmin = true }: { account?: ReactNode; isAdmin?: boolean }) {

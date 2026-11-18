@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>co.celldigital.video-brain</string>
+  <!-- Video Brain supervisor tick every 5 min. Token from ~/.config/adstudio-worker/prod.env (chmod 600), never in this file. -->
+  <key>ProgramArguments</key><array>
+    <string>/bin/zsh</string><string>-c</string>
+    <string>set -a; . "$HOME/.config/adstudio-worker/prod.env"; set +a; exec "__NODE__" "__DIR__/brain.mjs" --once</string>
+  </array>
+  <key>WorkingDirectory</key><string>__DIR__</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartInterval</key><integer>300</integer>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/video-brain.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/video-brain.log</string>
+</dict></plist>

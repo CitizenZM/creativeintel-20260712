@@ -13,10 +13,11 @@ export function isBlockedPath(pathname: string): boolean {
 
 /**
  * Master-admin-only areas: platform-wide settings (AI providers and keys, users), ops status and
- * debug views, and the shared LibTV balance. A member asking for them is sent to /projects (pages)
+ * debug views, the Video Brain board (/brain, /api/brain — not the worker-token /api/worker/brain), and the
+ * shared LibTV balance. A member asking for them is sent to /projects (pages)
  * or gets a 403 (API).
  */
-const ADMIN_ONLY = /^\/(settings\/(ai|users)|status|api\/(settings|debug|libtv))(\/|$)/;
+const ADMIN_ONLY = /^\/(settings\/(ai|users)|status|brain|api\/(settings|debug|libtv|brain))(\/|$)/;
 
 export function isAdminOnlyPath(pathname: string): boolean {
   return ADMIN_ONLY.test(pathname);
