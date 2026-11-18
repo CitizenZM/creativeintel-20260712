@@ -42,3 +42,17 @@ test('tick wiring: no batch while the OpenRouter balance probe fails', async () 
   assert.ok(!calls.includes('batch')); assert.ok(!calls.includes('retry'));
   assert.ok(pub.events.some((e) => /no new paid work/.test(e.summary)));
 });
+
+test('tick wiring: when the balance probe turns green again, runs that failed on 402 are retried once', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-refund-'));
+  const now = Date.now();
+  await writeFile(path.join(home, 'state.json'), JSON.stringify({ checks: {}, incidents: {}, probes: [{ name: 'openrouter balance', ok: true, detail: '$50' }], fundsWereOut: true, patterns: [], loopStatus: {}, acted: {}, probesAt: new Date(now).toISOString(), patternsAt: new Date(now).toISOString(), syncHash: 'x', batched: { p9: new Date(now).toISOString() } }));
+  const { tick } = await import('../brain.mjs?refund');
+  const runs = [{ id: 'r402', projectId: 'p9', status: 'failed', error: 'OpenRouter 402: requires at least $1.00 in balance', retries: 0, updatedAt: new Date(now - 3_600_000).toISOString(), estUsd: 0 }, { id: 'rcode', projectId: 'p9', status: 'failed', error: 'TypeError: x', retries: 0, updatedAt: new Date(now - 3_600_000).toISOString(), estUsd: 0 }];
+  const retried = [];
+  const call = async (a, b = {}) => { if (a === 'retry') retried.push(b.runId); if (a === 'observe') return { status: 200, policy: { autoApprove: true, maxRunUsd: 3, maxDayUsd: 20, maxRunAgeH: 24 }, learnings: [], spend: { autoApprovedTodayUsd: 0, byProject7d: {} }, perf: [], heartbeats: [], projects: [], stages: [], runs }; if (a === 'publish') return { status: 200, ok: true, verified: true }; return { status: 200, ok: true, status2: 'queued' }; };
+  await tick({ call, now, home, local: async () => ({ projects: [], stages: [], runs: [] }) });
+  assert.deepEqual(retried, ['r402']);
+  await tick({ call, now: now + 300_000, home, local: async () => ({ projects: [], stages: [], runs: [] }) });
+  assert.deepEqual(retried, ['r402'], 'only on the flip, not every tick');
+});

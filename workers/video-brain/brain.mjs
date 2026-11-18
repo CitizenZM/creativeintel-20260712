@@ -16,7 +16,7 @@ import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { think, approvals, retries, batchCandidates } from './lib/think.mjs';
+import { think, approvals, retries, batchCandidates, fundsRetries } from './lib/think.mjs';
 import { aggregate } from './lib/incidents.mjs';
 import { secondCheck } from './lib/verify.mjs';
 import { runProbes } from './lib/probes.mjs';
@@ -131,6 +131,16 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   const before = Object.keys(state.incidents).length;
   state.incidents = aggregate(state.incidents, obs.runs.filter((r) => r.status === 'failed'), now);
   if (Object.keys(state.incidents).length > before) events.push(ev('Doctor', 'think', `${Object.keys(state.incidents).length - before} new incident signature(s)`));
+
+  // funds back (balance probe green again after failing) → retry what failed for lack of funds
+  const fundsNow = !(state.probes || []).some((p) => p.name === 'openrouter balance' && !p.ok);
+  if (fundsNow && state.fundsWereOut && !dryRun) {
+    for (const r of fundsRetries(obs.runs, now)) {
+      const out = await call('retry', { runId: r.id, why: 'brain: provider balance restored' });
+      events.push(ev('Producer', 'call', out.ok ? `funds restored: retried run ${r.id.slice(-6)} → ${out.status}` : `retry after funds refused ${r.id.slice(-6)}: ${out.error}`, r.projectId, r.id));
+    }
+  }
+  state.fundsWereOut = !fundsNow;
 
   // PROBES + PATTERNS (slower cadence)
   if (!state.probesAt || now - Date.parse(state.probesAt) > PROBE_EVERY_MS) {
