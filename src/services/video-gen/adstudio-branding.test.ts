@@ -27,7 +27,7 @@ describe("typed logo / product / link / coupon", () => {
     expect(readFileSync("src/components/studio/adstudio-gallery.tsx", "utf8")).toMatch(/MockBrand\.Provider value=\{\{ product: branding\.productImageUrl, logo: branding\.logoUrl/);
     expect(readFileSync("src/components/studio/adstudio-panel.tsx", "utf8")).toMatch(/autoId=\{auto\.hookId\} branding=\{branding\}/);
     expect(readFileSync("src/app/api/projects/[projectId]/studio/adstudio-runs/route.ts", "utf8")).toMatch(/branding: body\.branding/);
-    expect(readFileSync("src/services/video-gen/adstudio-queue.ts", "utf8")).toMatch(/cleanBranding\(input\.branding\)[\s\S]*branding \}/);
+    expect(readFileSync("src/services/video-gen/adstudio-queue.ts", "utf8")).toMatch(/cleanBranding\(input\.branding\)[\s\S]*branding, visualMode \}/);
     expect(readFileSync("src/app/api/projects/[projectId]/studio/adstudio-endcard-preview/route.ts", "utf8")).toMatch(/typed\.logoUrl \?\? look\.logoUrl/);
     expect(readFileSync("workers/adstudio-worker/worker.mjs", "utf8")).toMatch(/logoUrl: br\.logoUrl/);
   });

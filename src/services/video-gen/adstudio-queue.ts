@@ -43,6 +43,8 @@ export interface CreateBatchInput {
   /** end-card template (E01–E12), "auto" = the campaign plan's end card, "" = Ad Studio's own close */
   endCardId?: string;
   endCardTheme?: string;
+  /** video (default) | slides | mixed - see VISUAL_MODES */
+  visualMode?: string;
   /** Ad Studio imitation format (auto | product_lock | interview | testimonial | single_scene | montage) */
   format?: string;
   /** logo / product photo / link / coupon / headline / button typed in the panel (adstudio-branding.ts) */
@@ -155,12 +157,15 @@ export async function createBatch(input: CreateBatchInput) {
   const isRef = !!refUrlOf(input.storyboardId);
   if (workflow === "storyboard" && isRef) throw new AdStudioError("Pick a storyboard or script for this workflow");
   if (workflow !== "storyboard" && !isRef) throw new AdStudioError("Pick a reference video for this workflow");
+  const visualMode = visualModeOf({ visualMode: input.visualMode });
+  // video mode needs footage the worker can generate: the stock-photo remix engine would bring product photos back
+  if (visualMode === "video" && input.engines.some((e) => e === FREE_ENGINE)) throw new AdStudioError("Video mode needs an AI video engine - the stock remix uses product photos. Pick an engine, or choose Slides / Mixed.");
   const variants = planVariants(input.hookTypes, input.engines);
   const base = await buildInput(input.projectId, input.storyboardId);
   const plan = await prisma.project.findUnique({ where: { id: input.projectId }, select: { campaignPlan: true } });
   const { opening, endCard } = pickOpeningEnding(input, plan?.campaignPlan);
   const branding = cleanBranding(input.branding);
-  const extra = { workflow, opening, endCard, format: isFormat(input.format) ? input.format : "auto", branding };
+  const extra = { workflow, opening, endCard, format: isFormat(input.format) ? input.format : "auto", branding, visualMode };
   const batchId = randomUUID();
   const baseOffer = input.offer ?? (base.brandKit?.offerText ? { text: base.brandKit.offerText } : undefined);
   // typed coupon code / text win over the brand kit's offer
@@ -221,6 +226,11 @@ export async function approveRun(projectId: string, runId: string) {
   }
   return prisma.adStudioRun.findUniqueOrThrow({ where: { id: runId }, select: LIST_SELECT });
 }
+
+/** video (default): every shot is real footage · slides: key frames + camera moves, no video model · mixed: AI scenes plus photo/type-card shots */
+export const VISUAL_MODES = ["video", "slides", "mixed"] as const;
+export type VisualMode = (typeof VISUAL_MODES)[number];
+export const visualModeOf = (input: unknown): VisualMode => { const m = (input as { visualMode?: string } | null)?.visualMode; return (VISUAL_MODES as readonly string[]).includes(m ?? "") ? (m as VisualMode) : "video"; };
 
 /** a failed run may be retried this many times (the worker resumes at the failed step, so a plan already paid for is reused) */
 export const MAX_RETRIES = 3;
@@ -379,10 +389,14 @@ export async function reportGate(runId: string, g: { estimate: { usd: number } &
 
 export async function reportDone(runId: string, d: { finalMp4Url: string; posterUrl?: string; review?: unknown; metrics?: unknown; autofix?: unknown; plan?: unknown; actualUsd?: number; log?: string[]; claim?: string }) {
   const r = await owned(runId, d.claim);
-  // a free run (stock remix) renders during planning and never waits for approval; a paid engine must pass the gate
-  if (r.status !== "generating" && !(r.status === "planning" && r.engine === FREE_ENGINE)) throw new AdStudioError(`done from status "${r.status}"`, 409);
+  // a free run (stock remix, or slides mode: key frames + camera moves, no video model) renders during planning and never waits
+  // for approval; a paid video engine must pass the gate
+  const freeRun = r.engine === FREE_ENGINE || visualModeOf(r.input) === "slides";
+  if (r.status !== "generating" && !(r.status === "planning" && freeRun)) throw new AdStudioError(`done from status "${r.status}"`, 409);
   const actual = d.actualUsd ?? r.estUsd;
   if (r.spendEntryId) await (await spendLedger()).settle(r.spendEntryId, Math.max(0, actual - (r.actualUsd ?? 0)));
+  // a slides run paid only for its key frames during planning: book them (no gate ran to do it)
+  else if (r.status === "planning" && actual > 0) await prisma.spendEntry.create({ data: { projectId: r.projectId, runId, kind: "image", model: "adstudio:keyframes", estUsd: actual, actualUsd: actual } });
   if (d.review) await saveReviewInsight(r.projectId, r, d.review); // P4: review → Insights
   return prisma.adStudioRun.update({
     where: { id: runId },

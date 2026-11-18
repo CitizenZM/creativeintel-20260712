@@ -106,3 +106,8 @@ test('approval card gets a small copy of each AI scene key frame (continued scen
     assert.equal(w, '360');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+test('visual mode from Studio reaches the job; anything unknown means video', () => {
+  assert.equal(jobOf(run).visualMode, 'video');
+  assert.equal(jobOf({ ...run, input: { ...run.input, visualMode: 'slides' } }).visualMode, 'slides');
+  assert.equal(jobOf({ ...run, input: { ...run.input, visualMode: 'nope' } }).visualMode, 'video');
+});

@@ -44,3 +44,8 @@ product (`auto:<k>`), learning-loop weights, run id in ad names, worker updates.
 - launchd `co.celldigital.adstudio-worker` (KeepAlive) runs `workers/adstudio-worker/worker.mjs` from this checkout (now on `main` c42f2e8); env from `~/.config/adstudio-worker/prod.env` (chmod 600: APP_URL https://creative.account.xark.io, production WORKER_TOKEN, AD_STUDIO_ROOT); log `~/Library/Logs/adstudio-worker.log`.
 - Checks: token probe → 404 "Run not found" (auth ok, prod `AdStudioRun` table queried), wrong token → 401; Claude CLI answers with a login environment (pipeline subscription mode works); worker process alive, first claim returned no run and logged no error.
 - Spend still only after a user approves a run in Studio (reservation = estimate × 1.3).
+
+## 2026-11-17 · feat/visual-mode — Picture mode asked before generation
+- Studio panel "Picture": Video (default, every shot is real footage), Slides (key frames + camera moves, no video model), Slides + video. Stored as `input.visualMode`; the worker passes it to the pipeline. Video mode refuses the stock-photo remix engine. A slides run finishes from planning (no gate, $0 video) and books its key frames as image spend.
+- Engine list: "Seedance 1.5 Pro" removed (retired from OpenRouter; the pipeline maps old runs to Seedance 2.0).
+- Verification: vitest video-gen + studio 500 passed; worker 13/13; tsc 0.
