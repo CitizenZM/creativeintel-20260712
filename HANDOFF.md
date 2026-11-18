@@ -45,3 +45,8 @@
 - 完成: PR #167 merged (dcce8b4): picture mode video/slides/mixed; prod deploy success; worker restarted on main
 - 验证: Vercel success; prod API 401 unauth; worker PID running
 - 下一步: Barron: test one video-mode run in Studio
+
+### 2026-11-18 00:58 · claude-sonnet-5-5 (barron-brain worker)
+- 完成: Prod video-mode smoke NOT run: needs real spend (~$1.7) and a signed-in approval; project test path is free-only
+- 验证: read scripts/smoke.ts and docs; RUN-REPORT updated; no run created
+- 下一步: Barron: OK ~$2 spend or provide test-user session; then run, ffprobe, frame grid

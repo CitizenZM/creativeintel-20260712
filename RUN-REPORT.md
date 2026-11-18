@@ -49,3 +49,9 @@ product (`auto:<k>`), learning-loop weights, run id in ad names, worker updates.
 - Studio panel "Picture": Video (default, every shot is real footage), Slides (key frames + camera moves, no video model), Slides + video. Stored as `input.visualMode`; the worker passes it to the pipeline. Video mode refuses the stock-photo remix engine. A slides run finishes from planning (no gate, $0 video) and books its key frames as image spend.
 - Engine list: "Seedance 1.5 Pro" removed (retired from OpenRouter; the pipeline maps old runs to Seedance 2.0).
 - Verification: vitest video-gen + studio 500 passed; worker 13/13; tsc 0.
+
+## 2026-11-18 · prod video-mode smoke run — NOT RUN (blocked)
+- Why: a video-mode run generates real footage (last real run $1.69, reservation = estimate x 1.3) and the approval gate needs a signed-in Studio user (Clerk/Xark SSO). The project's only token-based test path (`scripts/smoke.ts`, worker token) is free-only: health, operator select-creative, estimate-run. It cannot create or approve a run. Run rules forbid spending money, so nothing was triggered.
+- Not done: no run created, no ffprobe, no frame grid. Status is not success.
+- Tooling ready: ffprobe/ffmpeg at /opt/homebrew/bin; worker co.celldigital.adstudio-worker on main.
+- Needs from Barron: OK on ~$2 spend, or a test-user path (service session / Access token) that can create and approve a run. Then: create video-mode run, approve, poll, `ffprobe -show_entries format=duration`, `ffmpeg -vf tile` frame grid, save in this file.
