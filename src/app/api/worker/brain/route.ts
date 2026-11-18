@@ -7,6 +7,7 @@
  *   { action: "publish", snapshot }                         -> { ok, bytes, events, learnings } then re-read (second check)
  *   { action: "approve", runId, why }                       -> brain auto-approval within policy (server re-checks the caps)
  *   { action: "retry", runId, why }                         -> retry a failed run (Ad Studio retryRun, max 3)
+ *   { action: "batch", projectId, why }                     -> start ONE Ad Studio variant from the newest storyboard (no spend: it stops at the gate)
  *   { action: "learn", learning }                           -> { ok, count }
  *   { action: "events", events }                            -> { ok }
  */
@@ -17,7 +18,8 @@ import { observe } from "@/services/brain/observe";
 import { addLearning, appendEvents, getPolicy, getSnapshot, getView, publish } from "@/services/brain/store";
 import { canAutoApprove } from "@/services/brain/policy";
 import { pacificDayStart } from "@/services/brain/observe";
-import { AdStudioError, approveRun, reserveUsd, retryRun } from "@/services/video-gen/adstudio-queue";
+import { AdStudioError, approveRun, createBatch, reserveUsd, retryRun } from "@/services/video-gen/adstudio-queue";
+import { BRAIN_BATCH, pickBatch } from "@/services/brain/batch";
 import type { BrainEvent, BrainLearning, BrainSnapshot } from "@/services/brain/contract";
 
 export const dynamic = "force-dynamic";
@@ -70,6 +72,21 @@ export async function POST(request: Request) {
         await logOps("brain-retry", body.runId, run.projectId, true, { why: String(body.why || ""), status: r.status });
         return NextResponse.json({ ok: true, status: r.status });
       }
+      case "batch": {
+        if (typeof body.projectId !== "string") return NextResponse.json({ error: "projectId required" }, { status: 400 });
+        const project = await prisma.project.findUnique({ where: { id: body.projectId }, select: { productUrl: true, archivedAt: true } });
+        if (!project || project.archivedAt) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+        const [storyboards, runs] = await Promise.all([
+          prisma.storyboard.findMany({ where: { projectId: body.projectId, deletedAt: null }, select: { id: true, frames: true, createdAt: true }, take: 20 }),
+          prisma.adStudioRun.findMany({ where: { projectId: body.projectId }, select: { status: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 20 }),
+        ]);
+        const pick = pickBatch({ storyboards, runs, productUrl: project.productUrl });
+        if (!pick.ok) return NextResponse.json({ ok: false, reason: pick.reason }, { status: 409 });
+        const out = await createBatch({ projectId: body.projectId, storyboardId: pick.storyboardId, hookTypes: [...BRAIN_BATCH.hookTypes], engines: [...BRAIN_BATCH.engines], visualMode: BRAIN_BATCH.visualMode, openingId: BRAIN_BATCH.openingId, endCardId: BRAIN_BATCH.endCardId, notes: `Started by the Video Brain: ${String(body.why || "").slice(0, 200)}`, createdById: null });
+        const back = await prisma.adStudioRun.findMany({ where: { batchId: out.batchId }, select: { id: true, status: true } });
+        await prisma.opsEvent.create({ data: { action: "brain-batch", targetType: "run", targetId: back[0]?.id ?? null, projectId: body.projectId, ok: back.length > 0, detail: { storyboardId: pick.storyboardId, why: String(body.why || "") } as never } });
+        return NextResponse.json({ ok: back.length === out.runs.length && back.every((r) => r.status === "queued"), batchId: out.batchId, runs: back });
+      }
       case "learn": {
         const l = body.learning as BrainLearning | undefined;
         if (!l || typeof l.id !== "string" || typeof l.rule !== "string") return NextResponse.json({ error: "learning {id, rule} required" }, { status: 400 });
@@ -82,7 +99,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, count: ev.length });
       }
       default:
-        return NextResponse.json({ error: 'action must be one of "observe" | "view" | "publish" | "approve" | "retry" | "learn" | "events"' }, { status: 400 });
+        return NextResponse.json({ error: 'action must be one of "observe" | "view" | "publish" | "approve" | "retry" | "batch" | "learn" | "events"' }, { status: 400 });
     }
   } catch (err) {
     if (err instanceof AdStudioError) return NextResponse.json({ ok: false, error: err.message }, { status: err.status });

@@ -268,3 +268,11 @@ test('rules PR: only confirmed script-side learnings; one PR per content hash; n
   const order = ['worktree add', 'node --test', 'commit', 'push', 'gh pr create', 'worktree remove'].map((k) => cmds.findIndex((c) => c.includes(k)));
   assert.ok(order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])), order.join(','));
 });
+
+test('batch candidates: Xark project at studio with no runs, one per tick, 24 h cooldown, never local/batch', async () => {
+  const { batchCandidates } = await import('../lib/think.mjs');
+  const L = (id, o = {}) => ({ projectId: id, step: 'studio', stage: 'project', runs: { active: 0, done: 0, failed: 0 }, ...o });
+  assert.deepEqual(batchCandidates([L('a'), L('b')], {}, NOW).map((l) => l.projectId), ['a']);
+  assert.deepEqual(batchCandidates([L('a'), L('b')], { a: new Date(NOW - H).toISOString() }, NOW).map((l) => l.projectId), ['b']);
+  assert.deepEqual(batchCandidates([L('local:x'), L('batch:y'), L('c', { step: 'setup' }), L('d', { runs: { active: 0, done: 1, failed: 0 } })], {}, NOW), []);
+});

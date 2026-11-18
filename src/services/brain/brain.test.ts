@@ -6,6 +6,7 @@ import { canAutoApprove } from "./policy";
 import { mergeEvents, mergeLearnings, viewOf } from "./store";
 import { pacificDayStart } from "./observe";
 import { overlayRuns } from "./live";
+import { pickBatch } from "./batch";
 import { DEFAULT_POLICY, type BrainSnapshot } from "./contract";
 
 const reserve = (e: number) => Math.round(e * 1.3 * 10000) / 10000;
@@ -70,5 +71,19 @@ describe("live overlay", () => {
     expect(out.executing.map((t) => [t.id, t.step, t.progress])).toEqual([["srv1", "render", 40]]);
     expect(out.executing[0].gates[0].gate).toBe("estimate");
     expect(out.liveAt).toBe("2026-11-18T10:05:00.000Z");
+  });
+});
+
+describe("pickBatch", () => {
+  const now = Date.parse("2026-11-18T12:00:00Z");
+  const sb = (id: string, at: string, frames: unknown = [1]) => ({ id, frames, createdAt: new Date(at) });
+  it("newest storyboard with frames", () => {
+    expect(pickBatch({ productUrl: "u", runs: [], storyboards: [sb("a", "2026-11-01"), sb("b", "2026-11-10"), sb("c", "2026-11-12", [])] }, now)).toEqual({ ok: true, storyboardId: "b" });
+  });
+  it("refuses without product URL, with an active run, within 24 h of a batch, or without frames", () => {
+    expect(pickBatch({ productUrl: null, runs: [], storyboards: [sb("a", "2026-11-01")] }, now).ok).toBe(false);
+    expect(pickBatch({ productUrl: "u", runs: [{ status: "planning", createdAt: new Date("2026-11-01") }], storyboards: [sb("a", "2026-11-01")] }, now).ok).toBe(false);
+    expect(pickBatch({ productUrl: "u", runs: [{ status: "completed", createdAt: new Date(now - 3_600_000) }], storyboards: [sb("a", "2026-11-01")] }, now).ok).toBe(false);
+    expect(pickBatch({ productUrl: "u", runs: [], storyboards: [sb("a", "2026-11-01", [])] }, now).ok).toBe(false);
   });
 });

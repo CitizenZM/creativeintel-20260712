@@ -109,6 +109,11 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
   return { ...base, step, stage: 'project', status: idle ? 'idle-defect' : 'active', idleSince: idle ? iso(lastActivity) : null, agent: STEP_AGENT[step], doing: idle ? `stalled ${Math.round((now - lastActivity) / H)} h at ${step}: ${action}` : `${step}: ${action}`, nextAction: action, nextCheckpointAt: at(idle ? 6 * H : 24 * H), verifyHow: `project-stages: ${step} criteria all met` };
 }
 
+/** server projects whose storyboard is ready but nothing was ever produced: the brain starts one variant (≤ 1 per tick) */
+export function batchCandidates(loops, state = {}, now = Date.now()) {
+  return loops.filter((l) => !/^(local|batch):/.test(l.projectId) && l.step === 'studio' && l.stage === 'project' && l.runs.active + l.runs.done + l.runs.failed === 0 && !(state[l.projectId] && now - Date.parse(state[l.projectId]) < 24 * H)).slice(0, 1);
+}
+
 export function think(obs, checks, now = Date.now()) {
   const used = obs.spend.autoApprovedTodayUsd || 0;
   const stagesBy = Object.fromEntries((obs.stages || []).map((s) => [s.projectId, s]));
