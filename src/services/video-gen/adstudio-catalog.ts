@@ -26,7 +26,6 @@ export const ADSTUDIO_ENGINES = [
   { id: "kling3", label: "Kling 3.0", note: "720p" },
   { id: "seedance2", label: "Seedance 2.0", note: "720p" },
   { id: "seedance2fast", label: "Seedance 2.0 Fast", note: "720p, cheapest Seedance" },
-  { id: "seedance15", label: "Seedance 1.5 Pro", note: "720p" },
   { id: "wan3", label: "Wan 3.0", note: "720p" },
   { id: "h3", label: "MiniMax H3", note: "2K" },
   { id: "omni", label: "Gemini Omni 1.2", note: "720p, always with audio" },

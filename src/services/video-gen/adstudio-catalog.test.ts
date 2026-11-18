@@ -22,6 +22,6 @@ describe("planVariants", () => {
   });
   it("ids match the Mac pipeline (ad-studio pipeline/hooks.mjs HOOK_TYPES, pipeline/generate.mjs ENGINES + the free stock remix engine)", () => {
     expect(ADSTUDIO_HOOK_TYPES.map((h) => h.id).sort()).toEqual(["bold", "curiosity", "interrupt", "keep", "offer", "pain", "question", "result", "social", "story"]);
-    expect(ADSTUDIO_ENGINES.map((e) => e.id).sort()).toEqual(["auto", "h3", "kling3", "omni", "remix", "seedance15", "seedance2", "seedance2fast", "veo31fast", "veo31lite", "wan3"]);
+    expect(ADSTUDIO_ENGINES.map((e) => e.id).sort()).toEqual(["auto", "h3", "kling3", "omni", "remix", "seedance2", "seedance2fast", "veo31fast", "veo31lite", "wan3"]);
   });
 });
