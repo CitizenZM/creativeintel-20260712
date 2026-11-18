@@ -101,6 +101,9 @@ export function planOf(spec) {
 
 /** the step a retried plan resumes at: the first step the last attempt did not finish (a plan already paid for is reused);
  *  a fresh folder or a failure before the script starts from the beginning */
+/** a local job that already rendered and was reviewed: nothing left to run */
+export const alreadyDone = (st, hasFinal) => st?.state === 'done' && !!hasFinal;
+
 export function resumeFrom(st) {
   if (!st || st.state !== 'failed') return 'ingest';
   const s = STEPS.find((x) => !['done', 'skipped'].includes(st.steps?.[x]));
@@ -193,6 +196,9 @@ export async function handle(run) {
     const job = jobOf(run);
     if (run.input?.endCard) { const ec = await endCardFiles(run.runId, dir); if (ec?.layers) job.endCard = ec; else job.endCardSkipped = `${run.input.endCard.id}: ${ec?.skipped}`; }
     await writeFile(path.join(dir, 'job.json'), JSON.stringify(job, null, 1));
+    // finished on this Mac already (e.g. completed by hand after the platform ran out of retries): upload it, do not redo it
+    const prev = await readJSON(path.join(dir, 'status.json'));
+    if (run.phase === 'plan' && alreadyDone(prev, existsSync(path.join(dir, 'final.mp4')))) return finish(run, id, prev);
     // a retried run resumes where the last attempt failed (its script, key frames and gen.json are still in this folder)
     let from = run.phase === 'plan' ? resumeFrom(await readJSON(path.join(dir, 'status.json'))) : 'ingest';
     if (run.phase === 'copy_plan') {

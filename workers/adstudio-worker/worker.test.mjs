@@ -1,7 +1,7 @@
 // node --test workers/adstudio-worker - job.json mapping and plan extraction (no network, no pipeline)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { jobOf, planOf, jobIdOf, runLoop, resumeFrom, keyframeThumbs } from './worker.mjs';
+import { jobOf, planOf, jobIdOf, runLoop, resumeFrom, keyframeThumbs, alreadyDone } from './worker.mjs';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -118,4 +118,11 @@ test('budget fallback: a slides run marked zeroCost tells Ad Studio to build $0 
   assert.equal(j.visualMode, 'slides'); assert.equal(j.zeroCost, true); assert.equal(j.fallback, 'budget');
   const v = jobOf(base);
   assert.equal(v.visualMode, 'video'); assert.equal(v.zeroCost, undefined);
+});
+
+test('a job finished on this Mac is uploaded, not re-run from ingest', () => {
+  assert.equal(alreadyDone({ state: 'done' }, true), true);
+  assert.equal(alreadyDone({ state: 'done' }, false), false);
+  assert.equal(alreadyDone({ state: 'failed' }, true), false);
+  assert.equal(resumeFrom({ state: 'done' }), 'ingest'); // why the shortcut is needed
 });
