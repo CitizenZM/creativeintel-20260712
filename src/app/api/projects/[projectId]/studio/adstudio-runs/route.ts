@@ -77,6 +77,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
     endCardId?: string;
     endCardTheme?: string;
     format?: string;
+    visualMode?: string;
     branding?: unknown;
   };
   if (!body.storyboardId) return NextResponse.json({ error: "storyboardId required" }, { status: 400 });
@@ -87,7 +88,7 @@ async function unguardedPOST(request: Request, { params }: { params: Promise<{ p
       hookTypes: Array.isArray(body.hookTypes) ? body.hookTypes : [],
       engines: Array.isArray(body.engines) ? body.engines : [],
       offer: body.offer,
-      workflow: body.workflow, openingId: body.openingId, endCardId: body.endCardId, endCardTheme: body.endCardTheme, format: body.format, branding: body.branding,
+      workflow: body.workflow, openingId: body.openingId, endCardId: body.endCardId, endCardTheme: body.endCardTheme, format: body.format, branding: body.branding, visualMode: body.visualMode,
       notes: typeof body.notes === "string" ? body.notes.slice(0, 2000) : undefined,
       createdById: request.headers.get(ACTOR_HEADER),
     });

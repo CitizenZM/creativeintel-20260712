@@ -79,6 +79,7 @@ export function AdStudioPanel({ projectId, storyboard }: { projectId: string; st
   const [refLink, setRefLink] = useState("");
   const [formats, setFormats] = useState<Option[]>([]);
   const [format, setFormat] = useState("auto");
+  const [visualMode, setVisualMode] = useState<"video" | "slides" | "mixed">("video");
   const [openings, setOpenings] = useState<OpeningOpt[]>([]);
   const [openingId, setOpeningId] = useState("auto");
   const [endCards, setEndCards] = useState<EndCardOpt[]>([]);
@@ -279,6 +280,21 @@ export function AdStudioPanel({ projectId, storyboard }: { projectId: string; st
           ))}
         </div>
       </details>
+      <fieldset data-testid="adstudio-visual-mode" className="text-xs">
+        <legend className="mb-1.5 font-medium">Picture <span className="font-normal text-muted-foreground">· asked before anything is generated</span></legend>
+        <div className="flex flex-wrap gap-2">
+          {([
+            ["video", "Video (default)", "Every shot is real moving footage from the video model. No product-photo or type-card slides."],
+            ["slides", "Slides", "Only key-frame images with camera moves - no video model, cents per video. Use only when you want a slideshow."],
+            ["mixed", "Slides + video", "AI video scenes plus product-photo and type-card shots where the script wants them."],
+          ] as const).map(([id, label, note]) => (
+            <label key={id} className={cn("flex max-w-xs cursor-pointer items-start gap-2 rounded-md border px-2.5 py-1.5", visualMode === id ? "border-foreground bg-muted" : "border-border")}>
+              <input type="radio" name="adstudio-visual-mode" value={id} checked={visualMode === id} onChange={() => setVisualMode(id)} className="mt-0.5" />
+              <span><b>{label}</b><span className="block text-muted-foreground">{note}</span></span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <label data-testid="adstudio-look" className="flex flex-wrap items-center gap-2 text-xs">
         <span className="font-medium">Imitation style</span>
         <select value={format} onChange={(e) => setFormat(e.target.value)} className="rounded-md border border-border bg-background px-2 py-1.5">
@@ -299,7 +315,7 @@ export function AdStudioPanel({ projectId, storyboard }: { projectId: string; st
         <button
           type="button"
           disabled={count === 0 || count > maxVariants || busy === "create" || !activeId}
-          onClick={() => post(base, { storyboardId: activeId, workflow, hookTypes: pickHooks, engines: pickEngines, notes, openingId, endCardId, endCardTheme: endTheme, format, branding: cleanBranding(brandDraft) }, "create")}
+          onClick={() => post(base, { storyboardId: activeId, workflow, hookTypes: pickHooks, engines: pickEngines, notes, openingId, endCardId, endCardTheme: endTheme, format, visualMode, branding: cleanBranding(brandDraft) }, "create")}
           className="inline-flex h-9 items-center gap-1.5 rounded-md bg-foreground px-3.5 text-sm font-semibold text-background disabled:opacity-40"
         >
           {busy === "create" && <Loader2 className="h-4 w-4 animate-spin" />}
