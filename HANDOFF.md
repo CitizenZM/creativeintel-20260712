@@ -35,3 +35,8 @@
 - 完成: Clerk azp fix: creative proxy authorizedParties now accepts https://portal.account.xark.io (PR #164 squash-merged c0ff48b, prod dpl_2dWbtoSKk7YWTwcg3ceJgwvWUVA5 Ready). client-portal JWKS 401 NOT fixed: Production CLERK_SECRET_KEY is a 14-char truncated value; no valid Xark Accounts production key exists locally or in readable Vercel envs
 - 验证: vitest 177 files/1696 tests pass, tsc rc=0; vercel deployment READY on c0ff48b; no azp traffic since 04:45Z so live log confirmation pending; client-portal: jwks kid comparison of all candidate keys = no match for ins_3LNY0DFM9cAcjqks3YXG4yOD3ck
 - 下一步: Barron: copy Secret key from Clerk app Xark Accounts > Production > API keys into Vercel client-portal Production CLERK_SECRET_KEY and redeploy; then re-check creative runtime logs for azp
+
+### 2026-11-17 18:25 · claude-opus-5-5
+- 完成: Ad Studio released to production: PR #166 squash-merged (c42f2e8); NEXT_PUBLIC_ADSTUDIO=1 set for Production; build db push created AdStudioRun (additive); third-party reference clips kept out of public/
+- 验证: branch: tsc 0, vitest 1754 pass, worker 12/12, local next build ok; prod: Vercel deploy success, build log 'database is now in sync', creative.account.xark.io API 401 unauth, worker 401 without token, env re-read NEXT_PUBLIC_ADSTUDIO=1
+- 下一步: Signed-in check of the Studio panel; start the Mac adstudio-worker against production (APP_URL creative.account.xark.io + prod WORKER_TOKEN)
