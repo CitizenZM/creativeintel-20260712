@@ -1,5 +1,5 @@
 // tests never message Barron or call the model
-process.env.VIDEO_BRAIN_DIGEST = '0'; process.env.VIDEO_BRAIN_STRATEGIST = '0';
+process.env.VIDEO_BRAIN_DIGEST = '0'; process.env.VIDEO_BRAIN_STRATEGIST = '0'; process.env.VIDEO_BRAIN_CRITIC = '0';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
@@ -28,7 +28,9 @@ test('tick wiring: local Ad Studio jobs join the loops; own jobs approved via th
   };
   let published;
   const wrapped = async (a, b) => { const r = await call(a, b); if (a === 'publish') published = b.snapshot; return r; };
-  const r = await tick({ call: wrapped, now, home, strategist: null, local, approveLocal });
+  const critiqued = [];
+  const critic = async (v, d) => { critiqued.push([v, d]); return { model: 'google/x', scores: { first_frame: 3, product_clear: 3, consistency: 3, no_garbled_text: 2, sells: 3, issues: ['garbled label'] }, avg: 2.8, pass: false }; };
+  const r = await tick({ call: wrapped, now, home, strategist: null, local, approveLocal, critic });
   assert.equal(r.ok, true);
   assert.deepEqual(approved, ['own1']);
   assert.ok(!calls.includes('approve'), 'local jobs never go to the server approve');
@@ -37,4 +39,6 @@ test('tick wiring: local Ad Studio jobs join the loops; own jobs approved via th
   assert.equal(published.spend.autoApprovedTodayUsd, 1.3);
   // local finished videos get the second check too (regression: only URL runs were checked)
   assert.equal(published.checks.length, 1); assert.equal(published.checks[0].runId, 'local:done1'); assert.equal(published.checks[0].pass, false);
+  // the critic only runs when the file probed (no duration for a missing file)
+  assert.equal(critiqued.length, 0);
 });

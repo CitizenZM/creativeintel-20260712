@@ -5,6 +5,7 @@ vi.mock("@/services/ops/health", () => ({ scanHealth: vi.fn() }));
 import { canAutoApprove } from "./policy";
 import { mergeEvents, mergeLearnings, viewOf } from "./store";
 import { pacificDayStart } from "./observe";
+import { overlayRuns } from "./live";
 import { DEFAULT_POLICY, type BrainSnapshot } from "./contract";
 
 const reserve = (e: number) => Math.round(e * 1.3 * 10000) / 10000;
@@ -57,5 +58,17 @@ describe("pacificDayStart", () => {
   it("is Pacific midnight", () => {
     expect(pacificDayStart(new Date("2026-11-18T12:00:00Z")).toISOString()).toBe("2026-11-18T08:00:00.000Z");
     expect(pacificDayStart(new Date("2026-11-18T07:30:00Z")).toISOString()).toBe("2026-11-17T08:00:00.000Z");
+  });
+});
+
+describe("live overlay", () => {
+  const base = { v: 1, at: "2026-11-18T10:00:00Z", queue: [{ id: "local:a", status: "gated" }, { id: "srv1", status: "gated", gates: [{ gate: "estimate", pass: true, detail: "$1" }] }], executing: [{ id: "srvOld", status: "running" }] } as unknown as BrainSnapshot;
+  const r = (id: string, status: string) => ({ id, projectId: "p", status, step: "render", progress: 40, estUsd: 1, actualUsd: null, hookType: "pain", engine: "auto", updatedAt: "2026-11-18T10:04:00Z" });
+  it("replaces server runs with the fresh DB state, keeps local jobs and gate results", () => {
+    const out = overlayRuns(base, [r("srv1", "generating"), r("srv2", "queued")], Date.parse("2026-11-18T10:05:00Z"));
+    expect(out.queue.map((t) => t.id)).toEqual(["local:a", "srv2"]);
+    expect(out.executing.map((t) => [t.id, t.step, t.progress])).toEqual([["srv1", "render", 40]]);
+    expect(out.executing[0].gates[0].gate).toBe("estimate");
+    expect(out.liveAt).toBe("2026-11-18T10:05:00.000Z");
   });
 });
