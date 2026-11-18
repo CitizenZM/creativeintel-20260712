@@ -37,10 +37,13 @@ test('tick wiring: no batch while the OpenRouter balance probe fails', async () 
   const { tick } = await import('../brain.mjs?nofunds');
   const done = ['setup', 'research', 'insights', 'creative', 'studio'].map((id) => ({ id, state: 'done', action: '' }));
   const calls = []; let pub;
-  const call = async (a, b = {}) => { calls.push(a); if (a === 'observe') return { status: 200, policy: { autoApprove: true, maxRunUsd: 3, maxDayUsd: 20, maxRunAgeH: 24 }, learnings: [], spend: { autoApprovedTodayUsd: 0, byProject7d: {} }, perf: [], heartbeats: [], projects: [{ id: 'p9', name: 'P', updatedAt: new Date(now).toISOString() }], stages: [{ projectId: 'p9', stages: done }], runs: [{ id: 'f1', projectId: 'p9', status: 'failed', error: 'fetch failed', retries: 0, updatedAt: new Date(now - 60_000).toISOString(), estUsd: 0 }] }; if (a === 'publish') { pub = b.snapshot; return { status: 200, ok: true, verified: true }; } return { status: 200, ok: true }; };
+  const modes = [];
+  const call = async (a, b = {}) => { calls.push(a); if (a === 'batch') modes.push(b.mode); if (a === 'observe') return { status: 200, policy: { autoApprove: true, maxRunUsd: 3, maxDayUsd: 20, maxRunAgeH: 24 }, learnings: [], spend: { autoApprovedTodayUsd: 0, byProject7d: {} }, perf: [], heartbeats: [], projects: [{ id: 'p9', name: 'P', updatedAt: new Date(now).toISOString() }], stages: [{ projectId: 'p9', stages: done }], runs: [{ id: 'f1', projectId: 'p9', status: 'failed', error: 'OpenRouter 402: requires at least $1.00 in balance', retries: 0, updatedAt: new Date(now - 60_000).toISOString(), estUsd: 0 }] }; if (a === 'publish') { pub = b.snapshot; return { status: 200, ok: true, verified: true }; } return { status: 200, ok: true }; };
   await tick({ call, now, home, local: async () => ({ projects: [], stages: [], runs: [] }) });
-  assert.ok(!calls.includes('batch')); assert.ok(!calls.includes('retry'));
+  assert.ok(!calls.includes('retry'));
+  assert.equal(calls.filter((a) => a === 'batch').length, 1, 'one free batch while funds are out');
   assert.ok(pub.events.some((e) => /no new paid work/.test(e.summary)));
+  assert.deepEqual(modes, ['free']);
 });
 
 test('tick wiring: when the balance probe turns green again, runs that failed on 402 are retried once', async () => {

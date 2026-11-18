@@ -119,6 +119,15 @@ export function batchCandidates(loops, state = {}, now = Date.now()) {
   return loops.filter((l) => !/^(local|batch):/.test(l.projectId) && l.step === 'studio' && l.stage === 'project' && l.runs.active + l.runs.done + l.runs.failed === 0 && !(state[l.projectId] && now - Date.parse(state[l.projectId]) < 24 * H)).slice(0, 1);
 }
 
+/** while the provider balance is out: ready projects with nothing produced and only funds failures get a FREE stock remix */
+export function freeCandidates(loops, runs, state = {}, now = Date.now()) {
+  return loops.filter((l) => {
+    if (/^(local|batch):/.test(l.projectId) || !['studio', 'produce'].includes(l.step) || l.runs.active + l.runs.done > 0) return false;
+    if (state[l.projectId] && now - Date.parse(state[l.projectId]) < 24 * H) return false;
+    return runs.filter((r) => r.projectId === l.projectId && r.status === 'failed').every((r) => /\b402\b|balance|credit/i.test(String(r.error || '')));
+  }).slice(0, 1);
+}
+
 export function think(obs, checks, now = Date.now()) {
   const used = obs.spend.autoApprovedTodayUsd || 0;
   const stagesBy = Object.fromEntries((obs.stages || []).map((s) => [s.projectId, s]));

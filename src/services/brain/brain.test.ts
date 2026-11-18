@@ -86,4 +86,7 @@ describe("pickBatch", () => {
     expect(pickBatch({ productUrl: "u", runs: [{ status: "completed", createdAt: new Date(now - 3_600_000) }], storyboards: [sb("a", "2026-11-01")] }, now).ok).toBe(false);
     expect(pickBatch({ productUrl: "u", runs: [], storyboards: [sb("a", "2026-11-01", [])] }, now).ok).toBe(false);
   });
+  it("a run that failed only for lack of funds does not block the cooldown", () => {
+    expect(pickBatch({ productUrl: "u", runs: [{ status: "failed", error: "OpenRouter 402: requires at least $1.00 in balance", createdAt: new Date(now - 3_600_000) }], storyboards: [sb("a", "2026-11-01")] }, now).ok).toBe(true);
+  });
 });

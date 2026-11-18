@@ -7,7 +7,7 @@
  *   { action: "publish", snapshot }                         -> { ok, bytes, events, learnings } then re-read (second check)
  *   { action: "approve", runId, why }                       -> brain auto-approval within policy (server re-checks the caps)
  *   { action: "retry", runId, why }                         -> retry a failed run (Ad Studio retryRun, max 3)
- *   { action: "batch", projectId, why }                     -> start ONE Ad Studio variant from the newest storyboard (no spend: it stops at the gate)
+ *   { action: "batch", projectId, why, mode? }  mode "free" = stock remix (no spend)                     -> start ONE Ad Studio variant from the newest storyboard (no spend: it stops at the gate)
  *   { action: "learn", learning }                           -> { ok, count }
  *   { action: "events", events }                            -> { ok }
  */
@@ -19,7 +19,7 @@ import { addLearning, appendEvents, getPolicy, getSnapshot, getView, publish } f
 import { canAutoApprove } from "@/services/brain/policy";
 import { pacificDayStart } from "@/services/brain/observe";
 import { AdStudioError, approveRun, createBatch, reserveUsd, retryRun } from "@/services/video-gen/adstudio-queue";
-import { BRAIN_BATCH, pickBatch } from "@/services/brain/batch";
+import { BRAIN_BATCH, BRAIN_BATCH_FREE, pickBatch } from "@/services/brain/batch";
 import type { BrainEvent, BrainLearning, BrainSnapshot } from "@/services/brain/contract";
 
 export const dynamic = "force-dynamic";
@@ -78,11 +78,12 @@ export async function POST(request: Request) {
         if (!project || project.archivedAt) return NextResponse.json({ error: "Project not found" }, { status: 404 });
         const [storyboards, runs] = await Promise.all([
           prisma.storyboard.findMany({ where: { projectId: body.projectId, deletedAt: null }, select: { id: true, frames: true, createdAt: true }, take: 20 }),
-          prisma.adStudioRun.findMany({ where: { projectId: body.projectId }, select: { status: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 20 }),
+          prisma.adStudioRun.findMany({ where: { projectId: body.projectId }, select: { status: true, createdAt: true, error: true }, orderBy: { createdAt: "desc" }, take: 20 }),
         ]);
         const pick = pickBatch({ storyboards, runs, productUrl: project.productUrl });
         if (!pick.ok) return NextResponse.json({ ok: false, reason: pick.reason }, { status: 409 });
-        const out = await createBatch({ projectId: body.projectId, storyboardId: pick.storyboardId, hookTypes: [...BRAIN_BATCH.hookTypes], engines: [...BRAIN_BATCH.engines], visualMode: BRAIN_BATCH.visualMode, openingId: BRAIN_BATCH.openingId, endCardId: BRAIN_BATCH.endCardId, notes: `Started by the Video Brain: ${String(body.why || "").slice(0, 200)}`, createdById: null });
+        const B = body.mode === "free" ? BRAIN_BATCH_FREE : BRAIN_BATCH;
+        const out = await createBatch({ projectId: body.projectId, storyboardId: pick.storyboardId, hookTypes: [...B.hookTypes], engines: [...B.engines], visualMode: B.visualMode, openingId: B.openingId, endCardId: B.endCardId, notes: `Started by the Video Brain: ${String(body.why || "").slice(0, 200)}`, createdById: null });
         const back = await prisma.adStudioRun.findMany({ where: { batchId: out.batchId }, select: { id: true, status: true } });
         await prisma.opsEvent.create({ data: { action: "brain-batch", targetType: "run", targetId: back[0]?.id ?? null, projectId: body.projectId, ok: back.length > 0, detail: { storyboardId: pick.storyboardId, why: String(body.why || "") } as never } });
         return NextResponse.json({ ok: back.length === out.runs.length && back.every((r) => r.status === "queued"), batchId: out.batchId, runs: back });
