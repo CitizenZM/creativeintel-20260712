@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { LIVE_STATUSES, overlayRuns } from "./live";
+import { mirrorToTables, tablesOn } from "./tables";
 import {
   BRAIN_KEYS, DEFAULT_POLICY, MAX_EVENTS, MAX_LEARNINGS, SNAPSHOT_MAX_BYTES, STALE_AFTER_SEC,
   type BrainEvent, type BrainLearning, type BrainPolicy, type BrainSnapshot, type BrainView,
@@ -57,7 +58,7 @@ export async function getView(now = Date.now()): Promise<BrainView> {
 }
 
 /** store a snapshot; events and learnings are merged into their own rows. Returns the stored sizes. */
-export async function publish(snapshot: BrainSnapshot): Promise<{ bytes: number; events: number; learnings: number }> {
+export async function publish(snapshot: BrainSnapshot): Promise<{ bytes: number; events: number; learnings: number; tables: unknown }> {
   const { events = [], learnings = [], ...rest } = snapshot;
   const body = { ...rest, events: [], learnings: [] } as BrainSnapshot;
   const bytes = JSON.stringify(body).length;
@@ -68,7 +69,9 @@ export async function publish(snapshot: BrainSnapshot): Promise<{ bytes: number;
   await write(BRAIN_KEYS.snapshot, body);
   await write(BRAIN_KEYS.events, mergedEvents);
   await write(BRAIN_KEYS.learnings, mergedLearnings);
-  return { bytes, events: mergedEvents.length, learnings: mergedLearnings.length };
+  let tables: Awaited<ReturnType<typeof mirrorToTables>> | { error: string } | null = null;
+  if (tablesOn()) tables = await mirrorToTables(snapshot, events, learnings).catch((e: unknown) => { console.warn("[brain] table mirror failed:", e); return { error: e instanceof Error ? e.message : String(e) }; });
+  return { bytes, events: mergedEvents.length, learnings: mergedLearnings.length, tables };
 }
 
 export async function addLearning(l: BrainLearning): Promise<BrainLearning[]> {
