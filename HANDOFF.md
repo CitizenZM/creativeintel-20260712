@@ -85,3 +85,8 @@
 - 完成: 大脑代决（可回退、不花钱，Barron 可推翻）：Video Brain 的真 Brain* 表要不要上 production migration → 先在 preview/branch DB 跑一周，数据没问题再迁 prod
 - 验证: brain asks.json 推荐项；仅暂停/归档/留空/先走 preview
 - 下一步: 按代决执行：先在 preview/branch DB 跑一周，数据没问题再迁 prod
+
+### 2026-11-19 01:04 · claude-opus-5-5
+- 完成: STOPPED: Brain* local migration timed out 4x (25 min); no further dispatch
+- 验证: lastBrainRun failed 2026-11-18T17:21 timeout
+- 下一步: STOPPED — wait for Barron answer on migration/OpenRouter budget
