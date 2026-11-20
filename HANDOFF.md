@@ -105,3 +105,8 @@
 - 完成: P1+P2 no-schema: PR #187 (stacked on #186) workstreams.json, xark-job CLI (start/finish/list/backfill/directives), daily harvest of Barron's typed video instructions as candidates, synced to skills/_shared/VIDEO-KNOWLEDGE.md + Ad Studio json
 - 验证: node --test 39/39; directives wiring test fails when unwired; readBatches shows acw 81 + bdsmpub 10+10; 11 real candidates
 - 下一步: Barron: merge #186 then #187; confirm/reject 11 directive candidates; #180 for Neon tables
+
+### 2026-11-19 16:42 · claude-opus-5-5
+- 完成: Merged #186+#187; Barron confirmed all 11 harvested directives; Brain synced them to _shared/VIDEO-KNOWLEDGE.md, 6 skills LEARNINGS.md, ad-studio brain-learnings.json
+- 验证: directives.json 11 confirmed; grep finds rule in 6 skills + ad-studio json; shared file 11 session-sourced rules
+- 下一步: Ad Studio script prompt should read data/brain-learnings.json workstreams; P4 Quick Create
