@@ -6,7 +6,7 @@
 //   xark-job list                                          registered jobs
 //   xark-job backfill                                      register the pre-CLI batch folders (acw, bdsmpub) as jobs
 //   xark-job directives [--harvest [--days N]]                      harvested instructions (candidates first)
-//   xark-job directive confirm|reject <id>
+//   xark-job directive confirm|reject <id> [--workstream <id>]   (an unassigned rule needs --workstream to be confirmed)
 // Env: XARK_JOBS_DIR (~/.config/xark-studio/jobs), XARK_DIRECTIVES_FILE (~/.config/xark-studio/directives.json)
 import { stat } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
@@ -58,7 +58,7 @@ export async function main(argv, out = console.log) {
     return 0;
   }
   if (cmd === 'directive' && (a1 === 'confirm' || a1 === 'reject') && a2) {
-    const d = await setStatus(a2, a1 === 'confirm' ? 'confirmed' : 'rejected');
+    const d = await setStatus(a2, a1 === 'confirm' ? 'confirmed' : 'rejected', undefined, opt(argv, 'workstream'));
     out(`${d.id} ${d.status}`);
     return 0;
   }
