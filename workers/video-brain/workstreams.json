@@ -1,0 +1,25 @@
+{
+  "_doc": "Workstreams = brand x purpose. Every video job belongs to one. Video Brain reads this file; xark-job validates against it. Directives are Barron's standing instructions for that line of work (source = where he said it).",
+  "global": [
+    { "rule": "When the model budget is out, switch to $0 slideshow videos instead of stopping.", "source": "Barron 2026-11-18 (ad-studio session)" },
+    { "rule": "Paid video generation only within the approved budget; never type passwords/2FA or solve CAPTCHAs.", "source": "Barron standing rules" }
+  ],
+  "workstreams": [
+    {
+      "id": "allcomfywear-bf-promo", "brand": "allcomfywear", "purpose": "promo", "label": "allcomfywear · BF promo",
+      "mode": "auto", "compliance": "standard", "budgetUsdPerVideo": 3, "platforms": ["tiktok", "instagram", "pinterest"],
+      "tone": "cozy, warm, deal-forward", "keywords": ["allcomfywear", "acw", "comfywear"],
+      "directives": []
+    },
+    {
+      "id": "bdsmpub-social", "brand": "bdsmpub", "purpose": "social", "label": "bdsmpub · social",
+      "mode": "slideshow", "compliance": "sensitive", "budgetUsdPerVideo": 0.2, "platforms": ["x", "reddit", "pinterest"],
+      "tone": "dark, romantic, suggestive — never explicit", "keywords": ["bdsmpub", "dark fantasy", "bdsm"],
+      "directives": [
+        { "rule": "No exposed bodies and no explicit copy: mood and suggestion only.", "source": "Barron 2026-11-18 (bdsmpub session)" },
+        { "rule": "Soft, sensual music aimed at women viewers.", "source": "Barron 2026-11-18 (bdsmpub session)" },
+        { "rule": "Borrow a film's mood (palette, set, props), never its characters, actors' faces, posters or title type; use one original couple.", "source": "bdsmpub session 2026-11-19 (copyright/likeness)" }
+      ]
+    }
+  ]
+}

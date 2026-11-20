@@ -3,12 +3,13 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { listJobs, loadWorkstreams } from './jobs.mjs';
 
 export const BATCHES = [
-  { id: 'acw-bf', name: 'allcomfywear Black Friday videos (batch)', brand: 'allcomfywear', dir: path.join(homedir(), 'Projects', 'acw-bf-videos-20261116', 'all-videos-by-product'), index: 'INDEX.csv' },
+  { id: 'acw-bf', name: 'allcomfywear Black Friday videos (batch)', brand: 'allcomfywear', workstream: 'allcomfywear-bf-promo', dir: path.join(homedir(), 'Projects', 'acw-bf-videos-20261116', 'all-videos-by-product'), index: 'INDEX.csv' },
   // session-made sets without an INDEX.csv: every top-level .mp4 in the folder is one finished video (P1 backfill)
-  { id: 'bdsmpub-noir', name: 'bdsmpub noir split-screen BF videos (batch)', brand: 'bdsmpub', dir: path.join(homedir(), 'Projects', 'bdsm-ops-center-20261107', 'videos', 'bdsmpub-noir-20261119') },
-  { id: 'bdsmpub-slides', name: 'bdsmpub slides videos (batch)', brand: 'bdsmpub', dir: path.join(homedir(), 'Projects', 'bdsm-ops-center-20261107', 'videos', 'bdsmpub-slides-20261118') },
+  { id: 'bdsmpub-noir', name: 'bdsmpub noir split-screen BF videos (batch)', brand: 'bdsmpub', workstream: 'bdsmpub-social', dir: path.join(homedir(), 'Projects', 'bdsm-ops-center-20261107', 'videos', 'bdsmpub-noir-20261119') },
+  { id: 'bdsmpub-slides', name: 'bdsmpub slides videos (batch)', brand: 'bdsmpub', workstream: 'bdsmpub-social', dir: path.join(homedir(), 'Projects', 'bdsm-ops-center-20261107', 'videos', 'bdsmpub-slides-20261118') },
 ];
 
 /** rows for a batch: INDEX.csv when it has one, else one row per top-level .mp4 (product = file name without number prefix/extension) */
@@ -33,7 +34,18 @@ export function parseCsv(text) {
   return body.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ''])));
 }
 
-export async function readBatches(batches = BATCHES) {
+/** static seed batches + every job registered with `xark-job start` (a job with the same id replaces the seed entry) */
+export async function allBatches({ root, workstreamsFile } = {}) {
+  const jobs = await listJobs(root);
+  let ws = []; try { ws = (await loadWorkstreams(workstreamsFile)).workstreams; } catch { /* no config: plain names */ }
+  const brandOf = (id) => ws.find((w) => w.id === id)?.brand || null;
+  const fromJobs = jobs.map((j) => ({ id: j.id, name: j.name, brand: brandOf(j.workstream), workstream: j.workstream, dir: j.dir, index: j.index || undefined, jobStatus: j.status }));
+  const ids = new Set(fromJobs.map((b) => b.id));
+  return [...BATCHES.filter((b) => !ids.has(b.id)), ...fromJobs];
+}
+
+export async function readBatches(batches) {
+  batches = batches || await allBatches();
   const projects = []; const stages = []; const runs = [];
   for (const b of batches) {
     const rows = await batchRows(b);
@@ -47,7 +59,7 @@ export async function readBatches(batches = BATCHES) {
       if (at > latest) latest = at;
       runs.push({ id: `batch:${b.id}:${row.file}`, local: true, managedBy: 'batch', projectId: `batch:${b.id}`, status: 'completed', step: null, progress: 100, estUsd: 0, actualUsd: null, finalMp4Url: null, finalPath: st && st.size > 0 ? fp : null, error: null, metrics: null, retries: 0, hookType: row.product || null, engine: 'batch', updatedAt: at, createdAt: at, visualMode: 'video', cancelRequested: false });
     }
-    projects.push({ id: `batch:${b.id}`, name: b.name, brandName: b.brand, updatedAt: latest || new Date(0).toISOString() });
+    projects.push({ id: `batch:${b.id}`, name: `${b.workstream ? `[${b.workstream}] ` : ''}${b.name}${b.jobStatus === 'running' ? ' (running)' : ''}`, brandName: b.brand, workstream: b.workstream || null, updatedAt: latest || new Date(0).toISOString() });
     stages.push({ projectId: `batch:${b.id}`, local: true, stages: ['setup', 'research', 'insights', 'creative', 'studio'].map((id) => ({ id, state: 'done', action: '' })), next: null });
   }
   return { projects, stages, runs };
