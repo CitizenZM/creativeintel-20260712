@@ -1,12 +1,21 @@
 // Batch video productions outside Ad Studio (design §9 decision 4 = A), e.g. the allcomfywear Black Friday set: each
 // INDEX.csv row is a finished video that gets the second check and the critic like any Ad Studio run.
-import { readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
 export const BATCHES = [
   { id: 'acw-bf', name: 'allcomfywear Black Friday videos (batch)', brand: 'allcomfywear', dir: path.join(homedir(), 'Projects', 'acw-bf-videos-20261116', 'all-videos-by-product'), index: 'INDEX.csv' },
+  // session-made sets without an INDEX.csv: every top-level .mp4 in the folder is one finished video (P1 backfill)
+  { id: 'bdsmpub-noir', name: 'bdsmpub noir split-screen BF videos (batch)', brand: 'bdsmpub', dir: path.join(homedir(), 'Projects', 'bdsm-ops-center-20261107', 'videos', 'bdsmpub-noir-20261119') },
+  { id: 'bdsmpub-slides', name: 'bdsmpub slides videos (batch)', brand: 'bdsmpub', dir: path.join(homedir(), 'Projects', 'bdsm-ops-center-20261107', 'videos', 'bdsmpub-slides-20261118') },
 ];
+
+/** rows for a batch: INDEX.csv when it has one, else one row per top-level .mp4 (product = file name without number prefix/extension) */
+export async function batchRows(b) {
+  if (b.index) { try { return parseCsv(await readFile(path.join(b.dir, b.index), 'utf8')); } catch { return null; } }
+  try { return (await readdir(b.dir)).filter((f) => f.endsWith('.mp4')).sort().map((file) => ({ file, product: file.replace(/^\d+-/, '').replace(/\.mp4$/, '') })); } catch { return null; }
+}
 
 /** minimal RFC-4180 CSV (quoted fields with commas and "" escapes) */
 export function parseCsv(text) {
@@ -27,9 +36,10 @@ export function parseCsv(text) {
 export async function readBatches(batches = BATCHES) {
   const projects = []; const stages = []; const runs = [];
   for (const b of batches) {
-    let text; try { text = await readFile(path.join(b.dir, b.index), 'utf8'); } catch { continue; }
+    const rows = await batchRows(b);
+    if (!rows) continue;
     let latest = '';
-    for (const row of parseCsv(text)) {
+    for (const row of rows) {
       if (!row.file) continue;
       const fp = path.join(b.dir, row.file);
       let st; try { st = await stat(fp); } catch { st = null; }
