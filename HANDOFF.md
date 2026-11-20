@@ -110,3 +110,8 @@
 - 完成: Merged #186+#187; Barron confirmed all 11 harvested directives; Brain synced them to _shared/VIDEO-KNOWLEDGE.md, 6 skills LEARNINGS.md, ad-studio brain-learnings.json
 - 验证: directives.json 11 confirmed; grep finds rule in 6 skills + ad-studio json; shared file 11 session-sourced rules
 - 下一步: Ad Studio script prompt should read data/brain-learnings.json workstreams; P4 Quick Create
+
+### 2026-11-19 18:27 · claude-opus-5-5
+- 完成: Directives wired to Ad Studio script prompt: ad-studio PR #2 (directivesBlock per workstream/brand), creativeintel PR #188 (rules PR carries global+workstreams)
+- 验证: ad-studio test_brain_rules 9/9; video-brain 40/40; sabotage fails wiring test
+- 下一步: Barron merges ad-studio#2 then creativeintel#188; then merge the Brain's brain/rules-* PR
