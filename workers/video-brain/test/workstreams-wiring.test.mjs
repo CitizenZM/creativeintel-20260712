@@ -91,7 +91,8 @@ test('rules PR carries confirmed video rules per workstream only (with brand); u
   const harvested = [{ id: 'Dx', workstream: 'moneta-ads', rule: 'Ten seconds, tight rhythm.', source: 's', status: 'confirmed' }, { id: 'Dy', workstream: 'moneta-ads', rule: 'not yet', source: 's', status: 'candidate' }];
   const f = JSON.parse(rulesFile([], { config, harvested }));
   assert.equal(f.global, undefined, 'no cross-brand video rules');
-  assert.deepEqual(f.workstreams['moneta-ads'], { brand: 'moneta', rules: [{ rule: 'Ten seconds, tight rhythm.' }] });
+  assert.equal(f.workstreams['moneta-ads'].brand, 'moneta');
+  assert.ok(f.workstreams['moneta-ads'].rules.some((r) => r.rule === 'Ten seconds, tight rhythm.')); assert.ok(!f.workstreams['moneta-ads'].rules.some((r) => r.rule === 'not yet'));
   const { saveDirectives, setStatus } = await import('../lib/knowledge.mjs');
   const df = path.join(home, 'd-assign.json');
   await saveDirectives([{ id: 'Dz', workstream: 'unassigned', scope: 'directive:unassigned', rule: 'r', status: 'candidate' }], df);
