@@ -71,9 +71,9 @@
       "brand": "moneta",
       "purpose": "ads",
       "label": "Moneta · paid social ads",
-      "mode": "auto",
+      "mode": "remix",
       "compliance": "standard",
-      "budgetUsdPerVideo": 3,
+      "budgetUsdPerVideo": 0,
       "platforms": [
         "instagram",
         "tiktok"
@@ -83,7 +83,20 @@
         "moneta",
         "drinkmoneta"
       ],
-      "directives": []
+      "directives": [
+        {
+          "rule": "No video-generation models: borrow the reference structure and replace it with stock footage and Moneta product images ($0).",
+          "source": "Barron 2026-11-20"
+        },
+        {
+          "rule": "Change the music and the voice-over style from video to video; speak to specific audiences (busy moms, gym lovers, ...).",
+          "source": "Barron 2026-11-20"
+        },
+        {
+          "rule": "Ads run 15 s or shorter including the closing card.",
+          "source": "Barron 2026-11-19"
+        }
+      ]
     },
     {
       "id": "tcl-holiday-ads",
