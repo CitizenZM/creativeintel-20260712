@@ -8,18 +8,24 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
+import { rulesByWorkstream } from './knowledge.mjs';
 
 const pexec = promisify(execFile);
 export const SCRIPT_SCOPES = /^(global|pipeline:(script|prompts|generate|captions|audio))$/;
 export const REPO = 'CitizenZM/ad-studio-20261104';
 
 /** the tracked file's content for these learnings (pure, stable order) */
-export function rulesFile(learnings) {
+export function rulesFile(learnings, directives = null) {
+  const extra = {};
+  if (directives) { // Barron's confirmed video rules, per workstream only (brand lets Ad Studio match a job by its brand)
+    const r = rulesByWorkstream(directives.config, directives.harvested);
+    extra.workstreams = Object.fromEntries(directives.config.workstreams.map((w) => [w.id, { brand: w.brand, rules: r[w.id].map((x) => ({ rule: x.rule })) }]));
+  }
   const rules = learnings.filter((l) => l.status === 'confirmed' && SCRIPT_SCOPES.test(l.scope)).map((l) => ({ id: l.id, scope: l.scope, rule: l.rule, evidence: (l.evidence || []).slice(0, 3) })).sort((a, b) => a.id.localeCompare(b.id));
-  return JSON.stringify({ about: 'Video Brain rules for the script prompt. Changed only by PR (brain/rules-*), reviewed by Barron; see pipeline/brain-rules.mjs.', rules }, null, 1) + '\n';
+  return JSON.stringify({ about: 'Video Brain rules for the script prompt. Changed only by PR (brain/rules-*), reviewed by Barron; see pipeline/brain-rules.mjs.', rules, ...extra }, null, 1) + '\n';
 }
 export const hashOf = (text) => createHash('sha1').update(text).digest('hex').slice(0, 8);
-const norm = (text) => { try { return JSON.stringify(JSON.parse(text).rules.map((r) => [r.id, r.rule])); } catch { return null; } };
+const norm = (text) => { try { const j = JSON.parse(text); return JSON.stringify([j.rules.map((r) => [r.id, r.rule]), j.workstreams || null]); } catch { return null; } };
 
 /** decide (pure): nothing to do, already proposed, or open a PR */
 export function plan(current, desired, state = {}) {
@@ -29,10 +35,10 @@ export function plan(current, desired, state = {}) {
   return { action: 'open', hash: h };
 }
 
-export async function proposeRules(adRoot, learnings, state = {}, { sh = (cmd, args, opts) => pexec(cmd, args, { maxBuffer: 16 * 1024 * 1024, timeout: 300_000, ...opts }) } = {}) {
+export async function proposeRules(adRoot, learnings, state = {}, { directives = null, sh = (cmd, args, opts) => pexec(cmd, args, { maxBuffer: 16 * 1024 * 1024, timeout: 300_000, ...opts }) } = {}) {
   await sh('git', ['-C', adRoot, 'fetch', '-q', 'origin', 'main']);
   const current = await sh('git', ['-C', adRoot, 'show', 'origin/main:pipeline/brain-rules.json']).then((r) => r.stdout).catch(() => '');
-  const desired = rulesFile(learnings);
+  const desired = rulesFile(learnings, directives);
   const p = plan(current, desired, state);
   if (p.action !== 'open') return p;
   const branch = `brain/rules-${p.hash}`;
