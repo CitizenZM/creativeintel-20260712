@@ -35,3 +35,11 @@ tail -f ~/Library/Logs/video-brain.log | grep __VIDEO_BRAIN__
 
 Policy lives in `AppSetting brain:policy` (`{autoApprove, maxRunUsd, maxDayUsd, maxRunAgeH}`); `autoApprove:false` turns the brain into advice only.
 Storage uses AppSetting rows on purpose: new tables would be a production migration (`pnpm build` runs `prisma db push`), which needs Barron's OK.
+
+## Workstreams, session jobs and directives (P1/P2, 2026-11-19)
+- `workstreams.json` — every line of work is brand × purpose (`bdsmpub-social`, `allcomfywear-bf-promo`) with mode, compliance tier, $/video, platforms, tone and Barron's standing directives.
+- `bin/xark-job.mjs` — videos made in Claude sessions/scripts register here so the Brain second-checks and learns from them:
+  `xark-job start --workstream bdsmpub-social --dir <folder>` … `xark-job finish <jobId>`; `xark-job list`; `xark-job backfill` (done once for acw + bdsmpub).
+  Jobs live in `~/.config/xark-studio/jobs/*.json`; each shows on `/brain` as `[workstream] name`.
+- Directives: once a day the Brain harvests sentences Barron typed (transcript entries with `origin.kind = human`) that give a video instruction, as **candidates** in `~/.config/xark-studio/directives.json`. Only `xark-job directive confirm <id>` makes one a rule. Confirmed + config directives sync to `~/.claude/skills/_shared/VIDEO-KNOWLEDGE.md`, every video skill's `LEARNINGS.md`, and `ad-studio/data/brain-learnings.json` (`workstreams` key). Off switch: `VIDEO_BRAIN_HARVEST=0`.
+- Neon tables (`Lesson/Directive/CraftItem/Outcome`) wait for PR #180; until then these files are the store.

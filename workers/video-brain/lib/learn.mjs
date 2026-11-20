@@ -3,6 +3,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { renderDirectives, rulesByWorkstream } from './knowledge.mjs';
 
 export const BEGIN = '<!-- video-brain:begin -->';
 export const END = '<!-- video-brain:end -->';
@@ -47,13 +48,14 @@ export function harvest({ incidents, checks, now = new Date().toISOString(), bas
   return out;
 }
 
-export function renderBlock(learnings, at) {
+export function renderBlock(learnings, at, extra = '') {
   const live = learnings.filter((l) => l.status !== 'retired');
   const group = (s) => live.filter((l) => l.status === s);
   const line = (l) => `- [${l.scope}] ${l.rule}${l.promotedTo ? ` _(in code: ${l.promotedTo})_` : ''}${l.evidence?.length ? ` — evidence: ${l.evidence.slice(0, 3).join(', ')}` : ''}`;
   return [BEGIN, `## Video Brain shared learnings (synced ${at}; source: creative.xark.io /brain, do not edit inside this block)`, '',
     '### Confirmed — follow these', ...group('confirmed').map(line), '', '### In code already (promoted) — keep them when editing', ...group('promoted').map(line), '',
     '### Candidates — watch, not yet rules', ...(group('candidate').length ? group('candidate').map(line) : ['- (none)']), '',
+    ...(extra ? [extra, ''] : []),
     'Add a learning: `node ~/Projects/creativeintel-20260712/workers/video-brain/brain.mjs --learn "<rule>" --scope <scope> --evidence <runId>`', END].join('\n');
 }
 
@@ -70,9 +72,12 @@ export async function writeBlock(file, block) {
 export const POINTER = '> Before acting, read `LEARNINGS.md` in this skill folder (Video Brain shared learnings, synced from creative.xark.io /brain).';
 
 /** sync to skills (LEARNINGS.md + a one-line pointer in SKILL.md), agents and the Ad Studio pipeline file */
-export async function syncAll(learnings, { skillsDir, skills, adStudioRoot, at }) {
-  const block = renderBlock(learnings, at);
+export async function syncAll(learnings, { skillsDir, skills, adStudioRoot, at, directives = null }) {
+  const block = renderBlock(learnings, at, directives ? renderDirectives(directives.config, directives.harvested) : '');
   const synced = [];
+  // one shared file every video skill/agent can read (P2 single source until the Neon tables land)
+  await writeBlock(path.join(skillsDir, '_shared', 'VIDEO-KNOWLEDGE.md'), block);
+  synced.push('skills:_shared/VIDEO-KNOWLEDGE.md');
   for (const s of skills) {
     const dir = path.join(skillsDir, s);
     let skill; try { skill = await readFile(path.join(dir, 'SKILL.md'), 'utf8'); } catch { continue; }
@@ -86,7 +91,8 @@ export async function syncAll(learnings, { skillsDir, skills, adStudioRoot, at }
   if (adStudioRoot) {
     const rules = learnings.filter((l) => l.status === 'confirmed').map((l) => ({ id: l.id, scope: l.scope, rule: l.rule }));
     await mkdir(path.join(adStudioRoot, 'data'), { recursive: true });
-    await writeFile(path.join(adStudioRoot, 'data', 'brain-learnings.json'), JSON.stringify({ at, rules }, null, 2) + '\n');
+    const workstreams = directives ? rulesByWorkstream(directives.config, directives.harvested) : {};
+    await writeFile(path.join(adStudioRoot, 'data', 'brain-learnings.json'), JSON.stringify({ at, rules, workstreams }, null, 2) + '\n');
     await writeBlock(path.join(adStudioRoot, 'docs', 'LEARNINGS.md'), block);
     synced.push('ad-studio:data/brain-learnings.json', 'ad-studio:docs/LEARNINGS.md');
   }

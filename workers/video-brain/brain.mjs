@@ -25,6 +25,8 @@ import { SEED, harvest, idOf, syncAll } from './lib/learn.mjs';
 import { pick, promptFor, runClaude, apply as applyStrategy } from './lib/strategist.mjs';
 import { readLocal } from './lib/local.mjs';
 import { readBatches } from './lib/batch.mjs';
+import { loadWorkstreams } from './lib/jobs.mjs';
+import { harvestDirectives, loadDirectives } from './lib/knowledge.mjs';
 import { proposeRules } from './lib/rules-pr.mjs';
 import { buildDigest, digestDue, sendDigest } from './lib/digest.mjs';
 import { critique, withCritic, MAX_PER_DAY as CRITIC_PER_DAY } from './lib/critic.mjs';
@@ -67,7 +69,7 @@ export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'h
   return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
 }
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s) => proposeRules(ROOT, l, s) } = {}) {
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s) => proposeRules(ROOT, l, s), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }) } = {}) {
   await mkdir(home, { recursive: true });
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
@@ -166,10 +168,21 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   const byId = new Map([...SEED, ...(obs.learnings || []), ...fresh].map((l) => [l.id, l]));
   for (const l of obs.learnings || []) byId.set(l.id, { ...byId.get(l.id), ...l }); // server edits win (status changes)
   const learnings = [...byId.values()];
-  const hash = createHash('sha1').update(JSON.stringify(learnings.map((l) => [l.id, l.status, l.rule]))).digest('hex');
+  // workstream directives: config + Barron's instructions harvested once a day from session transcripts (candidates until confirmed)
+  let directives = null;
+  try {
+    const config = await loadWorkstreams();
+    if (harvestDirs && !dryRun && (!state.directivesAt || now - Date.parse(state.directivesAt) > 86_400_000)) {
+      state.directivesAt = new Date(now).toISOString();
+      const fresh = await harvestDirs(config.workstreams);
+      if (fresh.length) events.push(ev('Librarian', 'learn', `${fresh.length} instruction(s) of Barron's harvested from sessions as candidates; confirm with xark-job directive confirm <id>`));
+    }
+    directives = { config, harvested: await loadDirectives() };
+  } catch (e) { log(`directives: ${e.message}`); }
+  const hash = createHash('sha1').update(JSON.stringify([learnings.map((l) => [l.id, l.status, l.rule]), directives])).digest('hex');
   let synced = state.synced || [];
   if (hash !== state.syncHash && !dryRun) {
-    synced = await syncAll(learnings, { skillsDir: SKILLS_DIR, skills: SKILLS, adStudioRoot: ROOT, at: new Date(now).toISOString() });
+    synced = await syncAll(learnings, { skillsDir: SKILLS_DIR, skills: SKILLS, adStudioRoot: ROOT, at: new Date(now).toISOString(), directives });
     state.syncHash = hash; state.synced = synced;
     events.push(ev('Librarian', 'learn', `learnings synced (${learnings.length}) → ${synced.length} targets`));
   }
