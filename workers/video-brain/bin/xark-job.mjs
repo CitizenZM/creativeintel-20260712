@@ -5,7 +5,7 @@
 //   xark-job finish <jobId> [--status done|failed] [--note "<text>"]
 //   xark-job list                                          registered jobs
 //   xark-job backfill                                      register the pre-CLI batch folders (acw, bdsmpub) as jobs
-//   xark-job directives [--harvest]                        harvested instructions (candidates first)
+//   xark-job directives [--harvest [--days N]]                      harvested instructions (candidates first)
 //   xark-job directive confirm|reject <id>
 // Env: XARK_JOBS_DIR (~/.config/xark-studio/jobs), XARK_DIRECTIVES_FILE (~/.config/xark-studio/directives.json)
 import { stat } from 'node:fs/promises';
@@ -52,7 +52,7 @@ export async function main(argv, out = console.log) {
     return 0;
   }
   if (cmd === 'directives') {
-    if (argv.includes('--harvest')) out(`new candidates: ${(await harvestDirectives({ workstreams: (await loadWorkstreams()).workstreams })).length}`);
+    if (argv.includes('--harvest')) out(`new candidates: ${(await harvestDirectives({ workstreams: (await loadWorkstreams()).workstreams, days: Number(opt(argv, 'days', 3)) })).length}`);
     const list = await loadDirectives();
     for (const d of [...list].sort((x, y) => (x.status === 'candidate' ? -1 : 1) - (y.status === 'candidate' ? -1 : 1))) out(`${d.id}\t${d.status}\t${d.workstream}\t${d.rule}`);
     return 0;
