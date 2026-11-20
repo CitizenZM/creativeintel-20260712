@@ -83,3 +83,21 @@ test('extract: keeps only what Barron typed, as candidates; names a workstream o
   assert.deepEqual(out.map((d) => [d.workstream, d.rule]), [['bdsmpub-social', 'bdsmpub 的视频不要出现暴露画面。'], ['global', '视频广告的节奏一定要紧凑。']]);
   assert.ok(out.every((d) => d.status === 'candidate'));
 });
+
+test('rules PR carries confirmed directives (global + per workstream with brand) to Ad Studio; a directive-only change re-proposes', async () => {
+  const { rulesFile, plan } = await import('../lib/rules-pr.mjs');
+  const { loadWorkstreams } = await import('../lib/jobs.mjs');
+  const config = await loadWorkstreams();
+  const harvested = [{ id: 'Dx', workstream: 'global', rule: 'Ten seconds, tight rhythm.', source: 's', status: 'confirmed' }, { id: 'Dy', workstream: 'global', rule: 'not yet', source: 's', status: 'candidate' }];
+  const f = JSON.parse(rulesFile([], { config, harvested }));
+  assert.ok(f.global.some((r) => r.rule === 'Ten seconds, tight rhythm.')); assert.ok(!f.global.some((r) => r.rule === 'not yet'));
+  assert.equal(f.workstreams['bdsmpub-social'].brand, 'bdsmpub');
+  assert.ok(f.workstreams['bdsmpub-social'].rules.some((r) => /No exposed bodies/.test(r.rule)));
+  assert.equal(plan(rulesFile([]), rulesFile([], { config, harvested })).action, 'open');
+  // wiring: the tick hands the loaded directives to the rules PR
+  let got;
+  const now = Date.now() + 86_400_000 * 5;
+  const call = async (a) => a === 'observe' ? { status: 200, policy: { autoApprove: true, maxRunUsd: 3, maxDayUsd: 20, maxRunAgeH: 24 }, learnings: [], spend: { autoApprovedTodayUsd: 0, byProject7d: {} }, perf: [], heartbeats: [], projects: [], stages: [], runs: [] } : { status: 200, ok: true, verified: true };
+  await tick({ call, now, home, strategist: null, harvestDirs: null, local: async () => ({ projects: [], stages: [], runs: [] }), rulesPr: async (l, s, d) => { got = d; return { action: 'none' }; } });
+  assert.ok(got?.config?.workstreams?.some((w) => w.id === 'bdsmpub-social'), 'directives reached rulesPr');
+});
