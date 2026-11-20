@@ -62,3 +62,9 @@ product (`auto:<k>`), learning-loop weights, run id in ad names, worker updates.
 - Live: production `/api/worker/brain` wrong token → 401; first launchd ticks `__VIDEO_BRAIN__ ok:true verified:true` (14 loops = 9 Xark projects + 5 local Ad Studio project groups, 3 incidents, all 11 probes green incl. OpenRouter balance and every routed video model listed). Strategist (`claude -p` Sonnet) wrote next actions for 8 stalled projects; learnings synced to 6 skills + Ad Studio `data/brain-learnings.json` (script prompt).
 - Bugs found by the live run and fixed with failing tests: second check skipped local files; snapshot's auto-approved total ignored the same tick; pattern scan false positives (stem −16 LUFS, 30 ms fades); learning from pre-baseline videos; ticks up to 212 s (check time budget 120 s).
 - Not done / limits: `/brain` live view needs Barron's sign-in (Xark Account; not typed by the agent); no production AdStudioRun exists yet, so server-side auto-approve/retry are tested only against the fake API; storage is AppSetting rows (new tables = production migration, needs Barron); the 2 lab jobs stuck at approval since 11-09 are Xark-managed and left for Studio.
+
+## 2026-11-19 P1+P2 (no schema) — PR #187 (stacked on #186)
+- workstreams.json + xark-job CLI + directive harvest; backfilled jobs acw-bf(81) bdsmpub-noir(10) bdsmpub-slides(10)
+- verify: node --test test/*.test.mjs 39/39; sabotage (drop directives from syncAll) fails directives test; gh pr view 187 OPEN base p1-bdsmpub-batches
+- 11 directive candidates in ~/.config/xark-studio/directives.json await Barron confirm
+- assumption: one daemon tick ran branch code (00:13Z) and harvested with the old loose filter; store reset to [] and re-seeded with the strict filter

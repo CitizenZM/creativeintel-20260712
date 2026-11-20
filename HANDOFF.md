@@ -100,3 +100,8 @@
 - 完成: P1 no-migration slice: PR #186 registers bdsmpub noir+slides sets as Video Brain batch jobs (dir-scan when no INDEX.csv). OpenRouter probe fail is empty balance, not code
 - 验证: node --test workers/video-brain/test: 36/36 pass; new batch-dir test fails 0!==2 with lib/batch.mjs reverted; gh pr view OPEN
 - 下一步: Barron: merge #186; remaining P1 (Workstream via AppSetting, xark-job CLI) not started; P2 needs #180 schema
+
+### 2026-11-19 16:19 · claude-opus-5-5
+- 完成: P1+P2 no-schema: PR #187 (stacked on #186) workstreams.json, xark-job CLI (start/finish/list/backfill/directives), daily harvest of Barron's typed video instructions as candidates, synced to skills/_shared/VIDEO-KNOWLEDGE.md + Ad Studio json
+- 验证: node --test 39/39; directives wiring test fails when unwired; readBatches shows acw 81 + bdsmpub 10+10; 11 real candidates
+- 下一步: Barron: merge #186 then #187; confirm/reject 11 directive candidates; #180 for Neon tables
