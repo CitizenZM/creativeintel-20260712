@@ -46,7 +46,7 @@ export default async function RootLayout({
   const shell = (
     <TooltipProvider>
       <AppChrome
-        account={clerk ? <UserMenu isOwner={appUser?.role === "owner"} /> : null}
+        account={clerk ? <UserMenu isOwner={appUser?.role === "owner"} chooserUrl={`${accountUrl()}/?choose=1`} /> : null}
         isAdmin={!clerk || appUser?.role === "owner"}
       >
         {children}
