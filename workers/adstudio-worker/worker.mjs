@@ -151,13 +151,19 @@ export function liveOwner(st, jobId, { kill = killPid, ps = psCommand } = {}) {
     if (!pidAlive(st.pid, kill)) return false; // exited in between
     throw Object.assign(new Error(`pipeline still running (pid ${st.pid})`), { busy: true });
   }
-  return cmd.includes('pipeline/run.mjs') && cmd.trim().split(/\s+/).includes(jobId);
+  return isJobCommand(cmd, jobId);
 }
+const isJobCommand = (cmd, jobId) => cmd.includes('pipeline/run.mjs') && cmd.trim().split(/\s+/).includes(jobId);
+
+/** pipelines this worker process is watching, by job id: { pid, claim }. A run requeued after missed heartbeats (API outage,
+ *  Mac asleep > STALE_MS) and claimed again by this same process is handed to its watcher (new claim), never watched twice. */
+const watching = new Map();
 
 /** run the pipeline as its own process group, report every tick, kill it when Xark says cancel.
  *  `adopt` = the pid of this job's pipeline left running by an earlier worker: watch it instead of spawning a second one.
  *  Returns the exit code, or the signal when the pipeline was killed (code null); both null for an adopted pipeline. */
-export async function runPipeline(runId, id, args, claim, { tick = TICK_MS, adopt, kill = killPid } = {}) {
+export async function runPipeline(runId, id, args, claim, { tick = TICK_MS, adopt, kill = killPid, ps = psCommand, watch } = {}) {
+  const claimNow = () => watch?.claim ?? claim; // a reclaim by this process switches the claim mid-run
   let exited = null; let pid = adopt;
   if (!adopt) {
     // a host Claude Code session's variables (CLAUDECODE, CLAUDE_CODE_*) make the pipeline's `claude -p` return an empty session
@@ -165,18 +171,28 @@ export async function runPipeline(runId, id, args, claim, { tick = TICK_MS, adop
     const child = spawn(process.execPath, args, { cwd: ROOT, detached: true, stdio: 'ignore', env });
     pid = child.pid; child.on('exit', (code, signal) => { exited = { code, signal }; });
   }
-  const running = () => (adopt ? pidAlive(adopt, kill) : exited === null);
-  let cancelled = false;
+  if (watch) watch.pid = pid;
+  // adopted: not our child, so watch the pid, and stop when it is no longer this job's run.mjs (pid reused); ps unknown = still ours
+  const stillOurs = () => { try { return isJobCommand(String(ps(adopt)), id); } catch { return true; } };
+  const running = () => (adopt ? pidAlive(adopt, kill) && stillOurs() : exited === null);
+  let cancelled = false; let reclaimed = false;
   while (running()) {
     await sleep(tick);
     const st = await readJSON(path.join(jobDir(id), 'status.json'));
     const spec = await readJSON(path.join(jobDir(id), 'spec.json'));
+    const sent = claimNow();
     try {
-      const r = await api('progress', { runId, claim, step: st?.step, progress: progressOf(st), log: st?.log?.slice(-60), plan: planOf(spec) });
+      const r = await api('progress', { runId, claim: sent, step: st?.step, progress: progressOf(st), log: st?.log?.slice(-60), plan: planOf(spec) });
+      // 'reclaimed' is not a user cancel: never kill. Handed to this watcher meanwhile (claim switched) = keep going; else stop watching
+      if (r.status === 'reclaimed') { if (sent === claimNow()) { reclaimed = true; break; } continue; }
       if (r.cancel && !cancelled) { cancelled = true; try { kill(-pid, 'SIGTERM'); } catch { /* gone */ } }
-    } catch (e) { console.warn('[adstudio] progress failed:', e.message); }
+    } catch (e) {
+      if (/^progress: 409\b/.test(e.message) && sent === claimNow()) { reclaimed = true; break; } // a stale claim, same rule
+      console.warn('[adstudio] progress failed:', e.message);
+    }
   }
-  return { cancelled, code: exited?.code ?? null, signal: exited?.signal ?? null };
+  if (watch) watch.reclaimed = reclaimed;
+  return { cancelled, reclaimed, code: exited?.code ?? null, signal: exited?.signal ?? null };
 }
 
 async function upload(id, file, contentType) {
@@ -216,8 +232,23 @@ async function finish(run, id, st) {
   return api('done', { runId: run.runId, claim: run.claim, finalMp4Url, posterUrl, review: st.review, metrics: st.review?.metrics, autofix: st.autofix, plan: planOf(spec), actualUsd: st.cost, log: st.log }, { timeoutMs: BIG_API_TIMEOUT });
 }
 
-export async function handle(run, { kill = killPid, ps = psCommand } = {}) {
-  const id = jobIdOf(run.runId); const dir = jobDir(id); const claim = run.claim;
+export async function handle(run, opts = {}) {
+  const id = jobIdOf(run.runId);
+  const mine = watching.get(id);
+  if (mine) { // this process already runs or watches it: the new claim goes to that watcher, no second watcher
+    console.log(`[adstudio] ${run.phase} ${run.runId}: reclaimed by this worker, handed to the running watcher (pid ${mine.pid ?? 'starting'})`);
+    mine.claim = run.claim;
+    return { action: 'handed-off' };
+  }
+  const watch = { pid: null, claim: run.claim };
+  watching.set(id, watch);
+  try { return await handleOnce(run, watch, opts); } finally { if (watching.get(id) === watch) watching.delete(id); }
+}
+
+async function handleOnce(run0, watch, { kill = killPid, ps = psCommand } = {}) {
+  // every report goes out under the claim this watcher holds now (a reclaim by this process switches it)
+  const run = { ...run0, get claim() { return watch.claim; } };
+  const id = jobIdOf(run.runId); const dir = jobDir(id);
   // the server requeued this run (no heartbeat after a worker restart) while its pipeline is still running here: adopt it
   let adopt;
   try {
@@ -230,8 +261,8 @@ export async function handle(run, { kill = killPid, ps = psCommand } = {}) {
     return { action: 'deferred', error: e.message };
   }
   const end = async (st, cancelled, signal) => {
-    if (cancelled) return api('failed', { runId: run.runId, claim, error: 'cancelled by the user', cancelled: true, actualUsd: st?.cost, log: st?.log });
-    return api('failed', { runId: run.runId, claim, error: stopReason(st, signal), actualUsd: st?.cost, log: st?.log });
+    if (cancelled) return api('failed', { runId: run.runId, claim: run.claim, error: 'cancelled by the user', cancelled: true, actualUsd: st?.cost, log: st?.log });
+    return api('failed', { runId: run.runId, claim: run.claim, error: stopReason(st, signal), actualUsd: st?.cost, log: st?.log });
   };
   if (run.phase === 'plan' || run.phase === 'copy_plan') {
     let from = 'ingest';
@@ -247,27 +278,29 @@ export async function handle(run, { kill = killPid, ps = psCommand } = {}) {
       if (run.phase === 'plan') from = resumeFrom(await readJSON(path.join(dir, 'status.json')));
       if (run.phase === 'copy_plan') {
         const c = await new Promise((resolve) => { const p = spawn(process.execPath, ['pipeline/clone.mjs', jobIdOf(run.planFromRunId), id], { cwd: ROOT, stdio: 'inherit' }); p.on('exit', resolve); });
-        if (c !== 0) return api('failed', { runId: run.runId, claim, error: `could not copy the plan of ${run.planFromRunId}` });
+        if (c !== 0) return api('failed', { runId: run.runId, claim: run.claim, error: `could not copy the plan of ${run.planFromRunId}` });
         from = 'generate';
       }
     }
-    const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, from], claim, { adopt, kill });
+    const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, from], run.claim, { adopt, kill, ps, watch });
+    if (watch.reclaimed) return { action: 'reclaimed' }; // claimed elsewhere: stop watching, the pipeline is left running
     const st = await readJSON(path.join(dir, 'status.json'));
     if (!cancelled && st?.state === 'done') return finish(run, id, st); // free run (stock remix): rendered without an approval stop
     if (cancelled || st?.state !== 'approval') return end(st, cancelled, signal);
     const spec = await readJSON(path.join(dir, 'spec.json'));
     const estimate = { ...st.estimate, keyframes: await keyframeThumbs(id, spec).catch(() => []), warnings: st.warnings || [] };
-    return api('gate', { runId: run.runId, claim, estimate, plan: planOf(spec), storyboardAB: spec?.storyboard ? { winner: spec.storyboard.winner, scores: spec.storyboard.scores, why: spec.storyboard.why } : undefined, preUsd: st.cost || 0, log: st.log });
+    return api('gate', { runId: run.runId, claim: run.claim, estimate, plan: planOf(spec), storyboardAB: spec?.storyboard ? { winner: spec.storyboard.winner, scores: spec.storyboard.scores, why: spec.storyboard.why } : undefined, preUsd: st.cost || 0, log: st.log });
   }
   if (run.phase === 'generate') {
     if (!adopt) { // an adopted pipeline was approved and budgeted when it was started
       const job = await readJSON(path.join(dir, 'job.json'));
-      if (!job) return api('failed', { runId: run.runId, claim, error: 'job folder missing on this Mac' });
+      if (!job) return api('failed', { runId: run.runId, claim: run.claim, error: 'job folder missing on this Mac' });
       // the frame-QA re-generation may spend up to max(budget, estimate x 1.3): hold it to what Xark reserved
       const budget = typeof run.reserveUsd === 'number' && run.reserveUsd > 0 ? Math.min(job.budget ?? BUDGET, run.reserveUsd) : job.budget;
       await writeFile(path.join(dir, 'job.json'), JSON.stringify({ ...job, approved: true, budget }, null, 1));
     }
-    const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, 'generate'], claim, { adopt, kill });
+    const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, 'generate'], run.claim, { adopt, kill, ps, watch });
+    if (watch.reclaimed) return { action: 'reclaimed' }; // claimed elsewhere: stop watching, the pipeline is left running
     const st = await readJSON(path.join(dir, 'status.json'));
     if (cancelled || st?.state !== 'done') return end(st, cancelled, signal);
     return finish(run, id, st);

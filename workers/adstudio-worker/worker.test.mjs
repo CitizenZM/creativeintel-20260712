@@ -172,7 +172,7 @@ setTimeout(() => { writeFileSync(dir + '/final.mp4', 'x'); st({ state: 'done', c
 `;
 let adoptN = 0;
 /** a fresh worker module on a temp Ad Studio root with a fake pipeline/run.mjs, and a fake Xark API that records every report */
-async function adoptRig({ cancel = false } = {}) {
+async function adoptRig({ cancel = false, server } = {}) {
   const { mkdtemp, readFile } = await import('node:fs/promises'); const { tmpdir } = await import('node:os');
   const root = await mkdtemp(path.join(tmpdir(), 'adopt-'));
   await mkdir(path.join(root, 'pipeline'), { recursive: true }); await writeFile(path.join(root, 'pipeline', 'run.mjs'), FAKE_RUN);
@@ -181,7 +181,11 @@ async function adoptRig({ cancel = false } = {}) {
   Object.assign(process.env, env);
   let w; try { w = await import(`./worker.mjs?adopt=${adoptN++}`); } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
   const calls = []; const realFetch = globalThis.fetch;
-  globalThis.fetch = async (_url, init) => { const b = JSON.parse(init.body); calls.push(b); return new Response(JSON.stringify(b.action === 'progress' ? { cancel } : { action: b.action }), { status: 200 }); };
+  globalThis.fetch = async (_url, init) => {
+    const b = JSON.parse(init.body); calls.push(b);
+    const [status, body] = server?.(b) ?? [200, b.action === 'progress' ? { cancel } : { action: b.action }];
+    return new Response(JSON.stringify(body), { status });
+  };
   const spawns = async () => (await readFile(path.join(root, 'spawns.log'), 'utf8').catch(() => '')).split('\n').filter(Boolean);
   const dir = (id) => path.join(root, 'data', 'jobs', id);
   const done = async () => { globalThis.fetch = realFetch; await rm(root, { recursive: true, force: true }); };
@@ -267,4 +271,61 @@ test('cancel from Xark kills the adopted pipeline\'s process group and reports a
     assert.equal(await exited, 'SIGTERM'); assert.equal((await spawns()).length, 1);
     assert.equal(r.action, 'failed'); const f = calls.find((c) => c.action === 'failed'); assert.equal(f.cancelled, true);
   } finally { await done(); }
+});
+
+test('the same worker reclaims its own still-running pipeline (missed heartbeats): handed to the existing watcher, never killed, done reported once', { timeout: 20000 }, async () => {
+  // the server as in adstudio-queue.ts: a progress with an old claim answers {cancel:true,status:'reclaimed'}; reports with an old claim are 409
+  let serverClaim = 'c1';
+  const server = (b) => {
+    if (b.action === 'progress') return [200, b.claim !== serverClaim ? { cancel: true, status: 'reclaimed' } : { cancel: false }];
+    if (b.claim !== serverClaim) return [409, { error: "This claim is no longer the run's current one" }];
+    return [200, { action: b.action }];
+  };
+  const { w, calls, spawns, dir, done } = await adoptRig({ server });
+  const id = w.jobIdOf('reclaim1');
+  try {
+    await mkdir(dir(id), { recursive: true }); await writeFile(path.join(dir(id), 'job.json'), JSON.stringify({ id, budget: 6 }));
+    process.env.FAKE_MS = '700';
+    const first = w.handle({ runId: 'reclaim1', phase: 'generate', claim: 'c1', reserveUsd: 3 });
+    for (let i = 0; i < 100 && (await spawns()).length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    delete process.env.FAKE_MS;
+    await new Promise((r) => setTimeout(r, 100));
+    serverClaim = 'c2'; // requeued after 2 min without heartbeats, claimed again by this same worker
+    const second = await w.handle({ runId: 'reclaim1', phase: 'generate', claim: 'c2', reserveUsd: 3 });
+    const r1 = await first;
+    assert.equal((await spawns()).length, 1, 'one pipeline');
+    const st = JSON.parse(await (await import('node:fs/promises')).readFile(path.join(dir(id), 'status.json'), 'utf8'));
+    assert.equal(st.state, 'done', 'the pipeline was not killed');
+    const ok = calls.filter((c) => c.action === 'done');
+    assert.equal(ok.length, 1, `one done report (${calls.map((c) => c.action + ':' + c.claim).join(' ')})`); assert.equal(ok[0].claim, 'c2');
+    assert.equal(calls.some((c) => c.action === 'failed'), false);
+    assert.equal([r1?.action, second?.action].filter((a) => a === 'done').length, 1);
+  } finally { delete process.env.FAKE_MS; await done(); }
+});
+
+test('pid reuse while adopted: when the pid stops being this job\'s run.mjs the watch ends, status.json decides and the stranger is not killed', { timeout: 6000 }, async () => {
+  const { w, root, calls, spawns, done } = await adoptRig();
+  const id = w.jobIdOf('reuse1'); let p;
+  try {
+    p = await orphan(root, id, 8000);
+    let n = 0; const ps = () => (n++ < 3 ? `${process.execPath} pipeline/run.mjs ${id} generate` : '/Applications/Safari.app/Contents/MacOS/Safari');
+    const t0 = Date.now();
+    const r = await w.handle({ runId: 'reuse1', phase: 'generate', claim: 'c1' }, { ps });
+    assert.ok(Date.now() - t0 < 3000, `watch ended in ${Date.now() - t0} ms`);
+    assert.equal(r.action, 'failed'); assert.equal(calls.find((c) => c.action === 'failed').cancelled, undefined);
+    assert.equal(p.exitCode, null); assert.equal(p.signalCode, null); // the "stranger" was left alone
+    assert.equal((await spawns()).length, 1);
+  } finally { try { process.kill(-p.pid, 'SIGKILL'); } catch { /* gone */ } await done(); }
+});
+
+test('reclaimed by another worker: this watcher stops watching without killing the pipeline and sends no report', { timeout: 20000 }, async () => {
+  const server = (b) => (b.action === 'progress' ? [200, { cancel: true, status: 'reclaimed' }] : [409, { error: 'stale' }]);
+  const { w, root, calls, done } = await adoptRig({ server });
+  const id = w.jobIdOf('reclaim2'); let p;
+  try {
+    p = await orphan(root, id, 8000);
+    const r = await w.handle({ runId: 'reclaim2', phase: 'generate', claim: 'c1' });
+    assert.equal(r.action, 'reclaimed'); assert.equal(p.exitCode, null); assert.equal(p.signalCode, null);
+    assert.deepEqual(calls.map((c) => c.action).filter((a) => a !== 'progress'), []);
+  } finally { try { process.kill(-p.pid, 'SIGKILL'); } catch { /* gone */ } await done(); }
 });
