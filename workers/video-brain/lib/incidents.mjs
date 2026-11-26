@@ -15,17 +15,28 @@ const norm = (s) => s
   .trim();
 
 // provider JSON bodies ({"error":{"message":"..."}}, {"type":"error","error":{...}}, {"detail":"..."}): the cause is the
-// message, not request_id / user_id / metadata / trailing remedy text -> sign on its first sentence (after $1.00 -> $#)
+// HTTP code + message, not request_id / user_id / trailing remedy text -> sign on code + first sentence (after $1.00 -> $#).
+// OpenRouter wraps upstream failures as "Provider returned error" + metadata.raw: then raw's first sentence is the cause.
 const PROVIDER_MSG = /"(?:message|detail)"\s*:\s*"((?:[^"\\]|\\.)+)/;
+const RAW = /"raw"\s*:\s*"((?:[^"\\]|\\.)+)/;
+const GENERIC = /^(provider returned error|upstream error|internal (server )?error|unknown error|error)$/;
+const sentence = (t) => norm(t).split('. ')[0].replace(/\.$/, '');
+const unescape = (t) => { try { return JSON.parse(`"${t}"`); } catch { return t.replace(/\\"/g, '"'); } };
 
 export function signatureOf(error) {
   const s = String(error || 'unknown');
   const m = s.match(PROVIDER_MSG);
   if (!m) return norm(s).slice(0, 140);
   const brace = s.indexOf('{');
-  const head = norm(brace >= 0 && brace < m.index ? s.slice(0, brace) : '');
-  const msg = norm(m[1]).split('. ')[0].replace(/\.$/, '');
-  return `${head} ${msg}`.trim().slice(0, 140);
+  const headRaw = brace >= 0 && brace < m.index ? s.slice(0, brace) : '';
+  const code = headRaw.match(/\b([1-5]\d\d)\b/)?.[1] || s.match(/"code"\s*:\s*([1-5]\d\d)\b/)?.[1] || '';
+  let msg = sentence(m[1]);
+  const raw = GENERIC.test(msg) && s.match(RAW);
+  if (raw) {
+    const inner = unescape(raw[1]);
+    msg += ` | ${sentence(inner.match(PROVIDER_MSG)?.[1] ?? inner)}`;
+  }
+  return `${norm(headRaw)} ${code} ${msg}`.replace(/\s+/g, ' ').trim().slice(0, 140);
 }
 
 const RUNBOOKS = [
@@ -88,9 +99,11 @@ export function aggregate(prev, runs, now = Date.now()) {
     const c = classify(r.error);
     const at = new Date(r.updatedAt).toISOString();
     const cur = out[sig] || { signature: sig, kind: c.kind, count: 0, firstSeen: at, lastSeen: at, status: 'open', runbook: c.runbook, sample, runs: [], ids: [] };
-    if (!cur.ids.includes(r.id)) {
-      cur.ids = [...cur.ids, r.id].slice(-IDS_CAP);
-      cur.runs = [...cur.runs, r.id].slice(-20);
+    const seen = cur.ids.includes(r.id);
+    // a run that recovered and is now failed again is a new failure under the same id
+    if (!seen || (cur.status === 'resolved' && cur.resolvedBy === 'recovered')) {
+      if (!seen) { cur.ids = [...cur.ids, r.id].slice(-IDS_CAP); cur.runs = [...cur.runs, r.id].slice(-20); }
+      delete cur.resolvedBy; // counted once even if it stays resolved (failure older than 72 h)
       cur.count += 1;
       if (at > cur.lastSeen) cur.lastSeen = at;
       if (at < cur.firstSeen) cur.firstSeen = at;

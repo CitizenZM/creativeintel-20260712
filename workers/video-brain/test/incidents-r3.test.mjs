@@ -137,3 +137,54 @@ test('classify: a pipeline killed by a signal is transient, retried once', () =>
   }
   assert.equal(classify('node exited 1: TypeError: x').kind, 'code');
 });
+
+// ---------- S4 follow-up: OpenRouter "Provider returned error" wrappers keep the HTTP code + metadata.raw ----------
+const wrap = (code, raw, req = 'gen-1764000000-AbCdEfGhIjKlMnOp') => `OpenRouter ${code}: {"error":{"message":"Provider returned error","code":${code},"metadata":{"raw":${JSON.stringify(raw)},"provider_name":"Google"}},"user_id":"user_39vQn552mVjUU95dPAHVhXUrBW3","id":"${req}"}`;
+const W429 = wrap(429, 'google/veo-3.1 is temporarily rate-limited upstream. Please retry shortly, or add your own key');
+const W400 = wrap(400, '{"error":{"code":400,"message":"The prompt could not be submitted. Your prompt may violate our content safety policy.","status":"INVALID_ARGUMENT"}}');
+const W502 = wrap(502, 'upstream connect error or disconnect/reset before headers. reset reason: connection timeout');
+
+test('signatureOf: OpenRouter "Provider returned error" 429 / 400 safety / 502 stay three incidents', () => {
+  const sigs = [W429, W400, W502].map(signatureOf);
+  assert.equal(new Set(sigs).size, 3, sigs.join(' | '));
+  assert.match(signatureOf(W429), /429/);
+  assert.match(signatureOf(W429), /rate-limited upstream/);
+  assert.match(signatureOf(W400), /prompt could not be submitted/);
+  assert.match(signatureOf(W502), /upstream connect error/);
+  // same wrapped cause, different generation id / amounts -> one incident
+  assert.equal(signatureOf(W429), signatureOf(wrap(429, 'google/veo-3.1 is temporarily rate-limited upstream. Please retry shortly, or add your own key', 'gen-1764999999-ZzYyXxWwVvUuTtSs')));
+  // two different raw causes under the same code stay apart
+  assert.notEqual(signatureOf(W502), signatureOf(wrap(502, 'Bad gateway from provider Vertex')));
+  const m = aggregate({}, [W429, W400, W502].map((error, i) => ({ id: `w${i}`, status: 'failed', error, updatedAt: at(1) })), NOW);
+  assert.equal(Object.keys(m).length, 3);
+});
+
+test('signatureOf: the HTTP code stays in every provider JSON signature (401 vs 403, 402 vs 429 never merge)', () => {
+  assert.notEqual(signatureOf(AUTH_A), signatureOf(AUTH_A.replace(/^401/, '403')));
+  const or = (code) => `OpenRouter ${code}: {"error":{"message":"This request requires at least $1.00 in balance for image or video output","code":${code}}}`;
+  assert.notEqual(signatureOf(or(402)), signatureOf(or(429)));
+  assert.match(signatureOf(OR_402_SHORT), /402/);
+  assert.match(signatureOf(AUTH_A), /401/);
+});
+
+test('aggregate: a run that recovered and then fails again under the same id reopens the incident', () => {
+  const m = aggregate(AUTH_INC(['a']), [{ id: 'a', status: 'completed', updatedAt: at(2) }], NOW);
+  assert.equal(Object.values(m)[0].resolvedBy, 'recovered');
+  const m2 = aggregate(m, [{ id: 'a', status: 'failed', error: AUTH_B, updatedAt: at(0.5) }], NOW);
+  const [inc] = Object.values(m2);
+  assert.equal(inc.status, 'reopened');
+  assert.equal(inc.resolvedBy, undefined);
+  assert.equal(inc.lastSeen, at(0.5));
+  assert.deepEqual(inc.ids, ['a']);
+  // seen again next tick, still failed: no double count
+  assert.equal(Object.values(aggregate(m2, [{ id: 'a', status: 'failed', error: AUTH_B, updatedAt: at(0.5) }], NOW))[0].count, inc.count);
+});
+
+test('aggregate: a recovered run seen failed again with an OLD timestamp is counted once, not every tick', () => {
+  const m = aggregate(AUTH_INC(['a']), [{ id: 'a', status: 'completed', updatedAt: at(2) }], NOW);
+  const old = [{ id: 'a', status: 'failed', error: AUTH_B, updatedAt: at(100) }];
+  const m2 = aggregate(m, old, NOW);
+  const m3 = aggregate(m2, old, NOW);
+  assert.equal(Object.values(m3)[0].count, Object.values(m2)[0].count);
+  assert.equal(Object.values(m3)[0].status, 'resolved');
+});
