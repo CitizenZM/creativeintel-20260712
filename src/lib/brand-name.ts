@@ -49,3 +49,21 @@ export function normalizeCompetitor(
   }
   return { name, url: givenUrl };
 }
+
+/**
+ * A product page URL pasted into the product-name field became the project
+ * name and was never scraped. Move it to productUrl when that is empty; only
+ * a full http(s) URL counts, so "Notion.so Pro" or "shop.example.com" stay names.
+ */
+export function normalizeProductInput<T extends { productName?: unknown; productUrl?: unknown }>(input: T): T {
+  if (!input || input.productUrl || typeof input.productName !== "string") return input;
+  const candidate = input.productName.trim();
+  if (!/^https?:\/\//i.test(candidate)) return input;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return input;
+  } catch {
+    return input;
+  }
+  return { ...input, productUrl: candidate, productName: "" };
+}

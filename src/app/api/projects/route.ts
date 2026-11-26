@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { normalizeCompetitor } from "@/lib/brand-name";
+import { normalizeCompetitor, normalizeProductInput } from "@/lib/brand-name";
 import { createProjectSchema } from "@/lib/validations";
 import {
   upsertBrandProfile,
@@ -32,7 +32,8 @@ async function unguardedGET() {
 async function unguardedPOST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const data = createProjectSchema.parse(body);
+    // Normalize before parsing so a URL moved out of productName still gets the productUrl checks.
+    const data = createProjectSchema.parse(normalizeProductInput(body));
 
     const workspace = await getActiveWorkspace();
 
