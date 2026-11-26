@@ -44,7 +44,10 @@ export async function allBatches({ root, workstreamsFile } = {}) {
   return [...BATCHES.filter((b) => !ids.has(b.id)), ...fromJobs];
 }
 
-export async function readBatches(batches) {
+/** an .mp4 modified less than this long ago may still be written: it is 'generating', not finished (no check yet) */
+export const FRESH_MS = 120_000;
+
+export async function readBatches(batches, { now = Date.now() } = {}) {
   batches = batches || await allBatches();
   const projects = []; const stages = []; const runs = [];
   for (const b of batches) {
@@ -57,7 +60,8 @@ export async function readBatches(batches) {
       let st; try { st = await stat(fp); } catch { st = null; }
       const at = st ? st.mtime.toISOString() : new Date(0).toISOString();
       if (at > latest) latest = at;
-      runs.push({ id: `batch:${b.id}:${row.file}`, local: true, managedBy: 'batch', projectId: `batch:${b.id}`, status: 'completed', step: null, progress: 100, estUsd: 0, actualUsd: null, finalMp4Url: null, finalPath: st && st.size > 0 ? fp : null, error: null, metrics: null, retries: 0, hookType: row.product || null, engine: 'batch', updatedAt: at, createdAt: at, visualMode: 'video', cancelRequested: false });
+      const status = st && now - st.mtimeMs < FRESH_MS ? 'generating' : 'completed';
+      runs.push({ id: `batch:${b.id}:${row.file}`, local: true, managedBy: 'batch', projectId: `batch:${b.id}`, status, step: null, progress: status === 'completed' ? 100 : 0, estUsd: 0, actualUsd: null, finalMp4Url: null, finalPath: st && st.size > 0 ? fp : null, error: null, metrics: null, retries: 0, hookType: row.product || null, engine: 'batch', updatedAt: at, createdAt: at, visualMode: 'video', cancelRequested: false });
     }
     projects.push({ id: `batch:${b.id}`, name: `${b.workstream ? `[${b.workstream}] ` : ''}${b.name}${b.jobStatus === 'running' ? ' (running)' : ''}`, brandName: b.brand, workstream: b.workstream || null, updatedAt: latest || new Date(0).toISOString() });
     stages.push({ projectId: `batch:${b.id}`, local: true, stages: ['setup', 'research', 'insights', 'creative', 'studio'].map((id) => ({ id, state: 'done', action: '' })), next: null });
