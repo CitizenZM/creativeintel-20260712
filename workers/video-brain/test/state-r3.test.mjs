@@ -9,6 +9,7 @@ import { createServer } from 'node:net';
 import { link, mkdtemp, readFile, readdir, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { brainDirs } from './helpers/brain-dirs.mjs';
 import { fileURLToPath } from 'node:url';
 import { tick, acquireLock } from '../brain.mjs';
 import { toRun } from '../lib/local.mjs';
@@ -35,7 +36,7 @@ test('A17 default saveState replaces state.json by rename (a hard link to the ol
   const f = path.join(home, 'state.json'); const old = JSON.stringify(baseState(now));
   await writeFile(f, old);
   await link(f, path.join(home, 'old-link.json'));
-  await tick({ call: mkCall(() => observe()), now, home, local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: null, notify: null, rulesPr: null, harvestDirs: null });
+  await tick({ call: mkCall(() => observe()), now, home, ...brainDirs(home), local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: null, notify: null, rulesPr: null, harvestDirs: null });
   assert.equal(await readFile(path.join(home, 'old-link.json'), 'utf8'), old, 'an in-place write would have changed the linked inode');
   assert.notEqual(await readFile(f, 'utf8'), old, 'state.json got the new state');
   assert.deepEqual((await readdir(home)).sort(), ['old-link.json', 'state.json'], 'no temp file left behind');
@@ -54,7 +55,7 @@ test('DR19 dry-run: state file bytes unchanged, no state dir created, no critic/
   const failed = { id: 'f1', projectId: 'p9', status: 'failed', error: 'fetch failed: ETIMEDOUT', retries: 0, updatedAt: t, estUsd: 0 };
   const calls = [];
   const opts = { call: mkCall(() => observe([failed], [{ id: 'p9', name: 'P9', updatedAt: t }], [{ projectId: 'p9', stages: done }]), calls), dryRun: true, now, local: async () => ({ projects: [{ id: 'local:p', name: 'P', updatedAt: t }], stages: [], runs: [toRun('v1', { projectId: 'p' }, { state: 'done', finished: t }, await mp4())] }), critic: spy('critic'), strategist: spy('strategist'), notify: spy('notify'), verifyNotify: spy('verifyNotify'), rulesPr: spy('rulesPr'), harvestDirs: spy('harvest') };
-  const r = await tick({ ...opts, home });
+  const r = await tick({ ...opts, home, ...brainDirs(home) });
   assert.equal(r.dryRun, true);
   assert.deepEqual(used, []);
   assert.deepEqual(calls, ['observe'], 'only the read-only observe call');
@@ -75,7 +76,7 @@ test('B9 critic throws: the check is still stored and the critic quota is refund
   const now = Date.now(); const t = new Date(now - 3_600_000).toISOString();
   await writeFile(path.join(home, 'state.json'), JSON.stringify(baseState(now, { criticDay: { day: day(now), n: 4 } })));
   let n = 0;
-  await tick({ call: mkCall(() => observe()), now, home, local: async () => ({ projects: [{ id: 'local:p', name: 'P', updatedAt: t }], stages: [], runs: [toRun('v1', { projectId: 'p' }, { state: 'done', finished: t }, await mp4())] }), critic: async () => { n += 1; throw new Error('HTTP 503'); } });
+  await tick({ call: mkCall(() => observe()), now, home, ...brainDirs(home), local: async () => ({ projects: [{ id: 'local:p', name: 'P', updatedAt: t }], stages: [], runs: [toRun('v1', { projectId: 'p' }, { state: 'done', finished: t }, await mp4())] }), critic: async () => { n += 1; throw new Error('HTTP 503'); } });
   const s = JSON.parse(await readFile(path.join(home, 'state.json'), 'utf8'));
   assert.equal(n, 1);
   assert.ok(s.checks['local:v1'], 'check stored');
@@ -97,7 +98,7 @@ test('LU13 tick: unmeasured loudness is retried next tick; after 3 tries the che
   let probes = 0;
   const check = async (r) => { probes += 1; return compare(r, { file: { bytes: 9 }, probe }); };
   const run = { id: 'local:v1', local: true, projectId: 'local:p', status: 'completed', finalPath: '/x/final.mp4', estUsd: 0, actualUsd: null, retries: 0, updatedAt: t, createdAt: t };
-  const opts = { call: mkCall(() => observe()), home, local: async () => ({ projects: [{ id: 'local:p', name: 'P', updatedAt: t }], stages: [], runs: [run] }), critic: null, check };
+  const opts = { call: mkCall(() => observe()), home, ...brainDirs(home), local: async () => ({ projects: [{ id: 'local:p', name: 'P', updatedAt: t }], stages: [], runs: [run] }), critic: null, check };
   const read = async () => JSON.parse(await readFile(path.join(home, 'state.json'), 'utf8'));
   await tick({ ...opts, now });
   let s = await read();
@@ -118,7 +119,7 @@ test('LU13 tick: unmeasured loudness is retried next tick; after 3 tries the che
 
 // main(): spawned so the real lock, log and error line are exercised (observe goes to a just-closed local port)
 const closedPort = await new Promise((res) => { const s = createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => res(port)); }); });
-const spawnBrain = (home, args = []) => spawnSync(process.execPath, [BRAIN, '--once', ...args], { encoding: 'utf8', timeout: 60_000, env: { PATH: process.env.PATH, HOME: process.env.HOME, APP_URL: `http://127.0.0.1:${closedPort}`, WORKER_TOKEN: 'test', VIDEO_BRAIN_HOME: home, VIDEO_BRAIN_DIGEST: '0', VIDEO_BRAIN_STRATEGIST: '0', VIDEO_BRAIN_CRITIC: '0', VIDEO_BRAIN_RULES_PR: '0', VIDEO_BRAIN_HARVEST: '0', AD_STUDIO_URL: `http://127.0.0.1:${closedPort}` } });
+const spawnBrain = (home, args = []) => spawnSync(process.execPath, [BRAIN, '--once', ...args], { encoding: 'utf8', timeout: 60_000, env: { PATH: process.env.PATH, HOME: process.env.HOME, APP_URL: `http://127.0.0.1:${closedPort}`, WORKER_TOKEN: 'test', VIDEO_BRAIN_HOME: home, VIDEO_BRAIN_SKILLS_DIR: brainDirs(home).skillsDir, AD_STUDIO_ROOT: brainDirs(home).adStudioRoot, VIDEO_BRAIN_DIGEST: '0', VIDEO_BRAIN_STRATEGIST: '0', VIDEO_BRAIN_CRITIC: '0', VIDEO_BRAIN_RULES_PR: '0', VIDEO_BRAIN_HARVEST: '0', AD_STUDIO_URL: `http://127.0.0.1:${closedPort}` } });
 
 test('LK18 lock: a live tick holding the pidfile → log and exit 0 without observing', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'vb-lk18-'));
@@ -164,7 +165,7 @@ test('integration (a) tick: a failed run that later shows completed resolves its
   await writeFile(path.join(home, 'state.json'), JSON.stringify(baseState(now)));
   const t = (ms) => new Date(now - ms).toISOString();
   let runs = [{ id: 'run-x1', projectId: 'p1', status: 'failed', error: 'Model returned no image returned for scene 2', retries: 2, updatedAt: t(600_000), estUsd: 0 }];
-  const opts = { call: mkCall(() => observe(runs)), home, local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: null };
+  const opts = { call: mkCall(() => observe(runs)), home, ...brainDirs(home), local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: null };
   await tick({ ...opts, now });
   const read = async () => Object.values(JSON.parse(await readFile(path.join(home, 'state.json'), 'utf8')).incidents);
   let inc = await read();
@@ -183,7 +184,7 @@ test('integration (b) tick: a strategist memo carries the loop step', async () =
   const st = ['setup', 'research', 'insights', 'creative', 'studio'].map((id) => ({ id, state: id === 'setup' ? 'done' : id === 'research' ? 'partial' : 'todo', action: `do ${id}` }));
   const out = { hypothesis: 'h', nextAction: 'n', verifyHow: 'v', checkpointHours: 6, owner: 'Director' };
   let asked = 0;
-  await tick({ call: mkCall(() => observe([], [{ id: 'p7', name: 'Stalled', updatedAt: old }], [{ projectId: 'p7', stages: st }])), now, home, local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: async () => { asked += 1; return out; } });
+  await tick({ call: mkCall(() => observe([], [{ id: 'p7', name: 'Stalled', updatedAt: old }], [{ projectId: 'p7', stages: st }])), now, home, ...brainDirs(home), local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: async () => { asked += 1; return out; } });
   const s = JSON.parse(await readFile(path.join(home, 'state.json'), 'utf8'));
   assert.equal(asked, 1, 'the stalled loop reached the strategist');
   assert.ok(s.strategy.p7.step, 'memo carries the step');
@@ -227,7 +228,7 @@ test('LK18b lock: takeover race — another process creates the lock between sta
 test('LK18b SIGTERM: a brain process killed mid-tick removes its own pidfile and exits 143', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'vb-lk18e-'));
   const hang = createHttpServer(() => {}); await new Promise((res) => hang.listen(0, '127.0.0.1', res));
-  const child = spawn(process.execPath, [BRAIN, '--once'], { env: { PATH: process.env.PATH, HOME: process.env.HOME, APP_URL: `http://127.0.0.1:${hang.address().port}`, WORKER_TOKEN: 'test', VIDEO_BRAIN_HOME: home, VIDEO_BRAIN_DIGEST: '0', VIDEO_BRAIN_STRATEGIST: '0', VIDEO_BRAIN_CRITIC: '0', VIDEO_BRAIN_RULES_PR: '0', VIDEO_BRAIN_HARVEST: '0' } });
+  const child = spawn(process.execPath, [BRAIN, '--once'], { env: { PATH: process.env.PATH, HOME: process.env.HOME, APP_URL: `http://127.0.0.1:${hang.address().port}`, WORKER_TOKEN: 'test', VIDEO_BRAIN_HOME: home, VIDEO_BRAIN_SKILLS_DIR: brainDirs(home).skillsDir, AD_STUDIO_ROOT: brainDirs(home).adStudioRoot, VIDEO_BRAIN_DIGEST: '0', VIDEO_BRAIN_STRATEGIST: '0', VIDEO_BRAIN_CRITIC: '0', VIDEO_BRAIN_RULES_PR: '0', VIDEO_BRAIN_HARVEST: '0' } });
   const f = path.join(home, 'tick.pid');
   const code = new Promise((res) => child.on('exit', (c, sig) => res(c ?? sig)));
   try {
@@ -252,13 +253,13 @@ test('LU13b tick: lufsTries entries for runs no longer observed are dropped', as
   const home = await mkdtemp(path.join(tmpdir(), 'vb-lu13b-'));
   const now = Date.now();
   await writeFile(path.join(home, 'state.json'), JSON.stringify(baseState(now, { lufsTries: { gone: 2 } })));
-  await tick({ call: mkCall(() => observe()), now, home, local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: null });
+  await tick({ call: mkCall(() => observe()), now, home, ...brainDirs(home), local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: null });
   const s = JSON.parse(await readFile(path.join(home, 'state.json'), 'utf8'));
   assert.deepEqual(s.lufsTries || {}, {});
 });
 
 // ---- second verification: ps failure must not steal a live lock; an empty pidfile is a writer mid-create ----
-const spawnBrainEnv = (home, extra) => spawnSync(process.execPath, [BRAIN, '--once'], { encoding: 'utf8', timeout: 60_000, env: { PATH: process.env.PATH, HOME: process.env.HOME, APP_URL: `http://127.0.0.1:${closedPort}`, WORKER_TOKEN: 'test', VIDEO_BRAIN_HOME: home, VIDEO_BRAIN_DIGEST: '0', VIDEO_BRAIN_STRATEGIST: '0', VIDEO_BRAIN_CRITIC: '0', VIDEO_BRAIN_RULES_PR: '0', VIDEO_BRAIN_HARVEST: '0', ...extra } });
+const spawnBrainEnv = (home, extra) => spawnSync(process.execPath, [BRAIN, '--once'], { encoding: 'utf8', timeout: 60_000, env: { PATH: process.env.PATH, HOME: process.env.HOME, APP_URL: `http://127.0.0.1:${closedPort}`, WORKER_TOKEN: 'test', VIDEO_BRAIN_HOME: home, VIDEO_BRAIN_SKILLS_DIR: brainDirs(home).skillsDir, AD_STUDIO_ROOT: brainDirs(home).adStudioRoot, VIDEO_BRAIN_DIGEST: '0', VIDEO_BRAIN_STRATEGIST: '0', VIDEO_BRAIN_CRITIC: '0', VIDEO_BRAIN_RULES_PR: '0', VIDEO_BRAIN_HARVEST: '0', ...extra } });
 async function fakePs(body) {
   const bin = await mkdtemp(path.join(tmpdir(), 'vb-fakeps-'));
   await writeFile(path.join(bin, 'ps'), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
