@@ -24,6 +24,7 @@ const RUNBOOKS = [
   { re: /not found|no endpoints|unknown model|retired|deprecated|unavailable/, kind: 'model', runbook: 'model gone: pipeline falls back (generate.mjs GONE); probe flags the route to update; brain retries once', retry: true },
   { re: /no image returned|no output/, kind: 'model', runbook: 'keyframe returned nothing: pipeline retries twice; brain retries the run once', retry: true },
   { re: /\b401\b|authentication_error|invalid[ _-]?(x-)?api[ _-]?key|unauthori[sz]ed/i, kind: 'human', runbook: 'credential rejected (401): rotate or re-enter the key in the env file the failing stage reads - Barron', retry: false },
+  { re: /enospc|no space left/i, kind: 'human', runbook: 'disk full: free space on the Mac worker - Barron', retry: false },
   { re: /worker stopped|heartbeat|stale|econnreset|etimedout|socket hang up|fetch failed|timeout|timed out|\b5\d\d\b|rate limit|\b429\b|overloaded/, kind: 'platform', runbook: 'transient: brain retries the run once from the failed step', retry: true },
 ];
 
@@ -52,6 +53,12 @@ export function aggregate(prev, failedRuns, now = Date.now()) {
     }
     out[sig] = cur;
   }
-  for (const v of Object.values(out)) if (v.status !== 'resolved' && now - Date.parse(v.lastSeen) > 72 * H) v.status = 'resolved';
+  for (const v of Object.values(out)) {
+    if (v.status !== 'resolved' && now - Date.parse(v.lastSeen) > 72 * H) v.status = 'resolved';
+    // runbooks evolve: an open incident first seen before its rule existed is re-classified from its sample
+    if (v.status === 'resolved' || !v.sample) continue;
+    const c = classify(v.sample);
+    if (c.kind !== v.kind || c.runbook !== v.runbook) { v.kind = c.kind; v.runbook = c.runbook; }
+  }
   return out;
 }

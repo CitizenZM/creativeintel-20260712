@@ -80,3 +80,82 @@ test('wiring: the adstudio worker (launchd) probe uses launchdVerdict on launchc
   assert.match(body, /launchdVerdict\(stdout\)/);
   assert.doesNotMatch(body, /kickstart|kill|bootout|unload|stop/, 'read-only: never restarts or stops the service');
 });
+
+// I8: an incident classified before a runbook existed must be re-classified from its sample on every aggregate
+test('aggregate: a stored open incident is re-classified from its sample (401 stored as code -> human); counts and ids kept', () => {
+  const sig = '# {"type":"error"...}';
+  const prev = { [sig]: { signature: sig, kind: 'code', runbook: 'unknown cause: Doctor diagnoses it and opens a fix PR with a failing test', sample: AUTH, count: 7, firstSeen: at(30), lastSeen: at(2), status: 'open', runs: ['r1', 'r2'], ids: ['r1', 'r2'] } };
+  const inc = aggregate(prev, [], NOW)[sig];
+  assert.equal(inc.kind, 'human');
+  assert.match(inc.runbook, /credential rejected \(401\)/);
+  assert.equal(inc.signature, sig);
+  assert.equal(inc.count, 7);
+  assert.deepEqual(inc.ids, ['r1', 'r2']);
+  assert.match(buildDigest({ at: new Date(NOW).toISOString(), incidents: [inc] }), /credential rejected/);
+});
+
+test('aggregate: a resolved incident is not re-classified', () => {
+  const prev = { s: { signature: 's', kind: 'code', runbook: 'old', sample: AUTH, count: 1, firstSeen: at(100), lastSeen: at(90), status: 'resolved', runs: [], ids: [] } };
+  assert.equal(aggregate(prev, [], NOW).s.kind, 'code');
+});
+
+test('classify: ENOSPC / no space left is a human disk-full incident, no retry (not transient)', () => {
+  for (const e of ["ENOSPC: no space left on device, write '/Users/x/out.mp4'", 'ffmpeg: No space left on device (timeout after write)']) {
+    const c = classify(e);
+    assert.equal(c.kind, 'human', e);
+    assert.equal(c.retry, false, e);
+    assert.match(c.runbook, /disk full/);
+  }
+  const inc = Object.values(aggregate({}, [{ id: 'd1', error: 'ENOSPC: no space left on device', updatedAt: at(1) }], NOW))[0];
+  assert.equal(inc.kind, 'human');
+});
+
+// C1: a slow tick makes every probe time out together; only a failure that repeats on a sequential re-run is a FAIL
+import * as probesLib from '../lib/probes.mjs';
+const { balanceVerdict } = probesLib;
+const confirmFailures = (...a) => probesLib.confirmFailures(...a);
+const P = (name, ok, detail = '') => ({ name, ok, detail, at: 't' });
+
+test('confirmFailures: failed probes are re-run sequentially; pass on re-run = ok, fail again = FAIL', async () => {
+  const order = [];
+  let inFlight = 0, maxInFlight = 0;
+  const rerun = async (name) => { inFlight++; maxInFlight = Math.max(maxInFlight, inFlight); order.push(name); await new Promise((r) => setTimeout(r, 5)); inFlight--; return name === 'b' ? P('b', true, 'fine') : P(name, false, 'still broken'); };
+  const out = await confirmFailures([P('a', true, 'x'), P('b', false, ''), P('c', false, '')], rerun, 60_000);
+  assert.deepEqual(order, ['b', 'c'], 'only failed probes are re-run, in order');
+  assert.equal(maxInFlight, 1, 'sequential');
+  assert.deepEqual(out.map((r) => [r.name, r.ok]), [['a', true], ['b', true], ['c', false]]);
+  assert.equal(out[2].detail, 'still broken');
+});
+
+test('confirmFailures: total budget; a probe not re-run keeps its first result; empty detail -> timeout/no output', async () => {
+  let t = 0;
+  const clock = () => t;
+  const rerun = async (name) => { t += 40_000; return P(name, false, ''); };
+  const out = await confirmFailures([P('a', false, ''), P('b', false, ''), P('c', false, 'first')], rerun, 60_000, clock);
+  // a re-run at t=0 (ends 40 s), b re-run at 40 s (ends 80 s), c: budget exhausted -> first result kept
+  assert.deepEqual(out.map((r) => r.ok), [false, false, false]);
+  assert.equal(out[0].detail, 'timeout/no output');
+  assert.equal(out[1].detail, 'timeout/no output');
+  assert.equal(out[2].detail, 'first');
+});
+
+test('confirmFailures: a re-run that hangs past the remaining budget keeps the first result', async () => {
+  const out = await confirmFailures([P('slow', false, '')], () => new Promise(() => {}), 30);
+  assert.equal(out[0].ok, false);
+  assert.equal(out[0].detail, 'timeout/no output');
+});
+
+test('confirmFailures: openrouter balance still FAILS when the balance is low on both runs', async () => {
+  const low = balanceVerdict(1.2);
+  assert.equal(low.ok, false);
+  const out = await confirmFailures([low], async () => balanceVerdict(1.1), 60_000);
+  assert.equal(out[0].ok, false);
+  assert.equal(out[0].name, 'openrouter balance');
+  assert.match(out[0].detail, /\$1\.10 left/);
+});
+
+test('wiring: runProbes confirms failures with a 60 s total budget before returning', async () => {
+  const src = await readFile(new URL('../lib/probes.mjs', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export async function runProbes('));
+  assert.match(body, /const res = await confirmFailures\(await Promise\.all\(.*\), 60_000\);/);
+});

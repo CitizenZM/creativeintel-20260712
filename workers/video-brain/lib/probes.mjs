@@ -75,21 +75,46 @@ export async function envKey(file, name) {
   try { const m = (await readFile(file, 'utf8')).match(new RegExp(`^${name}=(.*)$`, 'm')); return m ? m[1].replace(/^["']|["']$/g, '').trim() : null; } catch { return null; }
 }
 
+const NO_OUTPUT = 'timeout/no output';
+const withDetail = (r) => (String(r.detail ?? '').trim() ? r : { ...r, detail: NO_OUTPUT });
+/** pure (rerun injected): re-run failed probes sequentially within budgetMs TOTAL; FAIL only if the re-run fails too.
+ *  A probe not re-run (budget gone, or the re-run outlives it) keeps its first result. */
+export async function confirmFailures(results, rerun, budgetMs, clock = Date.now) {
+  const start = clock();
+  const out = [];
+  for (const r of results) {
+    if (r.ok) { out.push(r); continue; }
+    const left = budgetMs - (clock() - start);
+    if (left <= 0) { out.push(withDetail(r)); continue; }
+    let timer;
+    const second = await Promise.race([
+      Promise.resolve().then(() => rerun(r.name)).catch((e) => bad(r.name, e?.message || e)),
+      new Promise((res) => { timer = setTimeout(() => res(null), left); }),
+    ]);
+    clearTimeout(timer);
+    out.push(withDetail(second || r));
+  }
+  return out;
+}
+
 export async function runProbes({ adStudioRoot, obs }) {
   const key = process.env.OPENROUTER_API_KEY || (await envKey(path.join(adStudioRoot, '.env.local'), 'OPENROUTER_API_KEY'));
-  const res = await Promise.all([
-    cmd('ffmpeg', 'ffmpeg', ['-version'], /ffmpeg version/),
-    cmd('ffprobe', 'ffprobe', ['-version'], /ffprobe version/),
+  const probes = [
+    ['ffmpeg', () => cmd('ffmpeg', 'ffmpeg', ['-version'], /ffmpeg version/)],
+    ['ffprobe', () => cmd('ffprobe', 'ffprobe', ['-version'], /ffprobe version/)],
     // the interpreter the pipeline itself resolves (pipeline/lib.mjs PYTHON) under this process's PATH = the worker's PATH
-    pipelinePython(adStudioRoot).then((py) => cmd('whisper (word timing)', py, ['-c', 'import faster_whisper; print("faster-whisper ok")'], /ok/)),
-    pipelinePython(adStudioRoot).then((py) => cmd('edge-tts (voice)', py, ['-c', 'import edge_tts; print("edge-tts ok")'], /ok/)),
-    launchdProbe('adstudio worker (launchd)', 'co.celldigital.adstudio-worker'),
-    cmd('ego lite (reference fetch)', 'zsh', ['-lc', 'command -v ego-browser && echo found'], /found/),
-    openrouterVideo(adStudioRoot, key),
-    openrouterCredits(key),
-    (async () => { try { const s = await statfs(adStudioRoot); const gb = (s.bavail * s.bsize) / 1e9; return gb > 20 ? ok('disk', `${gb.toFixed(0)} GB free`) : bad('disk', `${gb.toFixed(1)} GB free (< 20)`); } catch (e) { return bad('disk', e.message); } })(),
-    (async () => { try { const r = await fetch('http://127.0.0.1:5310/', { signal: AbortSignal.timeout(25_000) }); return r.status < 500 ? ok('ad-studio web :5310', `HTTP ${r.status}`) : bad('ad-studio web :5310', `HTTP ${r.status}`); } catch (e) { return bad('ad-studio web :5310', e.message); } })(),
-  ]);
+    ['whisper (word timing)', () => pipelinePython(adStudioRoot).then((py) => cmd('whisper (word timing)', py, ['-c', 'import faster_whisper; print("faster-whisper ok")'], /ok/))],
+    ['edge-tts (voice)', () => pipelinePython(adStudioRoot).then((py) => cmd('edge-tts (voice)', py, ['-c', 'import edge_tts; print("edge-tts ok")'], /ok/))],
+    ['adstudio worker (launchd)', () => launchdProbe('adstudio worker (launchd)', 'co.celldigital.adstudio-worker')],
+    ['ego lite (reference fetch)', () => cmd('ego lite (reference fetch)', 'zsh', ['-lc', 'command -v ego-browser && echo found'], /found/)],
+    ['openrouter video models', () => openrouterVideo(adStudioRoot, key)],
+    ['openrouter balance', () => openrouterCredits(key)],
+    ['disk', async () => { try { const s = await statfs(adStudioRoot); const gb = (s.bavail * s.bsize) / 1e9; return gb > 20 ? ok('disk', `${gb.toFixed(0)} GB free`) : bad('disk', `${gb.toFixed(1)} GB free (< 20)`); } catch (e) { return bad('disk', e.message); } }],
+    ['ad-studio web :5310', async () => { try { const r = await fetch('http://127.0.0.1:5310/', { signal: AbortSignal.timeout(25_000) }); return r.status < 500 ? ok('ad-studio web :5310', `HTTP ${r.status}`) : bad('ad-studio web :5310', `HTTP ${r.status}`); } catch (e) { return bad('ad-studio web :5310', e.message); } }],
+  ];
+  const byName = new Map(probes);
+  // a slow tick times every probe out together: re-run only the failures, one at a time, within 60 s in total
+  const res = await confirmFailures(await Promise.all(probes.map(([, f]) => f())), (name) => byName.get(name)(), 60_000);
   const hb = (obs.heartbeats || []).filter((h) => /adstudio/i.test(h.workerId)).sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))[0];
   const age = hb ? (Date.now() - Date.parse(hb.lastSeenAt)) / 60000 : null;
   res.push(hb && age < 10 ? ok('worker heartbeat', `${age.toFixed(1)} min ago`) : bad('worker heartbeat', hb ? `${age.toFixed(0)} min ago` : 'never seen'));
