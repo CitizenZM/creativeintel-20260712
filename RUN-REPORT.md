@@ -68,3 +68,8 @@ product (`auto:<k>`), learning-loop weights, run id in ad names, worker updates.
 - verify: node --test test/*.test.mjs 39/39; sabotage (drop directives from syncAll) fails directives test; gh pr view 187 OPEN base p1-bdsmpub-batches
 - 11 directive candidates in ~/.config/xark-studio/directives.json await Barron confirm
 - assumption: one daemon tick ran branch code (00:13Z) and harvested with the old loose filter; store reset to [] and re-seeded with the strict filter
+
+## 2026-11-26 overnight swarm round 2 (Video Brain)
+- Merged after independent verification: creativeintel #194 (incident reclassify + ENOSPC, confirmFailures, strategist stdin/stderr), #195 (URL in product-name → productUrl; Vercel prod success), #196 (digest at-most-once, stalled dedupe, local/batch done, wait labels + priority, setup deep links with href guard, phaseMs). #196 failed first verification (double-send paths A/B/C, no href guard), fixed, passed second.
+- Verify: `node --test workers/video-brain/test/*.test.mjs` 88/88; `worker.test.mjs` 17/17 on main 684c6b0.
+- Assumptions: at-most-once digest preferred over a possible duplicate DM; corrupt state = fresh start (pre-existing).
