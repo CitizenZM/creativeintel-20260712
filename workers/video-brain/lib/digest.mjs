@@ -14,13 +14,20 @@ export function digestDue(lastDay, now = Date.now()) { const p = ptParts(now); r
 export function buildDigest(snap, events24h = []) {
   const loops = snap.loops || [];
   const needBarron = loops.filter((l) => l.waitingOn === 'budget' || l.agent === 'Barron' || (l.status === 'idle-defect' && l.step === 'setup'));
+  // runs held only because the provider funds are out: one ask, not one per project ('estimate' is free brain work, not listed)
+  const funds = loops.filter((l) => l.waitingOn === 'funds');
   const stalled = loops.filter((l) => l.status === 'idle-defect' && !needBarron.includes(l));
   const failedProbes = (snap.probes || []).filter((p) => !p.ok);
   const human = (snap.incidents || []).filter((i) => i.kind === 'human' && i.status !== 'resolved');
   const badChecks = (snap.checks || []).filter((c) => !c.pass && c.renderedAt && Date.now() - Date.parse(c.renderedAt) < 7 * 86_400_000);
   const did = events24h.filter((e) => ['decide', 'call', 'fix'].includes(e.kind));
   const lines = [`【Video Brain 日报】${new Date(snap.at).toISOString().slice(0, 16).replace('T', ' ')} UTC · ${loops.length} 个项目 · 今日花费 $${snap.spend?.todayUsd ?? 0}/$${snap.spend?.capUsd ?? 0}`];
-  if (needBarron.length) { lines.push('', `需要你（${needBarron.length}）:`); for (const l of needBarron.slice(0, 8)) lines.push(`- ${l.name}: ${l.nextAction}`); }
+  const asks = needBarron.length + (funds.length ? 1 : 0);
+  if (asks) {
+    lines.push('', `需要你（${asks}）:`);
+    if (funds.length) lines.push(`- 模型额度用尽，${funds.length} 个项目的运行在等: ${funds[0].nextAction}`);
+    for (const l of needBarron.slice(0, 8)) lines.push(`- ${l.name}: ${l.nextAction}`);
+  }
   if (human.length) { lines.push('', '需要你处理的故障:'); for (const i of human.slice(0, 4)) lines.push(`- ${i.runbook}（${i.count} 次）`); }
   if (failedProbes.length) { lines.push('', '能力体检失败:'); for (const p of failedProbes) lines.push(`- ${p.name}: ${p.detail}`); }
   if (stalled.length) { lines.push('', `大脑在推进的停滞项目（${stalled.length}）:`); for (const l of stalled.slice(0, 6)) lines.push(`- ${l.name} @${l.step}: ${l.nextAction}`); }
@@ -37,5 +44,15 @@ export async function sendDigest(text, { importer = (p) => import(p) } = {}) {
   const cfg = n.loadFeishuConfig();
   if (!cfg.ok) return { ok: false, reason: cfg.reason };
   const r = await n.sendVerifiedDM(cfg, text);
-  return { ok: !!r.ok && !!r.verified, messageId: r.messageId || null, reasons: r.reasons || [] };
+  // sent: the DM went out (a messageId exists) even when the read-back did not verify; the brain never re-sends it
+  return { ok: !!r.ok && !!r.verified, sent: !!r.ok && !!r.messageId, messageId: r.messageId || null, reasons: r.reasons || [] };
+}
+
+/** read-only second check of a digest already sent (no send) → { ok, reasons } */
+export async function verifyDigest(messageId, text, { importer = (p) => import(p) } = {}) {
+  const n = await importer(NOTIFY_MODULE);
+  const cfg = n.loadFeishuConfig();
+  if (!cfg.ok) return { ok: false, reasons: [cfg.reason] };
+  const v = await n.verifyFeishuDM(cfg, messageId, text);
+  return { ok: !!v.verified, reasons: v.reasons || [] };
 }

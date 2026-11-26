@@ -43,7 +43,7 @@ export async function observe(now = new Date()) {
   const ids = projects.map((p) => p.id);
   const [stages, perf, spendToday, spend7d, heartbeats, autoEvents, health] = await Promise.all([
     // getProjectStages runs ~12 queries; one project at a time keeps the brain inside a 5-connection pool
-    pMap(ids, (id) => getProjectStages(id).then((s) => ({ projectId: id, stages: s.stages.map((x) => ({ id: x.id, state: x.state, action: x.action, detail: x.detail })), next: s.next?.id ?? null })).catch((e) => ({ projectId: id, stages: [], next: null, error: String(e?.message || e) })), { concurrency: 1 }),
+    pMap(ids, (id) => getProjectStages(id).then((s) => ({ projectId: id, stages: s.stages.map((x) => ({ id: x.id, state: x.state, action: x.action, detail: x.detail, href: x.href })), next: s.next?.id ?? null })).catch((e) => ({ projectId: id, stages: [], next: null, error: String(e?.message || e) })), { concurrency: 1 }),
     prisma.adPerformance.groupBy({ by: ["projectId"], where: { projectId: { in: ids } }, _max: { dateTo: true, updatedAt: true }, _sum: { impressions: true, views3s: true, thruplays: true, clicks: true, spend: true, conversions: true }, _count: true }),
     prisma.spendEntry.aggregate({ where: { createdAt: { gte: dayStart } }, _sum: { estUsd: true, actualUsd: true } }),
     prisma.spendEntry.groupBy({ by: ["projectId"], where: { projectId: { in: ids }, createdAt: { gte: new Date(now.getTime() - 7 * DAY) } }, _sum: { estUsd: true } }),

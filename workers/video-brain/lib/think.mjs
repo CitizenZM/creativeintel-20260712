@@ -11,6 +11,9 @@ const ACTIVE = ['queued', 'planning', 'awaiting_approval', 'approved', 'generati
 const EXEC = ['queued', 'planning', 'approved', 'generating'];
 export const IDLE_AFTER_H = 48;
 export const AD_DATA_WAIT_H = 72;
+export const APP_BASE = 'https://creative.xark.io';
+/** a same-site path only: starts with one '/', no '@', no backslash, no scheme */
+export const safeHref = (h) => typeof h === 'string' && /^\/(?!\/)/.test(h) && !/[@\\]/.test(h) && !/^\/*[a-z][a-z0-9+.-]*:/i.test(h);
 export const STEP_AGENT = { setup: 'Researcher', research: 'Researcher', insights: 'Strategist', creative: 'Director', studio: 'Director', produce: 'Producer', deliver: 'Performance Analyst', measure: 'Strategist' };
 const iso = (ms) => new Date(ms).toISOString();
 const t = (d) => (d ? Date.parse(d) : 0);
@@ -83,7 +86,7 @@ export function tasksOf(obs, checks, now) {
 }
 
 /** one project's loop: where it is, who acts, what next, when we check and how */
-export function loopOf(project, stages, runs, perf, spend7d, checks, policy, approvedTodayUsd, now) {
+export function loopOf(project, stages, runs, perf, spend7d, checks, policy, approvedTodayUsd, now, { budgetOut = false } = {}) {
   const mine = runs.filter((r) => r.projectId === project.id);
   const active = mine.filter((r) => ACTIVE.includes(r.status));
   const awaiting = mine.filter((r) => r.status === 'awaiting_approval');
@@ -102,7 +105,16 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
     }
     const decisions = awaiting.map((r) => canAutoApprove(r, policy, approvedTodayUsd, now));
     if (decisions.some((d) => d.ok)) return { ...base, step: 'produce', stage: 'gate', status: 'active', agent: 'Producer', doing: `approving ${decisions.filter((d) => d.ok).length} run(s) within the autonomy caps`, nextAction: 'auto-approve, then the Mac worker generates', nextCheckpointAt: at(5 * M), verifyHow: 're-read the run: status approved with a spend reservation' };
-    return { ...base, step: 'produce', stage: 'gate', status: 'waiting', waitingOn: 'budget', agent: 'Producer', doing: `${awaiting.length} run(s) over the autonomy cap: ${decisions[0]?.reason || ''}`, nextAction: 'Barron approves in Studio (free preparation already done)', nextCheckpointAt: at(24 * H), verifyHow: 'run leaves awaiting_approval; reminder after 24 h' };
+    // label only (approvals/canAutoApprove decide): say what actually blocks the gate
+    // priority across refused runs: cap overrun (budget) > funds > stale estimate, so an over-cap run is never hidden
+    const reasons = decisions.filter((d) => !d.ok).map((d) => d.reason || '');
+    const capR = reasons.find((r) => /\bcap\b/.test(r)); const staleR = reasons.find((r) => /estimate .* old/.test(r));
+    const BUDGET = { waitingOn: 'budget', nextAction: 'Barron approves in Studio (free preparation already done)' };
+    const [wait, reason] = capR ? [BUDGET, capR]
+      : budgetOut ? [{ waitingOn: 'funds', nextAction: 'raise the OpenRouter key cap first' }, reasons[0] || '']
+      : staleR ? [{ waitingOn: 'estimate', nextAction: 're-plan (free) to refresh the estimate, or cancel if obsolete' }, staleR]
+      : [BUDGET, reasons[0] || ''];
+    return { ...base, step: 'produce', stage: 'gate', status: 'waiting', ...wait, agent: 'Producer', doing: `${awaiting.length} run(s) not auto-approved: ${reason}`, nextCheckpointAt: at(24 * H), verifyHow: 'run leaves awaiting_approval; reminder after 24 h' };
   }
 
   const lastFailed = failed.sort((a, b) => t(b.updatedAt) - t(a.updatedAt))[0];
@@ -121,6 +133,8 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
     const doneAt = t(lastDone.updatedAt);
     if (p && p.rows > 0 && t(p.lastUpdatedAt) >= doneAt) return { ...base, step: 'measure', stage: 'learn', status: 'active', agent: 'Strategist', doing: `${p.rows} performance rows: hook rate ${p.impressions ? Math.round((p.views3s / p.impressions) * 100) : 0}%, CTR ${p.impressions ? ((p.clicks / p.impressions) * 100).toFixed(2) : 0}%`, nextAction: 'score elements (hook/end card/voice) and plan the next round', nextCheckpointAt: at(24 * H), verifyHow: 'next round plan has a hypothesis and a success metric; new runs created from it' };
     if (now - doneAt < AD_DATA_WAIT_H * H) return { ...base, step: 'deliver', stage: 'recover', status: 'waiting', waitingOn: 'ad-data', agent: 'Performance Analyst', doing: `video delivered ${Math.round((now - doneAt) / H)} h ago; ad data matures at 72 h`, nextAction: 'import Meta/TikTok results (AdPerformance) at 72 h', nextCheckpointAt: iso(doneAt + AD_DATA_WAIT_H * H), verifyHow: 'AdPerformance rows exist for the run ad names; hook rate and CTR computed' };
+    // local/batch jobs have no ad-results import: delivered is the end of their loop
+    if (/^(local|batch):/.test(project.id)) return { ...base, step: 'deliver', stage: 'learn', status: 'done', waitingOn: null, agent: 'Performance Analyst', doing: `delivered ${done.length} videos; results not tracked for local/batch jobs`, nextAction: 'none until a new job starts', nextCheckpointAt: at(7 * 24 * H), verifyHow: 'a new run appears for this project' };
     return { ...base, step: 'deliver', stage: 'recover', status: 'waiting', waitingOn: 'client', agent: 'Performance Analyst', doing: 'no performance data after 72 h', nextAction: 'ask the client for the ad results (CSV import) or confirm the ads are live', nextCheckpointAt: at(48 * H), verifyHow: 'AdPerformance rows appear; otherwise remind again' };
   }
 
@@ -129,7 +143,9 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
   const step = gap ? gap.id : 'studio';
   const idle = now - lastActivity > IDLE_AFTER_H * H;
   const action = gap?.action || 'generate the first Ad Studio batch from the best storyboard';
-  return { ...base, step, stage: 'project', status: idle ? 'idle-defect' : 'active', idleSince: idle ? iso(lastActivity) : null, agent: STEP_AGENT[step], doing: idle ? `stalled ${Math.round((now - lastActivity) / H)} h at ${step}: ${action}` : `${step}: ${action}`, nextAction: action, nextCheckpointAt: at(idle ? 6 * H : 24 * H), verifyHow: `project-stages: ${step} criteria all met` };
+  // the stage link (older APIs send none: keep the plain text)
+  const nextAction = safeHref(gap?.href) ? `${action} → ${APP_BASE}${gap.href}` : action;
+  return { ...base, step, stage: 'project', status: idle ? 'idle-defect' : 'active', idleSince: idle ? iso(lastActivity) : null, agent: STEP_AGENT[step], doing: idle ? `stalled ${Math.round((now - lastActivity) / H)} h at ${step}: ${action}` : `${step}: ${action}`, nextAction, nextCheckpointAt: at(idle ? 6 * H : 24 * H), verifyHow: `project-stages: ${step} criteria all met` };
 }
 
 /** runs that failed only because the provider balance/key cap was spent: retried once funds are back */
@@ -151,10 +167,10 @@ export function freeCandidates(loops, runs, state = {}, now = Date.now()) {
   }).slice(0, 1);
 }
 
-export function think(obs, checks, now = Date.now()) {
+export function think(obs, checks, now = Date.now(), { budgetOut = false } = {}) {
   const used = obs.spend.autoApprovedTodayUsd || 0;
   const stagesBy = Object.fromEntries((obs.stages || []).map((s) => [s.projectId, s]));
-  const loops = obs.projects.map((p) => loopOf(p, stagesBy[p.id], obs.runs, obs.perf || [], obs.spend.byProject7d?.[p.id], checks, obs.policy, used, now));
+  const loops = obs.projects.map((p) => loopOf(p, stagesBy[p.id], obs.runs, obs.perf || [], obs.spend.byProject7d?.[p.id], checks, obs.policy, used, now, { budgetOut }));
   const order = { 'idle-defect': 0, blocked: 1, active: 2, waiting: 3, done: 4 };
   loops.sort((a, b) => order[a.status] - order[b.status] || (a.nextCheckpointAt < b.nextCheckpointAt ? -1 : 1));
   const stageCounts = Object.fromEntries(LOOP_STAGES.map((s) => [s, loops.filter((l) => l.stage === s).length]));
