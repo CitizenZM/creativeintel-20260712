@@ -73,3 +73,8 @@ product (`auto:<k>`), learning-loop weights, run id in ad names, worker updates.
 - Merged after independent verification: creativeintel #194 (incident reclassify + ENOSPC, confirmFailures, strategist stdin/stderr), #195 (URL in product-name → productUrl; Vercel prod success), #196 (digest at-most-once, stalled dedupe, local/batch done, wait labels + priority, setup deep links with href guard, phaseMs). #196 failed first verification (double-send paths A/B/C, no href guard), fixed, passed second.
 - Verify: `node --test workers/video-brain/test/*.test.mjs` 88/88; `worker.test.mjs` 17/17 on main 684c6b0.
 - Assumptions: at-most-once digest preferred over a possible duplicate DM; corrupt state = fresh start (pre-existing).
+
+## 2026-11-26 overnight swarm round 3 (Video Brain)
+- 19 candidates from 3 lenses → 2 critics (2 rounds) → 6 jobs. Merged after independent verification: creativeintel #197 (worker signal), #198 (loops/strategist/digest/board; 2nd pass), #199 (incidents; wiring gap accepted, closed by #200), #200 (atomic state, read-only dry-run, tick lock, logs, batch freshness, critic refund, loudness retry; passed on 3rd verification); ad-studio #8, #9, #10.
+- Dropped this round: BL12 blank-frame gate (false-fail risk), P5 pipeline double-run (deferred; paid video off).
+- Verify: brain 136/136 on main eb35621; worker 18/18; AS pipeline 161/161; Vercel prod success for #198.
