@@ -9,7 +9,18 @@ function esc(s: unknown): string {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Ad Studio MP4 links: https only (an http:// or malformed URL is shown as text, never linked) */
+function isHttps(u: string | null | undefined): boolean {
+  try {
+    return !!u && new URL(u).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function asArray(v: unknown): string[] {
@@ -186,7 +197,7 @@ async function unguardedGET(
       <section class="storyboard">
         <h3>${esc(run.adName)}</h3>
         <p class="meta">${esc(run.hookType)} · ${esc(run.engine)} · ${esc(new Date(run.completedAt).toISOString().slice(0, 10))}</p>
-        <p>${hosted(run.finalMp4Url) ? `<a href="${esc(run.finalMp4Url)}">MP4</a>` : `<span class='sub'>${esc(run.finalMp4Url)}</span>`}</p>
+        <p>${isHttps(run.finalMp4Url) ? `<a href="${esc(run.finalMp4Url)}">MP4</a>` : `<span class="sub">${esc(run.finalMp4Url)}</span>`}</p>
       </section>`
     )
     .join("\n");

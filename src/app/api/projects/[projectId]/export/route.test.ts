@@ -65,6 +65,29 @@ describe("GET /api/projects/[projectId]/export — Ad Studio videos", () => {
     expect(zip).toContain("Ad Studio videos (0)");
   });
 
+  it("a quote in an MP4 URL cannot break out of the href", async () => {
+    h.adStudio = [run({ finalMp4Url: 'https://cdn.example.com/a.mp4" onmouseover="alert(4)' })];
+    const zip = await unzipText(await get());
+    expect(zip).not.toContain('onmouseover="alert(4)"');
+    // the anchor keeps exactly one attribute (href); the quote stays inside its value
+    expect(zip).not.toMatch(/<a [^>]*"\s+onmouseover=/);
+    expect(zip).toMatch(/<a href="[^"]*">MP4<\/a>/);
+    expect(zip).toContain('href="https://cdn.example.com/a.mp4&quot; onmouseover=&quot;alert(4)"');
+  });
+
+  it("does not link a non-https MP4 URL; shows it as escaped text", async () => {
+    h.adStudio = [run({ finalMp4Url: "http://cdn.example.com/plain.mp4" })];
+    const zip = await unzipText(await get());
+    expect(zip).not.toContain('href="http://cdn.example.com/plain.mp4"');
+    expect(zip).toMatch(/<span class="sub">http:\/\/cdn\.example\.com\/plain\.mp4<\/span>/);
+  });
+
+  it("keeps a normal https MP4 link intact", async () => {
+    h.adStudio = [run({ finalMp4Url: "https://cdn.example.com/as/ok.mp4?v=1&sig=a" })];
+    const zip = await unzipText(await get());
+    expect(zip).toContain('<a href="https://cdn.example.com/as/ok.mp4?v=1&amp;sig=a">MP4</a>');
+  });
+
   it("still 404s for an unknown project", async () => {
     expect((await get("nope")).status).toBe(404);
   });
