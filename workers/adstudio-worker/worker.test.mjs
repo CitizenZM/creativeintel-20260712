@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { jobOf, planOf, jobIdOf, runLoop, resumeFrom, keyframeThumbs, alreadyDone, runPipeline, stopReason } from './worker.mjs';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -159,4 +160,111 @@ test('a pipeline killed by a signal keeps the signal (not exit 0) and is reporte
   const src = await (await import('node:fs/promises')).readFile(new URL('./worker.mjs', import.meta.url), 'utf8');
   assert.match(src, /error: stopReason\(st, signal\)/); // handle() reports it
   assert.equal((src.match(/const \{ cancelled, signal \} = await runPipeline\(/g) || []).length, 2); // both phases pass the signal on
+});
+
+// ---- T12: a pipeline left running by a restarted worker is adopted, never started a second time ----
+const FAKE_RUN = `import { writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
+const [id, from] = process.argv.slice(2); const dir = 'data/jobs/' + id; mkdirSync(dir, { recursive: true });
+appendFileSync('spawns.log', process.pid + ' ' + id + ' ' + from + '\\n');
+const st = (o) => writeFileSync(dir + '/status.json', JSON.stringify({ pid: process.pid, steps: {}, ...o }));
+st({ state: 'running', step: 'generate' });
+setTimeout(() => { writeFileSync(dir + '/final.mp4', 'x'); st({ state: 'done', cost: 1.5, review: { score: 9 } }); process.exit(0); }, Number(process.env.FAKE_MS || 300));
+`;
+let adoptN = 0;
+/** a fresh worker module on a temp Ad Studio root with a fake pipeline/run.mjs, and a fake Xark API that records every report */
+async function adoptRig({ cancel = false } = {}) {
+  const { mkdtemp, readFile } = await import('node:fs/promises'); const { tmpdir } = await import('node:os');
+  const root = await mkdtemp(path.join(tmpdir(), 'adopt-'));
+  await mkdir(path.join(root, 'pipeline'), { recursive: true }); await writeFile(path.join(root, 'pipeline', 'run.mjs'), FAKE_RUN);
+  const env = { AD_STUDIO_ROOT: root, ADSTUDIO_MEDIA_BASE: 'http://media.test/jobs', APP_URL: 'http://adopt.test', ADSTUDIO_TICK_MS: '20' };
+  const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, env);
+  let w; try { w = await import(`./worker.mjs?adopt=${adoptN++}`); } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
+  const calls = []; const realFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => { const b = JSON.parse(init.body); calls.push(b); return new Response(JSON.stringify(b.action === 'progress' ? { cancel } : { action: b.action }), { status: 200 }); };
+  const spawns = async () => (await readFile(path.join(root, 'spawns.log'), 'utf8').catch(() => '')).split('\n').filter(Boolean);
+  const dir = (id) => path.join(root, 'data', 'jobs', id);
+  const done = async () => { globalThis.fetch = realFetch; await rm(root, { recursive: true, force: true }); };
+  return { w, root, calls, spawns, dir, done };
+}
+const { spawn: spawnChild } = await import('node:child_process');
+/** the pipeline a previous worker started: detached, still running after that worker is gone */
+async function orphan(root, id, ms) {
+  const p = spawnChild(process.execPath, ['pipeline/run.mjs', id, 'generate'], { cwd: root, detached: true, stdio: 'ignore', env: { ...process.env, FAKE_MS: String(ms) } });
+  const f = path.join(root, 'data', 'jobs', id, 'status.json'); const { readFile } = await import('node:fs/promises');
+  for (let i = 0; i < 200; i++) { const st = JSON.parse(await readFile(f, 'utf8').catch(() => '{}')); if (st.pid === p.pid) return p; await new Promise((r) => setTimeout(r, 10)); }
+  throw new Error('orphan never started');
+}
+
+test('liveOwner: adopt only a live pid whose command is this job\'s pipeline/run.mjs; unknown command on a live pid is "busy"', async () => {
+  const { w, done } = await adoptRig();
+  try {
+    const alive = () => true; const dead = () => { throw Object.assign(new Error('x'), { code: 'ESRCH' }); };
+    const eperm = () => { throw Object.assign(new Error('x'), { code: 'EPERM' }); };
+    const ps = (cmd) => () => cmd; const st = { state: 'running', pid: 4242 };
+    assert.equal(w.liveOwner(st, 'xk-r1', { kill: alive, ps: ps('/usr/bin/node pipeline/run.mjs xk-r1 generate') }), true);
+    assert.equal(w.liveOwner(st, 'xk-r1', { kill: eperm, ps: ps('node pipeline/run.mjs xk-r1 ingest') }), true); // another user's process is still alive
+    assert.equal(w.liveOwner(st, 'xk-r1', { kill: alive, ps: ps('node pipeline/run.mjs xk-r10 generate') }), false); // another job
+    assert.equal(w.liveOwner(st, 'xk-r1', { kill: alive, ps: ps('/Applications/Safari.app/Contents/MacOS/Safari') }), false); // pid reused
+    assert.equal(w.liveOwner(st, 'xk-r1', { kill: dead, ps: () => { throw new Error('ps must not run'); } }), false);
+    assert.equal(w.liveOwner({ state: 'failed', pid: 4242 }, 'xk-r1', { kill: alive, ps: ps('node pipeline/run.mjs xk-r1 generate') }), false);
+    assert.equal(w.liveOwner({ state: 'running' }, 'xk-r1', { kill: alive, ps: ps('node pipeline/run.mjs xk-r1 generate') }), false);
+    assert.equal(w.liveOwner(null, 'xk-r1', { kill: alive, ps: ps('') }), false);
+    assert.throws(() => w.liveOwner(st, 'xk-r1', { kill: alive, ps: () => { throw new Error('ps timed out'); } }), (e) => e.busy === true && /pipeline still running \(pid 4242\)/.test(e.message));
+    let n = 0; // ps failed because the pid exited in between: nothing to adopt, a fresh run is fine
+    assert.equal(w.liveOwner(st, 'xk-r1', { kill: () => { if (n++) dead(); return true; }, ps: () => { throw new Error('no such process'); } }), false);
+  } finally { await done(); }
+});
+
+test('a live pipeline left by a restarted worker is adopted: no second run.mjs, progress keeps flowing, it finishes and uploads once', { timeout: 20000 }, async () => {
+  const { w, root, calls, spawns, dir, done } = await adoptRig();
+  const id = w.jobIdOf('adopt1');
+  try {
+    const p = await orphan(root, id, 500);
+    const r = await w.handle({ runId: 'adopt1', phase: 'generate', claim: 'c9', reserveUsd: 3 });
+    assert.equal(r.action, 'done');
+    assert.deepEqual((await spawns()).map((l) => l.split(' ')[0]), [String(p.pid)], 'only the original pipeline ever ran');
+    const acts = calls.map((c) => c.action);
+    assert.ok(acts.includes('progress'), 'heartbeats while adopted');
+    assert.equal(acts.filter((a) => a === 'done').length, 1); assert.equal(acts.includes('failed'), false);
+    const d = calls.find((c) => c.action === 'done');
+    assert.equal(d.claim, 'c9'); assert.equal(d.finalMp4Url, `http://media.test/jobs/${id}/final.mp4`); assert.equal(d.actualUsd, 1.5);
+    assert.ok(calls.every((c) => c.claim === 'c9'));
+    assert.equal(existsSync(path.join(dir(id), 'job.json')), false, 'the running job folder was left alone');
+  } finally { await done(); }
+});
+
+test('a dead pid in status.json is not adopted: the pipeline is started normally', { timeout: 20000 }, async () => {
+  const { w, calls, spawns, dir, done } = await adoptRig();
+  const id = w.jobIdOf('adopt2');
+  try {
+    const gone = spawnChild(process.execPath, ['-e', '']); const deadPid = gone.pid; await new Promise((r) => gone.on('exit', r));
+    await mkdir(dir(id), { recursive: true }); await writeFile(path.join(dir(id), 'status.json'), JSON.stringify({ state: 'running', pid: deadPid, steps: {} }));
+    const r = await w.handle({ runId: 'adopt2', phase: 'plan', claim: 'c1', hookType: 'pain', engine: 'kling3', input: { storyboard: { frames: [] } } });
+    assert.equal(r.action, 'done');
+    const s = await spawns(); assert.equal(s.length, 1); assert.notEqual(s[0].split(' ')[0], String(deadPid)); assert.match(s[0], / ingest$/);
+    assert.equal(calls.filter((c) => c.action === 'done').length, 1);
+  } finally { await done(); }
+});
+
+test('a live pid whose command cannot be read: no second pipeline and no terminal failure; the lease lapses so the server retries later', async () => {
+  const { w, calls, spawns, dir, done } = await adoptRig();
+  const id = w.jobIdOf('adopt3');
+  try {
+    await mkdir(dir(id), { recursive: true }); await writeFile(path.join(dir(id), 'status.json'), JSON.stringify({ state: 'running', pid: process.pid, steps: {} }));
+    const r = await w.handle({ runId: 'adopt3', phase: 'generate', claim: 'c1' }, { ps: () => { throw new Error('ps: timed out'); } });
+    assert.equal(r.action, 'deferred'); assert.match(r.error, new RegExp(`pipeline still running \\(pid ${process.pid}\\)`));
+    assert.deepEqual(await spawns(), []); assert.deepEqual(calls, []);
+  } finally { await done(); }
+});
+
+test('cancel from Xark kills the adopted pipeline\'s process group and reports a cancelled run', { timeout: 20000 }, async () => {
+  const { w, root, calls, spawns, done } = await adoptRig({ cancel: true });
+  const id = w.jobIdOf('adopt4');
+  try {
+    const p = await orphan(root, id, 10000); const exited = new Promise((r) => p.on('exit', (code, signal) => r(signal)));
+    const r = await w.handle({ runId: 'adopt4', phase: 'generate', claim: 'c1' });
+    assert.equal(await exited, 'SIGTERM'); assert.equal((await spawns()).length, 1);
+    assert.equal(r.action, 'failed'); const f = calls.find((c) => c.action === 'failed'); assert.equal(f.cancelled, true);
+  } finally { await done(); }
 });

@@ -22,7 +22,7 @@
 //   POLL_INTERVAL_MS      default 20000, doubles while idle up to MAX_IDLE_POLL_MS (default 300000)
 //   ADSTUDIO_API_TIMEOUT_MS  per-call timeout for /api/worker/adstudio (default 30000; the 'done' report gets 120000)
 // Flags: --once (handle at most one claim, then exit)
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
@@ -136,24 +136,47 @@ const progressOf = (st) => {
 /** why a run that did not finish failed: a signal-killed pipeline (OOM, SIGKILL) wrote no error of its own */
 export const stopReason = (st, signal) => signal ? `pipeline killed by ${signal}` : st?.error || 'pipeline stopped';
 
+const killPid = (pid, sig) => process.kill(pid, sig);
+const psCommand = (pid) => execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8', timeout: 5000 });
+const pidAlive = (pid, kill) => { try { kill(pid, 0); return true; } catch (e) { return e?.code === 'EPERM'; } };
+
+/** is this job's pipeline still running from an earlier worker (run.mjs is spawned detached, so it outlives a worker restart)?
+ *  true only when status.json says running, its pid is alive and that pid's command is `pipeline/run.mjs <jobId>`.
+ *  A live pid whose command cannot be read throws (busy): neither adopt a stranger nor start a second paid pipeline. */
+export function liveOwner(st, jobId, { kill = killPid, ps = psCommand } = {}) {
+  if (st?.state !== 'running' || !Number.isInteger(st.pid) || st.pid <= 0) return false;
+  if (!pidAlive(st.pid, kill)) return false;
+  let cmd;
+  try { cmd = String(ps(st.pid)); } catch {
+    if (!pidAlive(st.pid, kill)) return false; // exited in between
+    throw Object.assign(new Error(`pipeline still running (pid ${st.pid})`), { busy: true });
+  }
+  return cmd.includes('pipeline/run.mjs') && cmd.trim().split(/\s+/).includes(jobId);
+}
+
 /** run the pipeline as its own process group, report every tick, kill it when Xark says cancel.
- *  Returns the exit code, or the signal when the pipeline was killed (code null). */
-export async function runPipeline(runId, id, args, claim, { tick = TICK_MS } = {}) {
-  // a host Claude Code session's variables (CLAUDECODE, CLAUDE_CODE_*) make the pipeline's `claude -p` return an empty session
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^CLAUDE/.test(k)));
-  const child = spawn(process.execPath, args, { cwd: ROOT, detached: true, stdio: 'ignore', env });
-  let exited = null; child.on('exit', (code, signal) => { exited = { code, signal }; });
+ *  `adopt` = the pid of this job's pipeline left running by an earlier worker: watch it instead of spawning a second one.
+ *  Returns the exit code, or the signal when the pipeline was killed (code null); both null for an adopted pipeline. */
+export async function runPipeline(runId, id, args, claim, { tick = TICK_MS, adopt, kill = killPid } = {}) {
+  let exited = null; let pid = adopt;
+  if (!adopt) {
+    // a host Claude Code session's variables (CLAUDECODE, CLAUDE_CODE_*) make the pipeline's `claude -p` return an empty session
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^CLAUDE/.test(k)));
+    const child = spawn(process.execPath, args, { cwd: ROOT, detached: true, stdio: 'ignore', env });
+    pid = child.pid; child.on('exit', (code, signal) => { exited = { code, signal }; });
+  }
+  const running = () => (adopt ? pidAlive(adopt, kill) : exited === null);
   let cancelled = false;
-  while (exited === null) {
+  while (running()) {
     await sleep(tick);
     const st = await readJSON(path.join(jobDir(id), 'status.json'));
     const spec = await readJSON(path.join(jobDir(id), 'spec.json'));
     try {
       const r = await api('progress', { runId, claim, step: st?.step, progress: progressOf(st), log: st?.log?.slice(-60), plan: planOf(spec) });
-      if (r.cancel && !cancelled) { cancelled = true; try { process.kill(-child.pid, 'SIGTERM'); } catch { /* gone */ } }
+      if (r.cancel && !cancelled) { cancelled = true; try { kill(-pid, 'SIGTERM'); } catch { /* gone */ } }
     } catch (e) { console.warn('[adstudio] progress failed:', e.message); }
   }
-  return { cancelled, code: exited.code, signal: exited.signal };
+  return { cancelled, code: exited?.code ?? null, signal: exited?.signal ?? null };
 }
 
 async function upload(id, file, contentType) {
@@ -193,28 +216,42 @@ async function finish(run, id, st) {
   return api('done', { runId: run.runId, claim: run.claim, finalMp4Url, posterUrl, review: st.review, metrics: st.review?.metrics, autofix: st.autofix, plan: planOf(spec), actualUsd: st.cost, log: st.log }, { timeoutMs: BIG_API_TIMEOUT });
 }
 
-export async function handle(run) {
+export async function handle(run, { kill = killPid, ps = psCommand } = {}) {
   const id = jobIdOf(run.runId); const dir = jobDir(id); const claim = run.claim;
+  // the server requeued this run (no heartbeat after a worker restart) while its pipeline is still running here: adopt it
+  let adopt;
+  try {
+    const cur = await readJSON(path.join(dir, 'status.json'));
+    if (liveOwner(cur, id, { kill, ps })) { adopt = cur.pid; console.log(`[adstudio] ${run.phase} ${run.runId}: adopting the running pipeline (pid ${adopt})`); }
+  } catch (e) {
+    if (!e?.busy) throw e;
+    // no report: 'failed' is final on the server, and a lapsed lease is requeued after STALE_MS and checked again
+    console.warn(`[adstudio] ${run.phase} ${run.runId}: ${e.message}, not starting a second one`);
+    return { action: 'deferred', error: e.message };
+  }
   const end = async (st, cancelled, signal) => {
     if (cancelled) return api('failed', { runId: run.runId, claim, error: 'cancelled by the user', cancelled: true, actualUsd: st?.cost, log: st?.log });
     return api('failed', { runId: run.runId, claim, error: stopReason(st, signal), actualUsd: st?.cost, log: st?.log });
   };
   if (run.phase === 'plan' || run.phase === 'copy_plan') {
-    await mkdir(dir, { recursive: true });
-    const job = jobOf(run);
-    if (run.input?.endCard) { const ec = await endCardFiles(run.runId, dir); if (ec?.layers) job.endCard = ec; else job.endCardSkipped = `${run.input.endCard.id}: ${ec?.skipped}`; }
-    await writeFile(path.join(dir, 'job.json'), JSON.stringify(job, null, 1));
-    // finished on this Mac already (e.g. completed by hand after the platform ran out of retries): upload it, do not redo it
-    const prev = await readJSON(path.join(dir, 'status.json'));
-    if (run.phase === 'plan' && alreadyDone(prev, existsSync(path.join(dir, 'final.mp4')))) return finish(run, id, prev);
-    // a retried run resumes where the last attempt failed (its script, key frames and gen.json are still in this folder)
-    let from = run.phase === 'plan' ? resumeFrom(await readJSON(path.join(dir, 'status.json'))) : 'ingest';
-    if (run.phase === 'copy_plan') {
-      const c = await new Promise((resolve) => { const p = spawn(process.execPath, ['pipeline/clone.mjs', jobIdOf(run.planFromRunId), id], { cwd: ROOT, stdio: 'inherit' }); p.on('exit', resolve); });
-      if (c !== 0) return api('failed', { runId: run.runId, claim, error: `could not copy the plan of ${run.planFromRunId}` });
-      from = 'generate';
+    let from = 'ingest';
+    if (!adopt) { // an adopted pipeline already has its job folder: leave job.json and the plan copy alone
+      await mkdir(dir, { recursive: true });
+      const job = jobOf(run);
+      if (run.input?.endCard) { const ec = await endCardFiles(run.runId, dir); if (ec?.layers) job.endCard = ec; else job.endCardSkipped = `${run.input.endCard.id}: ${ec?.skipped}`; }
+      await writeFile(path.join(dir, 'job.json'), JSON.stringify(job, null, 1));
+      // finished on this Mac already (e.g. completed by hand after the platform ran out of retries): upload it, do not redo it
+      const prev = await readJSON(path.join(dir, 'status.json'));
+      if (run.phase === 'plan' && alreadyDone(prev, existsSync(path.join(dir, 'final.mp4')))) return finish(run, id, prev);
+      // a retried run resumes where the last attempt failed (its script, key frames and gen.json are still in this folder)
+      if (run.phase === 'plan') from = resumeFrom(await readJSON(path.join(dir, 'status.json')));
+      if (run.phase === 'copy_plan') {
+        const c = await new Promise((resolve) => { const p = spawn(process.execPath, ['pipeline/clone.mjs', jobIdOf(run.planFromRunId), id], { cwd: ROOT, stdio: 'inherit' }); p.on('exit', resolve); });
+        if (c !== 0) return api('failed', { runId: run.runId, claim, error: `could not copy the plan of ${run.planFromRunId}` });
+        from = 'generate';
+      }
     }
-    const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, from], claim);
+    const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, from], claim, { adopt, kill });
     const st = await readJSON(path.join(dir, 'status.json'));
     if (!cancelled && st?.state === 'done') return finish(run, id, st); // free run (stock remix): rendered without an approval stop
     if (cancelled || st?.state !== 'approval') return end(st, cancelled, signal);
@@ -223,12 +260,14 @@ export async function handle(run) {
     return api('gate', { runId: run.runId, claim, estimate, plan: planOf(spec), storyboardAB: spec?.storyboard ? { winner: spec.storyboard.winner, scores: spec.storyboard.scores, why: spec.storyboard.why } : undefined, preUsd: st.cost || 0, log: st.log });
   }
   if (run.phase === 'generate') {
-    const job = await readJSON(path.join(dir, 'job.json'));
-    if (!job) return api('failed', { runId: run.runId, claim, error: 'job folder missing on this Mac' });
-    // the frame-QA re-generation may spend up to max(budget, estimate x 1.3): hold it to what Xark reserved
-    const budget = typeof run.reserveUsd === 'number' && run.reserveUsd > 0 ? Math.min(job.budget ?? BUDGET, run.reserveUsd) : job.budget;
-    await writeFile(path.join(dir, 'job.json'), JSON.stringify({ ...job, approved: true, budget }, null, 1));
-    const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, 'generate'], claim);
+    if (!adopt) { // an adopted pipeline was approved and budgeted when it was started
+      const job = await readJSON(path.join(dir, 'job.json'));
+      if (!job) return api('failed', { runId: run.runId, claim, error: 'job folder missing on this Mac' });
+      // the frame-QA re-generation may spend up to max(budget, estimate x 1.3): hold it to what Xark reserved
+      const budget = typeof run.reserveUsd === 'number' && run.reserveUsd > 0 ? Math.min(job.budget ?? BUDGET, run.reserveUsd) : job.budget;
+      await writeFile(path.join(dir, 'job.json'), JSON.stringify({ ...job, approved: true, budget }, null, 1));
+    }
+    const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, 'generate'], claim, { adopt, kill });
     const st = await readJSON(path.join(dir, 'status.json'));
     if (cancelled || st?.state !== 'done') return end(st, cancelled, signal);
     return finish(run, id, st);
