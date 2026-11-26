@@ -2,13 +2,15 @@
 process.env.VIDEO_BRAIN_DIGEST = '0'; process.env.VIDEO_BRAIN_HARVEST = '0'; process.env.VIDEO_BRAIN_STRATEGIST = '0'; process.env.VIDEO_BRAIN_RULES_PR = '0'; process.env.VIDEO_BRAIN_CRITIC = '0';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { link, mkdtemp, readFile, readdir, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { tick } from '../brain.mjs';
+import { tick, acquireLock } from '../brain.mjs';
 import { toRun } from '../lib/local.mjs';
 import { readBatches } from '../lib/batch.mjs';
 import { compare } from '../lib/verify.mjs';
@@ -186,4 +188,71 @@ test('integration (b) tick: a strategist memo carries the loop step', async () =
   assert.equal(asked, 1, 'the stalled loop reached the strategist');
   assert.ok(s.strategy.p7.step, 'memo carries the step');
   assert.deepEqual(s.strategy.p7.out, out);
+});
+
+// ---- lock / batch / loudness follow-ups (independent verification of PR #200) ----
+test('LK18b lock: a pidfile older than 15 min is stale even when its pid is alive (pid reuse) and is taken over', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-lk18b-'));
+  const f = path.join(home, 'tick.pid');
+  await writeFile(f, String(process.pid));
+  const old = new Date(Date.now() - 20 * 60_000); await utimes(f, old, old);
+  const r = spawnBrain(home);
+  assert.equal(r.status, 2, `took the lock and ran the tick: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /another tick is running/);
+  await assert.rejects(stat(f), /ENOENT/, 'released at exit');
+});
+
+test('LK18b lock: a live pid whose recorded start time differs is stale; our own pidfile records pid and start time', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-lk18c-'));
+  const f = path.join(home, 'tick.pid');
+  await writeFile(f, `${process.pid}\nThu Jan  1 00:00:00 1970`);
+  const l = acquireLock(home);
+  assert.equal(l.ok, true);
+  const [pid, start] = (await readFile(f, 'utf8')).split('\n');
+  assert.equal(pid, String(process.pid));
+  assert.equal(start, execFileSync('ps', ['-o', 'lstart=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
+  l.release();
+  assert.equal(existsSync(f), false);
+});
+
+test('LK18b lock: takeover race — another process creates the lock between stale removal and our create → not ours, theirs kept', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-lk18d-'));
+  const f = path.join(home, 'tick.pid');
+  await writeFile(f, '2147483646');
+  const l = acquireLock(home, { beforeCreate: () => execFileSync('sh', ['-c', `printf 4242 > '${f}'`]) });
+  assert.equal(l.ok, false);
+  assert.equal(await readFile(f, 'utf8'), '4242', 'the winner keeps its lock');
+});
+
+test('LK18b SIGTERM: a brain process killed mid-tick removes its own pidfile and exits 143', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-lk18e-'));
+  const hang = createHttpServer(() => {}); await new Promise((res) => hang.listen(0, '127.0.0.1', res));
+  const child = spawn(process.execPath, [BRAIN, '--once'], { env: { PATH: process.env.PATH, HOME: process.env.HOME, APP_URL: `http://127.0.0.1:${hang.address().port}`, WORKER_TOKEN: 'test', VIDEO_BRAIN_HOME: home, VIDEO_BRAIN_DIGEST: '0', VIDEO_BRAIN_STRATEGIST: '0', VIDEO_BRAIN_CRITIC: '0', VIDEO_BRAIN_RULES_PR: '0', VIDEO_BRAIN_HARVEST: '0' } });
+  const f = path.join(home, 'tick.pid');
+  const code = new Promise((res) => child.on('exit', (c, sig) => res(c ?? sig)));
+  try {
+    for (let i = 0; i < 100 && !existsSync(f); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(existsSync(f), 'lock taken');
+    await new Promise((r) => setTimeout(r, 300));
+    child.kill('SIGTERM');
+    assert.equal(await code, 143);
+    assert.equal(existsSync(f), false, 'pidfile removed on SIGTERM');
+  } finally { child.kill('SIGKILL'); hang.closeAllConnections(); hang.close(); }
+});
+
+test('B9b batch: an .mp4 with a future mtime (clock skew / copied file) is completed, not generating forever', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'vb-b9f-'));
+  await writeFile(path.join(dir, '01-future.mp4'), 'x');
+  const fut = new Date(Date.now() + 3_600_000); await utimes(path.join(dir, '01-future.mp4'), fut, fut);
+  const r = await readBatches([{ id: 'b', name: 'b', dir }]);
+  assert.equal(r.runs[0].status, 'completed');
+});
+
+test('LU13b tick: lufsTries entries for runs no longer observed are dropped', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-lu13b-'));
+  const now = Date.now();
+  await writeFile(path.join(home, 'state.json'), JSON.stringify(baseState(now, { lufsTries: { gone: 2 } })));
+  await tick({ call: mkCall(() => observe()), now, home, local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: null });
+  const s = JSON.parse(await readFile(path.join(home, 'state.json'), 'utf8'));
+  assert.deepEqual(s.lufsTries || {}, {});
 });

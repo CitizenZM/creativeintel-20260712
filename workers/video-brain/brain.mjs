@@ -13,6 +13,8 @@
 // Prints one __VIDEO_BRAIN__{json} line per tick. Exit 0 ok (or another live tick holds VIDEO_BRAIN_HOME/tick.pid) ·
 // 1 publish failed/unverified · 2 observe failed.
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, utimesSync, writeSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -53,20 +55,41 @@ export async function writeAtomic(f, data) {
 }
 
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
-/** one tick at a time per VIDEO_BRAIN_HOME: pidfile, taken over when its pid is dead. Returns { ok, pid, release } */
-export async function acquireLock(home) {
+/** process start time ('' when unknown): a pid reused by another process after a reboot/SIGTERM has a different one */
+const startOf = (pid) => { try { return execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 5_000 }).trim(); } catch { return ''; } };
+export const LOCK_MAX_AGE_MS = 15 * 60_000;
+/**
+ * one tick at a time per VIDEO_BRAIN_HOME: pidfile "<pid>\n<start time>", created atomically (O_EXCL). Another holder is
+ * respected only while its pid is alive, its start time matches (when recorded) and the file is < 15 min old; otherwise
+ * the file is moved aside and recreated with O_EXCL — losing that create to another process means it is theirs.
+ * Synchronous so a signal handler can release it. Returns { ok, pid, release() }.
+ */
+export function acquireLock(home, { now = Date.now(), beforeCreate = null } = {}) {
   const f = path.join(home, 'tick.pid');
-  await mkdir(home, { recursive: true });
-  for (let i = 0; i < 2; i++) {
-    try {
-      await writeFile(f, String(process.pid), { flag: 'wx' });
-      return { ok: true, pid: process.pid, release: async () => { if ((await readFile(f, 'utf8').catch(() => '')).trim() === String(process.pid)) await unlink(f).catch(() => {}); } };
-    } catch (e) { if (e.code !== 'EEXIST') throw e; }
-    const pid = Number((await readFile(f, 'utf8').catch(() => '')).trim());
-    if (pid > 0 && alive(pid)) return { ok: false, pid };
-    await unlink(f).catch(() => {}); // stale: its tick died without releasing
+  mkdirSync(home, { recursive: true });
+  const mine = `${process.pid}\n${startOf(process.pid)}`;
+  const create = () => {
+    try { const fd = openSync(f, 'wx'); try { writeSync(fd, mine); } finally { closeSync(fd); } } catch (e) { if (e.code === 'EEXIST') return false; throw e; }
+    return true;
+  };
+  const release = () => { try { if (readFileSync(f, 'utf8') === mine) unlinkSync(f); } catch { /* gone already */ } };
+  const won = { ok: true, pid: process.pid, release };
+  if (create()) return won;
+  let held; let mtime;
+  try { held = readFileSync(f, 'utf8'); mtime = statSync(f).mtimeMs; } catch { held = null; }
+  if (held != null) {
+    const [p, start = ''] = held.split('\n'); const pid = Number(p.trim());
+    const live = pid > 0 && alive(pid) && now - mtime < LOCK_MAX_AGE_MS && (!start.trim() || startOf(pid) === start.trim());
+    if (live) return { ok: false, pid };
+    // stale: move it aside and check we moved the stale file, not a lock someone else just created
+    const aside = `${f}.stale.${process.pid}`;
+    try { renameSync(f, aside); } catch { return { ok: false, pid: null } }
+    const moved = readFileSync(aside, 'utf8');
+    if (moved !== held) { try { linkSync(aside, f); } catch { /* a third holder exists */ } unlinkSync(aside); return { ok: false, pid: null }; }
+    unlinkSync(aside);
   }
-  return { ok: false, pid: null };
+  beforeCreate?.();
+  return create() ? won : { ok: false, pid: null };
 }
 
 export function api(appUrl, token) {
@@ -143,6 +166,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   const toCheck = obs.runs.filter((r) => r.status === 'completed' && (r.finalMp4Url || r.finalPath) && !state.checks[r.id]).slice(0, CHECKS_PER_TICK);
   const tickStart = Date.now();
   state.lufsTries = state.lufsTries || {};
+  if (!dryRun) { const seen = new Set(obs.runs.map((r) => r.id)); for (const id of Object.keys(state.lufsTries)) if (!seen.has(id)) delete state.lufsTries[id]; }
   for (const r of toCheck) {
     if (Date.now() - tickStart > CHECK_BUDGET_MS) { events.push(ev('QA Critic', 'wait', `second checks paused for this tick (time budget ${CHECK_BUDGET_MS / 1000}s); rest next tick`)); break; }
     try {
@@ -365,12 +389,15 @@ async function main() {
     }
   };
   // one live tick per state dir (launchd StartInterval can overlap a slow tick); a dry-run reads only and needs no lock
-  const lock = flag('dry-run') ? null : await acquireLock(HOME);
-  if (lock && !lock.ok) { log(`another tick is running (pid ${lock.pid}); exiting`); return 0; }
+  const lock = flag('dry-run') ? null : acquireLock(HOME);
+  if (lock && !lock.ok) { log(lock.pid ? `another tick is running (pid ${lock.pid}); exiting` : 'another tick took the lock first; exiting'); return 0; }
+  // launchd stops jobs with SIGTERM: drop our pidfile synchronously so the next tick is not blocked by it
+  if (lock) for (const [sig, code] of [['SIGTERM', 143], ['SIGINT', 130]]) process.once(sig, () => { lock.release(); process.exit(code); });
+  const touch = () => { try { const t = new Date(); utimesSync(path.join(HOME, 'tick.pid'), t, t); } catch { /* released */ } };
   try {
     if (!flag('loop')) return await once();
-    for (;;) { await once(); await new Promise((r) => setTimeout(r, Number(process.env.VIDEO_BRAIN_TICK_MS || 300_000))); }
-  } finally { await lock?.release(); }
+    for (;;) { if (lock) touch(); await once(); await new Promise((r) => setTimeout(r, Number(process.env.VIDEO_BRAIN_TICK_MS || 300_000))); }
+  } finally { lock?.release(); }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main().then((c) => process.exit(c));
