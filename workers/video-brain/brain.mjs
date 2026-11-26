@@ -194,7 +194,15 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
       const r = await rulesPr(learnings, state.rulesPr || {}, directives);
       if (r.action === 'opened') { state.rulesPr = { hash: r.hash, url: r.url }; events.push(ev('Librarian', 'learn', `rules PR opened for the script prompt: ${r.url}`)); }
       else if (r.action === 'none') state.rulesPr = {};
-    } catch (e) { log(`rules PR: ${e.message}`); events.push(ev('Librarian', 'learn', `rules PR failed: ${String(e.message).slice(0, 160)}`)); }
+      // r.action === 'failed': this hash failed < 24 h ago; wait (plan retries it after a day)
+    } catch (e) {
+      log(`rules PR: ${e.message}`);
+      const prev = state.rulesPr || {};
+      const step = e.step || 'rules PR';
+      // one event per new hash or failing step (test output tails carry timings, so the raw text differs on every run)
+      if (prev.failedHash !== e.hash || prev.failedStep !== step) events.push(ev('Librarian', 'learn', `rules PR blocked: ${step} for ${e.hash || 'unknown'}`));
+      state.rulesPr = { ...prev, failedHash: e.hash, failedStep: step, failedAt: new Date(now).toISOString(), error: String(e.message).slice(-400) };
+    }
   }
 
   // THINK (rules first; the strategist model only for stalled or measuring projects, once a day each)
