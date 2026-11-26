@@ -28,8 +28,9 @@ export type LoopStage = (typeof LOOP_STAGES)[number];
 export const PROJECT_STEPS = ["setup", "research", "insights", "creative", "studio", "produce", "deliver", "measure"] as const;
 export type ProjectStep = (typeof PROJECT_STEPS)[number];
 
-/** The only waits allowed (design §3): a client, ad data maturing, or spend above the autonomy cap. */
-export type WaitingOn = "client" | "ad-data" | "budget" | null;
+/** The only waits allowed (design §3): a client, ad data maturing, or spend above the autonomy cap.
+ *  Labels of a refused auto-approval: "estimate" (stale estimate: free re-plan) and "funds" (provider budget out). */
+export type WaitingOn = "client" | "ad-data" | "budget" | "estimate" | "funds" | null;
 export type LoopStatus = "active" | "waiting" | "blocked" | "idle-defect" | "done";
 
 export interface BrainLoop {

@@ -57,18 +57,64 @@ test('I6 digest: the pending message is persisted right after the send (a crash 
   assert.equal(sent.length, 1);
 });
 
-test('I6 digest: a send with no messageId is retried next tick; a later verified read-back clears the pending entry', async () => {
+test('I6 digest: a send with no messageId is never retried; one "outcome unknown, not resent" event; a later verified read-back clears a pending entry', async () => {
   const home = await freshHome();
   const { call, pubs } = recorder(obsOf());
   let n = 0;
-  const notify = async () => { n += 1; return n === 1 ? { ok: false, reason: 'Feishu send failed' } : { ok: false, sent: true, messageId: 'om_3' }; };
-  const verifyNotify = async () => ({ ok: true });
-  for (let i = 0; i < 4; i++) await tick({ call, now: NOW + i * 300_000, home, strategist: null, local: empty, notify, verifyNotify });
-  assert.equal(n, 2);
+  const notify = async () => { n += 1; return { ok: false, reason: 'Feishu send failed' }; };
+  for (let i = 0; i < 4; i++) await tick({ call, now: NOW + i * 300_000, home, strategist: null, local: empty, notify, verifyNotify: async () => ({ ok: true }) });
+  assert.equal(n, 1);
   const evs = pubs.flatMap((p) => p.events.map((e) => e.summary));
-  assert.ok(evs.some((s) => /digest NOT delivered: Feishu send failed/.test(s)));
-  assert.ok(evs.some((s) => /digest read back: verified/.test(s)));
-  assert.ok(!evs.some((s) => /unverified/.test(s)));
+  assert.equal(evs.filter((s) => /outcome unknown, not resent/.test(s)).length, 1);
+  const home2 = await freshHome();
+  const r2 = recorder(obsOf());
+  for (let i = 0; i < 3; i++) await tick({ call: r2.call, now: NOW + i * 300_000, home: home2, strategist: null, local: empty, notify: async () => ({ ok: false, sent: true, messageId: 'om_3' }), verifyNotify: async () => ({ ok: true }) });
+  const evs2 = r2.pubs.flatMap((p) => p.events.map((e) => e.summary));
+  assert.ok(evs2.some((s) => /digest read back: verified/.test(s)));
+  assert.ok(!evs2.some((s) => /unverified/.test(s)));
+});
+
+test('I6 at-most-once A: notify throws after Feishu accepted the POST (timeout / bad JSON) → one send over 3 ticks', async () => {
+  const home = await freshHome();
+  const { call, pubs } = recorder(obsOf());
+  let sends = 0;
+  const notify = async () => { sends += 1; throw new Error('The operation was aborted due to timeout'); };
+  for (let i = 0; i < 3; i++) await tick({ call, now: NOW + i * 300_000, home, strategist: null, local: empty, notify, verifyNotify: async () => ({ ok: true }) });
+  assert.equal(sends, 1);
+  assert.equal(pubs.flatMap((p) => p.events).filter((e) => /outcome unknown, not resent/.test(e.summary)).length, 1);
+});
+
+test('I6 at-most-once B: Feishu code 0 without message_id → one send over 3 ticks', async () => {
+  const { sendDigest } = await import('../lib/digest.mjs');
+  const mod = { loadFeishuConfig: () => ({ ok: true }), sendVerifiedDM: async () => ({ ok: true, messageId: null, verified: false, reasons: ['no message_id returned by the send'] }) };
+  const home = await freshHome();
+  const { call } = recorder(obsOf());
+  let sends = 0;
+  const notify = async (t) => { sends += 1; return sendDigest(t, { importer: async () => mod }); };
+  for (let i = 0; i < 3; i++) await tick({ call, now: NOW + i * 300_000, home, strategist: null, local: empty, notify, verifyNotify: async () => ({ ok: true }) });
+  assert.equal(sends, 1);
+});
+
+test('I6 at-most-once C: a crash right after notify returns (state write fails) → no re-send next ticks', async () => {
+  const home = await freshHome();
+  const { call } = recorder(obsOf());
+  let sends = 0;
+  const notify = async () => { sends += 1; return { ok: true, sent: true, messageId: 'om_c' }; };
+  const save = (file, s) => { if (sends > 0 && !save.crashed) { save.crashed = true; throw new Error('disk full'); } return writeFile(file, JSON.stringify(s)); };
+  await assert.rejects(tick({ call, now: NOW, home, strategist: null, local: empty, notify, verifyNotify: async () => ({ ok: true }), saveState: save }));
+  for (let i = 1; i < 3; i++) await tick({ call, now: NOW + i * 300_000, home, strategist: null, local: empty, notify, verifyNotify: async () => ({ ok: true }), saveState: save });
+  assert.equal(sends, 1);
+});
+
+test('I6 at-most-once: when the pre-send state write fails nothing is sent', async () => {
+  const home = await freshHome();
+  const { call } = recorder(obsOf());
+  let sends = 0; let writes = 0;
+  const notify = async () => { sends += 1; return { ok: true, messageId: 'om_d' }; };
+  // write 1 = the state write after ACT/THINK; write 2 = the pre-send digest write
+  const save = (file, s) => { writes += 1; if (writes === 2) throw new Error('read-only fs'); return writeFile(file, JSON.stringify(s)); };
+  await assert.rejects(tick({ call, now: NOW, home, strategist: null, local: empty, notify, verifyNotify: null, saveState: save }));
+  assert.equal(sends, 0);
 });
 
 test('B1 stalled event: emitted only when the stalled set changes, plus one reminder per 24 h', async () => {
@@ -164,4 +210,21 @@ test('I6 notify adapter: sent-but-unverified carries sent + messageId; verifyDig
   assert.deepEqual(await sendDigest('hi', { importer }), { ok: false, sent: true, messageId: 'om_9', reasons: ['read-back failed'] });
   assert.deepEqual(await verifyDigest('om_9', 'hi', { importer }), { ok: true, reasons: [] });
   assert.deepEqual(calls, ['send', 'verify om_9 hi']);
+});
+
+test('D1 href guard: only same-site paths become links', () => {
+  const L = (href) => loopOf({ id: 'p1', name: 'P', updatedAt: iso(NOW - 80 * H) }, { projectId: 'p1', stages: [{ id: 'setup', state: 'partial', action: 'Fix setup', href }] }, [], [], 0, {}, policy, 0, NOW).nextAction;
+  for (const bad of ['@evil.com/p', 'http://evil', '//evil.com/x', '/\\evil', '/a@b', 'javascript:alert(1)', '/javascript:x']) assert.equal(L(bad), 'Fix setup', bad);
+  assert.equal(L('/projects/abc/stage'), 'Fix setup → https://creative.xark.io/projects/abc/stage');
+});
+
+test('B3 label priority across several refused runs: budget (cap) > funds > estimate', () => {
+  const stale = run({ id: 's1', status: 'awaiting_approval', estUsd: 1, updatedAt: iso(NOW - 30 * H) });
+  const big = run({ id: 'b1', status: 'awaiting_approval', estUsd: 5, updatedAt: iso(NOW - 2 * H) });
+  const L = (runs, opts) => loopOf({ id: 'p1', name: 'P', updatedAt: iso(NOW) }, null, runs, [], 0, {}, policy, 0, NOW, opts);
+  assert.equal(L([stale, big]).waitingOn, 'budget');
+  assert.equal(L([stale, big], { budgetOut: true }).waitingOn, 'budget');
+  assert.match(L([stale, big]).doing, /run cap/);
+  assert.equal(L([stale], { budgetOut: true }).waitingOn, 'funds');
+  assert.equal(L([stale]).waitingOn, 'estimate');
 });

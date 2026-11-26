@@ -12,6 +12,8 @@ const EXEC = ['queued', 'planning', 'approved', 'generating'];
 export const IDLE_AFTER_H = 48;
 export const AD_DATA_WAIT_H = 72;
 export const APP_BASE = 'https://creative.xark.io';
+/** a same-site path only: starts with one '/', no '@', no backslash, no scheme */
+export const safeHref = (h) => typeof h === 'string' && /^\/(?!\/)/.test(h) && !/[@\\]/.test(h) && !/^\/*[a-z][a-z0-9+.-]*:/i.test(h);
 export const STEP_AGENT = { setup: 'Researcher', research: 'Researcher', insights: 'Strategist', creative: 'Director', studio: 'Director', produce: 'Producer', deliver: 'Performance Analyst', measure: 'Strategist' };
 const iso = (ms) => new Date(ms).toISOString();
 const t = (d) => (d ? Date.parse(d) : 0);
@@ -104,10 +106,14 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
     const decisions = awaiting.map((r) => canAutoApprove(r, policy, approvedTodayUsd, now));
     if (decisions.some((d) => d.ok)) return { ...base, step: 'produce', stage: 'gate', status: 'active', agent: 'Producer', doing: `approving ${decisions.filter((d) => d.ok).length} run(s) within the autonomy caps`, nextAction: 'auto-approve, then the Mac worker generates', nextCheckpointAt: at(5 * M), verifyHow: 're-read the run: status approved with a spend reservation' };
     // label only (approvals/canAutoApprove decide): say what actually blocks the gate
-    const reason = decisions.find((d) => !d.ok)?.reason || '';
-    const wait = budgetOut ? { waitingOn: 'funds', nextAction: 'raise the OpenRouter key cap first' }
-      : /estimate .* old/.test(reason) ? { waitingOn: 'estimate', nextAction: 're-plan (free) to refresh the estimate, or cancel if obsolete' }
-      : { waitingOn: 'budget', nextAction: 'Barron approves in Studio (free preparation already done)' };
+    // priority across refused runs: cap overrun (budget) > funds > stale estimate, so an over-cap run is never hidden
+    const reasons = decisions.filter((d) => !d.ok).map((d) => d.reason || '');
+    const capR = reasons.find((r) => /\bcap\b/.test(r)); const staleR = reasons.find((r) => /estimate .* old/.test(r));
+    const BUDGET = { waitingOn: 'budget', nextAction: 'Barron approves in Studio (free preparation already done)' };
+    const [wait, reason] = capR ? [BUDGET, capR]
+      : budgetOut ? [{ waitingOn: 'funds', nextAction: 'raise the OpenRouter key cap first' }, reasons[0] || '']
+      : staleR ? [{ waitingOn: 'estimate', nextAction: 're-plan (free) to refresh the estimate, or cancel if obsolete' }, staleR]
+      : [BUDGET, reasons[0] || ''];
     return { ...base, step: 'produce', stage: 'gate', status: 'waiting', ...wait, agent: 'Producer', doing: `${awaiting.length} run(s) not auto-approved: ${reason}`, nextCheckpointAt: at(24 * H), verifyHow: 'run leaves awaiting_approval; reminder after 24 h' };
   }
 
@@ -138,7 +144,7 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
   const idle = now - lastActivity > IDLE_AFTER_H * H;
   const action = gap?.action || 'generate the first Ad Studio batch from the best storyboard';
   // the stage link (older APIs send none: keep the plain text)
-  const nextAction = gap?.href ? `${action} → ${APP_BASE}${gap.href}` : action;
+  const nextAction = safeHref(gap?.href) ? `${action} → ${APP_BASE}${gap.href}` : action;
   return { ...base, step, stage: 'project', status: idle ? 'idle-defect' : 'active', idleSince: idle ? iso(lastActivity) : null, agent: STEP_AGENT[step], doing: idle ? `stalled ${Math.round((now - lastActivity) / H)} h at ${step}: ${action}` : `${step}: ${action}`, nextAction, nextCheckpointAt: at(idle ? 6 * H : 24 * H), verifyHow: `project-stages: ${step} criteria all met` };
 }
 

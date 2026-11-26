@@ -70,7 +70,7 @@ export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'h
   return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
 }
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(ROOT, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }) } = {}) {
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(ROOT, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }), saveState = (f, s) => writeFile(f, JSON.stringify(s)) } = {}) {
   await mkdir(home, { recursive: true });
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
@@ -267,28 +267,37 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   };
   // prune local state
   for (const k of Object.keys(state.acted)) if (/^retry:/.test(k) && !k.endsWith(new Date(now).toISOString().slice(0, 10))) delete state.acted[k];
-  await writeFile(stateFile, JSON.stringify(state));
+  await saveState(stateFile, state);
   if (dryRun) { lap('publish'); return { ok: true, dryRun: true, snapshot, approvedNow, phaseMs }; }
   // actions of the last 24 h for the daily digest
   state.actions = [...(state.actions || []), ...events.filter((e) => ['decide', 'call', 'fix'].includes(e.kind)).map((e) => ({ at: e.at, kind: e.kind }))].filter((a) => now - Date.parse(a.at) < 86_400_000);
-  // a digest DM that went out (has a messageId) is never re-sent: later ticks only re-read it, at most DIGEST_VERIFY_TRIES times
+  // daily digest, AT MOST ONCE per Pacific day: the day and a pending entry are persisted BEFORE the send; a pending entry
+  // with a messageId is only read back (<= DIGEST_VERIFY_TRIES); one without (send threw, no message_id, crash) is never resent
   const pend = state.digestPending;
-  if (pend) {
+  if (pend && !pend.messageId) {
+    events.push(ev('Brain', 'check', `daily digest send outcome unknown, not resent (${pend.day})`));
+    delete state.digestPending;
+    await saveState(stateFile, state);
+  } else if (pend) {
     pend.tries = (pend.tries || 0) + 1;
     const v = verifyNotify ? await verifyNotify(pend.messageId, pend.text).catch((e) => ({ ok: false, reasons: [e.message] })) : { ok: false, reasons: ['no read-back available'] };
     if (v.ok) { events.push(ev('Brain', 'check', `daily digest read back: verified (${pend.day})`)); delete state.digestPending; }
     else if (!verifyNotify || pend.tries >= DIGEST_VERIFY_TRIES) { events.push(ev('Brain', 'check', `daily digest sent, unverified (${pend.day}) after ${pend.tries} read-back(s): ${(v.reasons || []).join('; ') || 'not found'} (not re-sent)`)); delete state.digestPending; }
-    await writeFile(stateFile, JSON.stringify(state));
+    await saveState(stateFile, state);
   }
   const day = notify && digestDue(state.digestDay, now);
   if (day) {
     const text = buildDigest(snapshot, state.actions);
+    const before = { digestDay: state.digestDay, digestPending: state.digestPending };
+    state.digestDay = day; state.digestPending = { day, messageId: null, text, tries: 0, sending: true };
+    // if this write fails nothing is sent (the error propagates; the tick reports it)
+    try { await saveState(stateFile, state); } catch (e) { Object.assign(state, before); if (!before.digestPending) delete state.digestPending; throw e; }
     const d = await notify(text).catch((e) => ({ ok: false, reason: e.message }));
-    // persist first: once a messageId exists the day is done, whatever happens later in this tick
-    if (d.ok || d.messageId) state.digestDay = day;
-    if (!d.ok && d.messageId) state.digestPending = { day, messageId: d.messageId, text, tries: 0 };
-    await writeFile(stateFile, JSON.stringify(state));
-    events.push(ev('Brain', 'call', d.ok ? `daily digest sent to Barron (Feishu DM, read back: verified)` : d.messageId ? `daily digest sent to Barron (Feishu DM); read-back not verified yet: ${(d.reasons || []).join('; ') || 'no detail'} — re-checking, no re-send` : `daily digest NOT delivered: ${d.reason || (d.reasons || []).join('; ')}`));
+    if (d.ok) delete state.digestPending;
+    else if (d.messageId) Object.assign(state.digestPending, { messageId: d.messageId, sending: false });
+    else delete state.digestPending; // outcome unknown: reported now, never resent
+    events.push(ev('Brain', 'call', d.ok ? `daily digest sent to Barron (Feishu DM, read back: verified)` : d.messageId ? `daily digest sent to Barron (Feishu DM); read-back not verified yet: ${(d.reasons || []).join('; ') || 'no detail'} — re-checking, no re-send` : `daily digest NOT delivered: ${d.reason || (d.reasons || []).join('; ') || 'no message id'} — send outcome unknown, not resent today`));
+    await saveState(stateFile, state);
   }
   const pub = await call('publish', { snapshot });
   lap('publish');
