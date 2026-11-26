@@ -41,7 +41,7 @@ export function harvest({ incidents, checks, now = new Date().toISOString(), bas
     out.push({ id: idOf('incident', i.signature), at: now, who: 'brain', scope: `ops:${i.kind}`, rule, evidence: i.runs.slice(-5), status: i.count >= 3 ? 'confirmed' : 'candidate', promotedTo: null });
   }
   const failed = {};
-  for (const c of Object.values(checks || {})) if (!c.renderedAt || c.renderedAt >= baseline) for (const f of c.fields || []) if (!f.pass) (failed[f.field] = failed[f.field] || []).push(c.runId);
+  for (const c of Object.values(checks || {})) if (!c.renderedAt || c.renderedAt >= baseline) for (const f of c.fields || []) if (!f.pass && !f.advisory) (failed[f.field] = failed[f.field] || []).push(c.runId);
   for (const [field, runs] of Object.entries(failed)) {
     if (runs.length < 2) continue;
     out.push({ id: idOf('check', field), at: now, who: 'QA Critic', scope: 'pipeline:render', rule: `Second check: "${field}" failed on ${runs.length} finished videos; the pipeline's own QA passed them — tighten measure.mjs for ${field}.`, evidence: runs.slice(-5), status: runs.length >= 3 ? 'confirmed' : 'candidate', promotedTo: null });

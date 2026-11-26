@@ -58,5 +58,5 @@ export async function critique(video, durationSec, key) {
 /** add the critic's result to a second-check record as fields (pure) */
 export function withCritic(check, c) {
   const fields = [...check.fields, { field: `critic (${c.model.split('/')[1]})`, expected: `avg ≥ ${PASS_AT}, clean text`, actual: `${c.avg} · ${KEYS.map((k) => `${k} ${c.scores[k]}`).join(', ')}${c.scores.issues?.length ? ' · ' + c.scores.issues.join(' / ') : ''}`, pass: c.pass, source: 'second model family' }];
-  return { ...check, fields, pass: fields.every((f) => f.pass), critic: c };
+  return { ...check, fields, pass: fields.every((f) => f.pass || f.advisory), critic: c };
 }

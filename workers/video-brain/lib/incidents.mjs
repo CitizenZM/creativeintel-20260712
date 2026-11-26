@@ -20,7 +20,10 @@ const norm = (s) => s
 const PROVIDER_MSG = /"(?:message|detail)"\s*:\s*"((?:[^"\\]|\\.)+)/;
 const RAW = /"raw"\s*:\s*"((?:[^"\\]|\\.)+)/;
 const GENERIC = /^(provider returned error|upstream error|internal (server )?error|unknown error|error)$/;
-const sentence = (t) => norm(t).split('. ')[0].replace(/\.$/, '');
+const sentence = (t) => norm(t).split(/(?<!\b(?:e\.g|i\.e))\. /)[0].replace(/\.$/, '');
+// a provider body sits right after an HTTP code or a short provider/error prefix ("OpenRouter 402: {", "401 {", "Error: {")
+// or is the whole string; JSON echoed inside a prompt or a log line is not one
+const providerHead = (h) => !h.trim() || (h.length <= 60 && /\b[1-5]\d\d\b|openrouter|error/i.test(h));
 const unescape = (t) => { try { return JSON.parse(`"${t}"`); } catch { return t.replace(/\\"/g, '"'); } };
 
 export function signatureOf(error) {
@@ -28,7 +31,8 @@ export function signatureOf(error) {
   const m = s.match(PROVIDER_MSG);
   if (!m) return norm(s).slice(0, 140);
   const brace = s.indexOf('{');
-  const headRaw = brace >= 0 && brace < m.index ? s.slice(0, brace) : '';
+  if (brace < 0 || brace > m.index || !providerHead(s.slice(0, brace))) return norm(s).slice(0, 140);
+  const headRaw = s.slice(0, brace);
   const code = headRaw.match(/\b([1-5]\d\d)\b/)?.[1] || s.match(/"code"\s*:\s*([1-5]\d\d)\b/)?.[1] || '';
   let msg = sentence(m[1]);
   const raw = GENERIC.test(msg) && s.match(RAW);
