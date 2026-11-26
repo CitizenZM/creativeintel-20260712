@@ -161,7 +161,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   const lap = (k) => { const t = Date.now(); phaseMs[k] = (phaseMs[k] || 0) + (t - mark); mark = t; };
   const obs = await call('observe');
   if (obs.status !== 200 || !Array.isArray(obs.projects)) throw new Error(`observe: HTTP ${obs.status} ${obs.error || ''}`);
-  // local Ad Studio jobs join the observation (Xark-managed xk-* jobs are grouped as the lab project)
+  // local Ad Studio jobs join the observation (xk-* mirrors are skipped by readLocal; the server AdStudioRun is authoritative)
   let locOk = true;
   const loc = await local().catch((e) => { locOk = false; log(`local jobs: ${e.message}`); return { projects: [], stages: [], runs: [] }; });
   if (loc.failed?.length) { locOk = false; log(`local jobs: ${loc.failed.join('; ')}`); }
