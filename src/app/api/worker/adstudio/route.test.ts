@@ -39,4 +39,16 @@ describe("POST /api/worker/adstudio", () => {
     expect((await call({ action: "progress" })).status).toBe(400);
     expect((await call({ action: "nope", runId: "r1" })).status).toBe(400);
   });
+  it("rejects a non-string workerId with 400 before recording or claiming anything; a missing one is still 'mac'", async () => {
+    for (const workerId of [{ a: 1 }, ["mac"], 7, true]) {
+      const res = await call({ action: "claim", workerId });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "workerId must be a string" });
+    }
+    expect(m.recordWorkerSeen).not.toHaveBeenCalled();
+    expect(m.claimNext).not.toHaveBeenCalled();
+    m.claimNext.mockResolvedValue(null);
+    expect((await call({ action: "claim" })).status).toBe(200);
+    expect(m.recordWorkerSeen).toHaveBeenCalledWith("adstudio:mac");
+  });
 });

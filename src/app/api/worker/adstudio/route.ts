@@ -36,7 +36,9 @@ export async function POST(request: Request) {
   if (!isAuthorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = (await request.json().catch(() => null)) as Body | null;
   if (!body || typeof body.action !== "string") return NextResponse.json({ error: "action required" }, { status: 400 });
-  const workerId = String(body.workerId || "mac");
+  // a non-string id (object, array, number) would be stringified into a bogus worker name: refuse it
+  if (body.workerId != null && typeof body.workerId !== "string") return NextResponse.json({ error: "workerId must be a string" }, { status: 400 });
+  const workerId = body.workerId || "mac";
   await recordWorkerSeen(ADSTUDIO_WORKER_PREFIX + workerId);
   if (body.action !== "claim" && typeof body.runId !== "string") return NextResponse.json({ error: "runId required" }, { status: 400 });
   try {

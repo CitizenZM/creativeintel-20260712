@@ -1,6 +1,6 @@
 /** Pure helpers for the Video Brain board (sorting, labels, relative time). Tested in brain-format.test.ts. */
 import type {
-  BrainEvent, BrainLearning, BrainLoop, BrainView, LoopStage, LoopStatus, PatternHit, ProjectStep, TaskStatus,
+  BrainCheck, BrainEvent, BrainLearning, BrainLoop, BrainView, LoopStage, LoopStatus, PatternHit, ProjectStep, TaskStatus,
 } from "@/services/brain/contract";
 
 export type Tone = "healthy" | "attention" | "urgent" | "ai" | "muted";
@@ -162,4 +162,14 @@ export function projectHref(projectId: string): string | null {
 export function checkProject(projectId: string, loops: readonly Pick<BrainLoop, "projectId" | "name">[]): { name: string; href: string | null } {
   const name = loops.find((l) => l.projectId === projectId)?.name || projectId || "—";
   return { name, href: /^c[a-z0-9]{20,30}$/.test(projectId) ? projectHref(projectId) : null };
+}
+
+type CheckField = BrainCheck["fields"][number];
+/** fields that count as OK: passed, or advisory (information only, never a failure) */
+export const fieldsOk = (fields: readonly CheckField[]) => fields.filter((f) => f.pass || f.advisory).length;
+/** the Pass chip of one field: ✓ / ✗, or a neutral "i" for a failed advisory field */
+export function fieldChip(f: Pick<CheckField, "pass" | "advisory">): { tone: Tone; label: string; title?: string } {
+  if (f.pass) return { tone: "healthy", label: "✓" };
+  if (f.advisory) return { tone: "muted", label: "i", title: "advisory: information only, not a failure" };
+  return { tone: "urgent", label: "✗" };
 }

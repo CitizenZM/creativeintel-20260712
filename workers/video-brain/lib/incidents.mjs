@@ -1,5 +1,8 @@
 // Failures -> incidents by cause signature (ids, urls, paths, numbers stripped). One root cause = one incident.
 const H = 3_600_000;
+// the OpenRouter funds cause: the balance probe, the 402/balance human incident and the budget-out line say the same thing
+export const FUNDS_INCIDENT = /\b402\b|balance|credit|budget/i;
+const isFunds = (i) => FUNDS_INCIDENT.test(`${i.signature || ''} ${i.runbook || ''}`);
 /** dedup memory per incident: every run id seen, last IDS_CAP kept (40 published incidents x 200 x ~37 B stays far under SNAPSHOT_MAX_BYTES) */
 export const IDS_CAP = 200;
 
@@ -86,8 +89,10 @@ function merge(a, b) {
  * legacy callers, only failed ones (a run without status counts as failed). Resolved after 72 h quiet, or
  * resolvedBy 'recovered' once every run it lists is visible as completed and not a $0 budget fallback (a 402 run
  * re-planned as slides completes while funds are still out). Reopened when the cause returns within 72 h.
+ * fundsOut (the balance probe fails): a funds incident does not resolve on the 72 h rule - the cause is still there,
+ * only no run hit it (new runs are planned as $0 slides).
  */
-export function aggregate(prev, runs, now = Date.now()) {
+export function aggregate(prev, runs, now = Date.now(), { fundsOut = false } = {}) {
   const out = {};
   for (const [k, v0] of Object.entries(prev || {})) {
     const v = { ...v0, runs: [...(v0.runs || [])], ids: [...(v0.ids || v0.runs || [])] };
@@ -119,7 +124,7 @@ export function aggregate(prev, runs, now = Date.now()) {
   const recovered = (id) => { const r = byId.get(id); return !!r && r.status === 'completed' && r.fallback !== 'budget'; };
   for (const v of Object.values(out)) {
     if (v.status !== 'resolved' && v.ids.length && v.ids.every(recovered)) { v.status = 'resolved'; v.resolvedBy = 'recovered'; }
-    if (v.status !== 'resolved' && now - Date.parse(v.lastSeen) > 72 * H) v.status = 'resolved';
+    if (v.status !== 'resolved' && now - Date.parse(v.lastSeen) > 72 * H && !(fundsOut && isFunds(v))) v.status = 'resolved';
     // runbooks evolve: an open incident first seen before its rule existed is re-classified from its sample
     if (v.status === 'resolved' || !v.sample) continue;
     const c = classify(v.sample);

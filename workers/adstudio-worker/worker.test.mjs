@@ -368,3 +368,31 @@ test('B: a progress tick sees "reclaimed" (nobody holds the run yet) before this
     assert.deepEqual(calls.filter((c) => c.action !== 'progress').map((c) => `${c.action}:${c.claim}`), ['done:c2']);
   } finally { delete process.env.FAKE_MS; await done(); }
 });
+
+test('a run that throws after this worker reclaimed it reports failed under the newer claim, not the one runLoop saw first', { timeout: 20000 }, async () => {
+  let serverClaim = 'c1';
+  const server = (b) => {
+    if (b.action === 'progress') return [200, b.claim !== serverClaim ? { cancel: true, status: 'reclaimed' } : { cancel: false }];
+    if (b.claim !== serverClaim) return [409, { error: "This claim is no longer the run's current one" }];
+    if (b.action === 'done') return [500, { error: 'db down' }]; // the done report throws -> runLoop calls onError
+    return [200, { action: b.action }];
+  };
+  const { w, calls, spawns, dir, done } = await adoptRig({ server });
+  const id = w.jobIdOf('claimerr1');
+  try {
+    await mkdir(dir(id), { recursive: true }); await writeFile(path.join(dir(id), 'job.json'), JSON.stringify({ id, budget: 6 }));
+    process.env.FAKE_MS = '700';
+    const run1 = { runId: 'claimerr1', phase: 'generate', claim: 'c1', reserveUsd: 3 };
+    const first = w.handle(run1).then(() => null, (e) => e);
+    for (let i = 0; i < 100 && (await spawns()).length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    delete process.env.FAKE_MS;
+    await new Promise((r) => setTimeout(r, 100));
+    serverClaim = 'c2';
+    assert.equal((await w.handle({ runId: 'claimerr1', phase: 'generate', claim: 'c2', reserveUsd: 3 })).action, 'handed-off');
+    const err = await first;
+    assert.ok(err instanceof Error, 'the done report threw');
+    await w.reportError(run1, err); // what main()'s runLoop onError does with the run object it claimed first
+    const f = calls.filter((c) => c.action === 'failed');
+    assert.deepEqual(f.map((c) => c.claim), ['c2'], `failed reports: ${calls.map((c) => c.action + ':' + c.claim).join(' ')}`);
+  } finally { delete process.env.FAKE_MS; await done(); }
+});

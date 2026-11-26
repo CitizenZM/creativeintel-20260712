@@ -121,13 +121,16 @@ export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'h
   return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
 }
 
+/** short run name for event text: batch runs by their file name (the last 6 chars of every batch id are "le.mp4") */
+export const label = (id) => (id.startsWith('batch:') ? path.basename(id.split(':').slice(2).join(':')).replace(/\.mp4$/i, '') : id.slice(-6));
+
 export const PRUNE_AFTER_MS = 30 * 86_400_000;
 /** drop checks and acted entries older than 30 d whose run is no longer observed (age AND absence: a run that leaves a
  *  windowed list and comes back is not re-checked within 30 d). acted entries carry no time: stamped in state.actedAt when
- *  first seen. Local entries are kept when the local read failed this tick (its runs are missing, not gone). */
+ *  first seen. Local and batch entries are kept when the local read failed this tick (their runs are missing, not gone). */
 export function pruneState(state, runs, now, { localOk = true } = {}) {
   const seen = new Set(runs.map((r) => r.id));
-  const gone = (id, at) => !seen.has(id) && (localOk || !id.startsWith('local:')) && now - Date.parse(at) > PRUNE_AFTER_MS;
+  const gone = (id, at) => !seen.has(id) && (localOk || !/^(local|batch):/.test(id)) && now - Date.parse(at) > PRUNE_AFTER_MS;
   for (const [id, c] of Object.entries(state.checks)) if (gone(id, c.at)) delete state.checks[id];
   state.actedAt = state.actedAt || {};
   for (const k of Object.keys(state.acted)) {
@@ -138,7 +141,17 @@ export function pruneState(state, runs, now, { localOk = true } = {}) {
   for (const k of Object.keys(state.actedAt)) if (!(k in state.acted)) delete state.actedAt[k];
 }
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, skillsDir = SKILLS_DIR, adStudioRoot = ROOT, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(adStudioRoot, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }), saveState = (f, s) => writeAtomic(f, JSON.stringify(s)), check = secondCheck } = {}) {
+/** Ad Studio jobs + batch folders; one failing source does not empty the other. `failed` names the failed source(s): their
+ *  runs are missing this tick, not gone, so their state is not pruned */
+export async function defaultLocal({ readJobs = () => readLocal(ROOT), readBatch = () => readBatches() } = {}) {
+  const got = await Promise.allSettled([readJobs(), readBatch()]);
+  const ok = got.filter((g) => g.status === 'fulfilled').map((g) => g.value);
+  const failed = got.flatMap((g, i) => (g.status === 'rejected' ? [`${i ? 'batch' : 'local'}: ${g.reason?.message || g.reason}`] : []));
+  if (!ok.length) throw new Error(failed.join('; '));
+  return { projects: ok.flatMap((x) => x.projects), stages: ok.flatMap((x) => x.stages), runs: ok.flatMap((x) => x.runs), failed };
+}
+
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, skillsDir = SKILLS_DIR, adStudioRoot = ROOT, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = defaultLocal, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(adStudioRoot, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }), saveState = (f, s) => writeAtomic(f, JSON.stringify(s)), check = secondCheck } = {}) {
   if (!dryRun) await mkdir(home, { recursive: true }); // dry-run never writes the state dir
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
@@ -151,6 +164,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   // local Ad Studio jobs join the observation (Xark-managed xk-* jobs are grouped as the lab project)
   let locOk = true;
   const loc = await local().catch((e) => { locOk = false; log(`local jobs: ${e.message}`); return { projects: [], stages: [], runs: [] }; });
+  if (loc.failed?.length) { locOk = false; log(`local jobs: ${loc.failed.join('; ')}`); }
   obs.projects = [...obs.projects, ...loc.projects]; obs.stages = [...obs.stages, ...loc.stages]; obs.runs = [...obs.runs, ...loc.runs];
   const today = new Date(now).toISOString().slice(0, 10);
   state.localApproved = state.localApproved?.day === today ? state.localApproved : { day: today, usd: 0 };
@@ -162,12 +176,12 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   for (const a of approvals(obs.runs, obs.policy, obs.spend.autoApprovedTodayUsd || 0, now)) {
     const key = `approve:${a.run.id}`;
     if (state.acted[key] === 'approved') continue;
-    if (!a.ok) { if (!state.acted[key]) { events.push(ev('Producer', 'wait', `run ${a.run.id.slice(-6)} held at the gate: ${a.reason}`, a.run.projectId, a.run.id)); state.acted[key] = 'held'; } continue; }
-    if (dryRun) { events.push(ev('Producer', 'decide', `[dry-run] would approve ${a.run.id.slice(-6)} ($${a.reserveUsd})`, a.run.projectId, a.run.id)); continue; }
+    if (!a.ok) { if (!state.acted[key]) { events.push(ev('Producer', 'wait', `run ${label(a.run.id)} held at the gate: ${a.reason}`, a.run.projectId, a.run.id)); state.acted[key] = 'held'; } continue; }
+    if (dryRun) { events.push(ev('Producer', 'decide', `[dry-run] would approve ${label(a.run.id)} ($${a.reserveUsd})`, a.run.projectId, a.run.id)); continue; }
     const r = a.run.local ? await approveLocal(a.run.id.replace(/^local:/, '')).catch((e) => ({ ok: false, error: e.message })) : await call('approve', { runId: a.run.id, why: `brain: reservation $${a.reserveUsd} within caps` });
     if (r.ok && a.run.local) state.localApproved.usd += a.reserveUsd;
     if (r.ok) obs.spend.autoApprovedTodayUsd = (obs.spend.autoApprovedTodayUsd || 0) + a.reserveUsd; // this tick's approvals count in the snapshot
-    events.push(ev('Producer', 'decide', r.ok ? `auto-approved run ${a.run.id.slice(-6)} · reserve $${a.reserveUsd} · re-read: approved` : `approve refused for ${a.run.id.slice(-6)}: ${r.reason || r.error}`, a.run.projectId, a.run.id));
+    events.push(ev('Producer', 'decide', r.ok ? `auto-approved run ${label(a.run.id)} · reserve $${a.reserveUsd} · re-read: approved` : `approve refused for ${label(a.run.id)}: ${r.reason || r.error}`, a.run.projectId, a.run.id));
     if (r.ok) approvedNow += 1;
     state.acted[key] = r.ok ? 'approved' : 'refused';
   }
@@ -177,10 +191,10 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   for (const r of retries(obs.runs, now).filter((x) => fundsOk || x.fallback === 'budget')) {
     const key = `retry:${r.id}:${new Date(now).toISOString().slice(0, 10)}`;
     if (state.acted[key]) continue;
-    if (dryRun) { events.push(ev('Producer', 'decide', `[dry-run] would retry ${r.id.slice(-6)}`, r.projectId, r.id)); continue; }
+    if (dryRun) { events.push(ev('Producer', 'decide', `[dry-run] would retry ${label(r.id)}`, r.projectId, r.id)); continue; }
     state.acted[key] = 'tried';
     const out = await call('retry', { runId: r.id, why: `brain: transient failure: ${String(r.error).slice(0, 80)}` });
-    events.push(ev('Producer', 'call', out.ok ? `retried failed run ${r.id.slice(-6)} → ${out.status}` : `retry refused ${r.id.slice(-6)}: ${out.error}`, r.projectId, r.id));
+    events.push(ev('Producer', 'call', out.ok ? `retried failed run ${label(r.id)} → ${out.status}` : `retry refused ${label(r.id)}: ${out.error}`, r.projectId, r.id));
   }
 
   lap('act');
@@ -208,19 +222,20 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
       const critiqued = !!state.checks[r.id]?.critic && state.checks[r.id].renderedAt === c.renderedAt;
       if (critic && !dryRun && !critiqued && dur > 0 && state.criticDay.n < CRITIC_PER_DAY) {
         state.criticDay.n += 1;
-        try { const cr = await critic(r.finalMp4Url || r.finalPath, dur); c = withCritic(c, cr); events.push(ev('QA Critic', 'check', `${cr.model} on ${r.id.slice(-6)}: avg ${cr.avg}${cr.scores.issues?.length ? ' — ' + cr.scores.issues[0] : ''}`, r.projectId, r.id)); }
+        try { const cr = await critic(r.finalMp4Url || r.finalPath, dur); c = withCritic(c, cr); events.push(ev('QA Critic', 'check', `${cr.model} on ${label(r.id)}: avg ${cr.avg}${cr.scores.issues?.length ? ' — ' + cr.scores.issues[0] : ''}`, r.projectId, r.id)); }
         catch (e) { state.criticDay.n -= 1; log(`critic ${r.id}: ${e.message} (quota refunded; check stored without the critic)`); }
       }
       state.checks[r.id] = c;
       const bad = c.fields.filter((f) => !f.pass && !f.advisory).map((f) => `${f.field} ${f.actual}`);
-      events.push(ev('QA Critic', 'check', c.pass ? `second check passed: run ${r.id.slice(-6)} (${c.fields.length} fields)` : `second check FAILED run ${r.id.slice(-6)}: ${bad.join('; ')}`, r.projectId, r.id));
+      events.push(ev('QA Critic', 'check', c.pass ? `second check passed: run ${label(r.id)} (${c.fields.length} fields)` : `second check FAILED run ${label(r.id)}: ${bad.join('; ')}`, r.projectId, r.id));
     } catch (e) { log(`check ${r.id}: ${e.message}`); }
   }
 
   lap('checks');
   // INCIDENTS
   const before = Object.keys(state.incidents).length;
-  state.incidents = aggregate(state.incidents, obs.runs, now); // all runs: a listed run seen completed resolves as 'recovered'
+  // all runs: a listed run seen completed resolves as 'recovered'; a funds incident stays open while the balance probe fails
+  state.incidents = aggregate(state.incidents, obs.runs, now, { fundsOut: !fundsOk });
   if (Object.keys(state.incidents).length > before) events.push(ev('Doctor', 'think', `${Object.keys(state.incidents).length - before} new incident signature(s)`));
 
   // PROBES + PATTERNS (slower cadence)
@@ -243,7 +258,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   for (const r of dryRun ? [] : fundsRetries(obs.runs, now)) {
     const key = `fundsretry:${r.id}`; if (state.acted[key]) continue; state.acted[key] = 'tried';
     const out = await call('retry', { runId: r.id, why: budgetOut ? 'brain: model budget out - re-plan as $0 slides' : 'brain: model budget restored' });
-    events.push(ev('Producer', 'call', out.ok ? `retried run ${r.id.slice(-6)} that failed for lack of funds → ${out.status}${budgetOut ? ' (will be $0 slides)' : ''}` : `retry refused ${r.id.slice(-6)}: ${out.error}`, r.projectId, r.id));
+    events.push(ev('Producer', 'call', out.ok ? `retried run ${label(r.id)} that failed for lack of funds → ${out.status}${budgetOut ? ' (will be $0 slides)' : ''}` : `retry refused ${label(r.id)}: ${out.error}`, r.projectId, r.id));
   }
   if (!state.patternsAt || now - Date.parse(state.patternsAt) > PATTERN_EVERY_MS) {
     state.patterns = await scanRoots(PATTERN_ROOTS);

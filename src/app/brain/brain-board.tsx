@@ -6,7 +6,7 @@ import { AlertTriangle, Brain, CheckCircle2, Eye, GraduationCap, Hourglass, Phon
 import { cn } from "@/lib/utils";
 import { LOOP_STAGES, PROJECT_STEPS, type BrainEvent, type BrainTask, type BrainView } from "@/services/brain/contract";
 import {
-  EVENT_TONE, LOOP_STATUS_LABEL, STAGE_LABEL, STEP_LABEL, TONE_CLASS, ageLabel, groupPatterns, learningTone, loopTone, pct,
+  EVENT_TONE, LOOP_STATUS_LABEL, fieldChip, fieldsOk, STAGE_LABEL, STEP_LABEL, TONE_CLASS, ageLabel, groupPatterns, learningTone, loopTone, pct,
   relTime, sortEvents, sortLoops, staleMessage, taskTone, usd, type Tone,
   checkProject, projectHref,
 } from "./brain-format";
@@ -263,7 +263,7 @@ export function BrainBoard() {
                         <CheckProject id={c.projectId} loops={snap.loops} />
                         <span className="font-mono text-xs text-muted-foreground">{c.runId}</span>
                         <span className="text-xs text-muted-foreground">
-                          {c.fields.filter((f) => f.pass).length}/{c.fields.length} fields · {relTime(c.at, now)}
+                          {fieldsOk(c.fields)}/{c.fields.length} fields · {relTime(c.at, now)}
                         </span>
                       </summary>
                       <div className="mt-2 overflow-x-auto rounded-md border border-border">
@@ -278,17 +278,17 @@ export function BrainBoard() {
                             </tr>
                           </thead>
                           <tbody>
-                            {c.fields.map((f) => (
+                            {c.fields.map((f) => { const chip = fieldChip(f); return (
                               <tr key={f.field} className="border-b border-border last:border-0">
                                 <td className="px-2 py-1.5 font-medium">{f.field}</td>
                                 <td className="px-2 py-1.5">{f.expected}</td>
                                 <td className="px-2 py-1.5">{f.actual}</td>
                                 <td className="px-2 py-1.5">
-                                  <Chip tone={f.pass ? "healthy" : "urgent"}>{f.pass ? "✓" : "✗"}</Chip>
+                                  <Chip tone={chip.tone} title={chip.title}>{chip.label}</Chip>
                                 </td>
                                 <td className="px-2 py-1.5 text-muted-foreground">{f.source}</td>
                               </tr>
-                            ))}
+                            ); })}
                           </tbody>
                         </table>
                       </div>
