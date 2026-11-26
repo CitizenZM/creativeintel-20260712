@@ -23,7 +23,7 @@ import { secondCheck, LUFS_TRIES, loudnessNotMeasured } from './lib/verify.mjs';
 import { runProbes } from './lib/probes.mjs';
 import { scanRoots } from './lib/patterns.mjs';
 import { SEED, harvest, idOf, syncAll } from './lib/learn.mjs';
-import { pick, promptFor, runClaude, apply as applyStrategy } from './lib/strategist.mjs';
+import { pick, promptFor, runClaude, apply as applyStrategy, memoFor } from './lib/strategist.mjs';
 import { readLocal } from './lib/local.mjs';
 import { readBatches } from './lib/batch.mjs';
 import { loadWorkstreams } from './lib/jobs.mjs';
@@ -171,7 +171,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   lap('checks');
   // INCIDENTS
   const before = Object.keys(state.incidents).length;
-  state.incidents = aggregate(state.incidents, obs.runs.filter((r) => r.status === 'failed'), now);
+  state.incidents = aggregate(state.incidents, obs.runs, now); // all runs: a listed run seen completed resolves as 'recovered'
   if (Object.keys(state.incidents).length > before) events.push(ev('Doctor', 'think', `${Object.keys(state.incidents).length - before} new incident signature(s)`));
 
   // PROBES + PATTERNS (slower cadence)
@@ -253,7 +253,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     for (const l of pick(t.loops, state.strategy, now)) {
       try {
         const out = await strategist(promptFor(l, obs, learnings));
-        state.strategy[l.projectId] = { at: new Date(now).toISOString(), day: new Date(now).toISOString().slice(0, 10), out };
+        state.strategy[l.projectId] = memoFor(l, out, now);
         events.push(ev('Strategist', 'think', `${l.name}: ${out.hypothesis} → ${out.nextAction} (check: ${out.verifyHow})`, l.projectId));
       } catch (e) { log(`strategist ${l.projectId}: ${e.message}`); state.strategy[l.projectId] = { at: new Date(now).toISOString(), day: new Date(now).toISOString().slice(0, 10), error: e.message }; }
     }

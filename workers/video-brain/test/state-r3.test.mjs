@@ -155,3 +155,35 @@ test('L7 log: ISO timestamp with date; the error line and log carry the fetch ca
   const line = r.stdout.split('\n').find((l) => l.startsWith('__VIDEO_BRAIN__'));
   assert.match(JSON.parse(line.slice('__VIDEO_BRAIN__'.length)).error, /ECONNREFUSED/);
 });
+
+test('integration (a) tick: a failed run that later shows completed resolves its incident with resolvedBy "recovered"', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-int-a-'));
+  const now = Date.now();
+  await writeFile(path.join(home, 'state.json'), JSON.stringify(baseState(now)));
+  const t = (ms) => new Date(now - ms).toISOString();
+  let runs = [{ id: 'run-x1', projectId: 'p1', status: 'failed', error: 'Model returned no image returned for scene 2', retries: 2, updatedAt: t(600_000), estUsd: 0 }];
+  const opts = { call: mkCall(() => observe(runs)), home, local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: null };
+  await tick({ ...opts, now });
+  const read = async () => Object.values(JSON.parse(await readFile(path.join(home, 'state.json'), 'utf8')).incidents);
+  let inc = await read();
+  assert.equal(inc.length, 1); assert.equal(inc[0].status, 'open');
+  runs = [{ ...runs[0], status: 'completed', error: null, updatedAt: t(0) }];
+  await tick({ ...opts, now: now + 300_000 });
+  inc = await read();
+  assert.equal(inc[0].status, 'resolved'); assert.equal(inc[0].resolvedBy, 'recovered');
+});
+
+test('integration (b) tick: a strategist memo carries the loop step', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-int-b-'));
+  const now = Date.now();
+  await writeFile(path.join(home, 'state.json'), JSON.stringify(baseState(now)));
+  const old = new Date(now - 100 * 3_600_000).toISOString();
+  const st = ['setup', 'research', 'insights', 'creative', 'studio'].map((id) => ({ id, state: id === 'setup' ? 'done' : id === 'research' ? 'partial' : 'todo', action: `do ${id}` }));
+  const out = { hypothesis: 'h', nextAction: 'n', verifyHow: 'v', checkpointHours: 6, owner: 'Director' };
+  let asked = 0;
+  await tick({ call: mkCall(() => observe([], [{ id: 'p7', name: 'Stalled', updatedAt: old }], [{ projectId: 'p7', stages: st }])), now, home, local: async () => ({ projects: [], stages: [], runs: [] }), critic: null, strategist: async () => { asked += 1; return out; } });
+  const s = JSON.parse(await readFile(path.join(home, 'state.json'), 'utf8'));
+  assert.equal(asked, 1, 'the stalled loop reached the strategist');
+  assert.ok(s.strategy.p7.step, 'memo carries the step');
+  assert.deepEqual(s.strategy.p7.out, out);
+});
