@@ -8,21 +8,24 @@
 // Env: APP_URL, WORKER_TOKEN (same file as the adstudio worker: ~/.config/adstudio-worker/prod.env),
 //      AD_STUDIO_ROOT (default ~/Projects/ad-studio-20261104), VIDEO_BRAIN_HOME (default ~/.config/video-brain),
 //      VIDEO_BRAIN_SKILLS_DIR (default ~/.claude/skills)
-// Flags: --once (one tick, default when run by launchd StartInterval) · --loop (tick every 5 min) · --dry-run (no approve/
-//        retry/publish/sync) · --learn "<rule>" --scope <s> --evidence <id> (add a learning and exit)
-// Prints one __VIDEO_BRAIN__{json} line per tick. Exit 0 ok · 1 publish failed/unverified · 2 observe failed.
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+// Flags: --once (one tick, default when run by launchd StartInterval) · --loop (tick every 5 min) · --dry-run (read-only:
+//        no approve/retry/batch/publish/sync, no critic/strategist/digest/rules PR/harvest, no state write, no lock) · --learn "<rule>" --scope <s> --evidence <id> (add a learning and exit)
+// Prints one __VIDEO_BRAIN__{json} line per tick. Exit 0 ok (or another live tick holds VIDEO_BRAIN_HOME/tick.pid) ·
+// 1 publish failed/unverified · 2 observe failed.
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, utimesSync, writeSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { think, approvals, retries, batchCandidates, fundsRetries } from './lib/think.mjs';
 import { aggregate } from './lib/incidents.mjs';
-import { secondCheck } from './lib/verify.mjs';
+import { secondCheck, LUFS_TRIES, loudnessNotMeasured } from './lib/verify.mjs';
 import { runProbes } from './lib/probes.mjs';
 import { scanRoots } from './lib/patterns.mjs';
 import { SEED, harvest, idOf, syncAll } from './lib/learn.mjs';
-import { pick, promptFor, runClaude, apply as applyStrategy } from './lib/strategist.mjs';
+import { pick, promptFor, runClaude, apply as applyStrategy, memoFor } from './lib/strategist.mjs';
 import { readLocal } from './lib/local.mjs';
 import { readBatches } from './lib/batch.mjs';
 import { loadWorkstreams } from './lib/jobs.mjs';
@@ -43,7 +46,55 @@ const PATTERN_ROOTS = [path.join(ROOT, 'pipeline'), path.join(ROOT, 'renderer', 
 const PROBE_EVERY_MS = 30 * 60_000, PATTERN_EVERY_MS = 6 * 3_600_000, CHECKS_PER_TICK = 3;
 export const DIGEST_VERIFY_TRIES = 3, STALLED_REMIND_MS = 24 * 3_600_000;
 export const CHECK_BUDGET_MS = Number(process.env.VIDEO_BRAIN_CHECK_BUDGET_MS || 120_000);
-const log = (m) => console.error(`[video-brain ${new Date().toISOString().slice(11, 19)}] ${m}`);
+const log = (m) => console.error(`[video-brain ${new Date().toISOString()}] ${m}`);
+
+/** replace a file by rename from a temp file in the same dir (a crash mid-write never leaves a truncated state.json) */
+export async function writeAtomic(f, data) {
+  const tmp = `${f}.${process.pid}.tmp`;
+  try { await writeFile(tmp, data); await rename(tmp, f); } catch (e) { await unlink(tmp).catch(() => {}); throw e; }
+}
+
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+/** process start time ('' when unknown): a pid reused by another process after a reboot/SIGTERM has a different one */
+const startOf = (pid) => { try { return execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 5_000 }).trim(); } catch { return ''; } };
+export const LOCK_MAX_AGE_MS = 15 * 60_000;
+/**
+ * one tick at a time per VIDEO_BRAIN_HOME: pidfile "<pid>\n<start time>", created atomically (O_EXCL). Another holder is
+ * respected only while its pid is alive, its start time matches (when recorded) and the file is < 15 min old; otherwise
+ * the file is moved aside and recreated with O_EXCL — losing that create to another process means it is theirs.
+ * Synchronous so a signal handler can release it. Returns { ok, pid, release() }.
+ */
+export function acquireLock(home, { now = Date.now(), beforeCreate = null } = {}) {
+  const f = path.join(home, 'tick.pid');
+  mkdirSync(home, { recursive: true });
+  const mine = `${process.pid}\n${startOf(process.pid)}`;
+  const create = () => {
+    try { const fd = openSync(f, 'wx'); try { writeSync(fd, mine); } finally { closeSync(fd); } } catch (e) { if (e.code === 'EEXIST') return false; throw e; }
+    return true;
+  };
+  const release = () => { try { if (readFileSync(f, 'utf8') === mine) unlinkSync(f); } catch { /* gone already */ } };
+  const won = { ok: true, pid: process.pid, release };
+  if (create()) return won;
+  let held; let mtime;
+  try { held = readFileSync(f, 'utf8'); mtime = statSync(f).mtimeMs; } catch { held = null; }
+  if (held != null) {
+    // empty and < 10 s old: the holder is between open('wx') and its write
+    if (!held.trim() && now - mtime < 10_000) return { ok: false, pid: null };
+    const [p, start = ''] = held.split('\n'); const pid = Number(p.trim());
+    // stale by start time only when both are known and differ (ps failing or timing out must not steal a live lock)
+    const s = pid > 0 && start.trim() ? startOf(pid) : '';
+    const live = pid > 0 && alive(pid) && now - mtime < LOCK_MAX_AGE_MS && (!start.trim() || !s || s === start.trim());
+    if (live) return { ok: false, pid };
+    // stale: move it aside and check we moved the stale file, not a lock someone else just created
+    const aside = `${f}.stale.${process.pid}`;
+    try { renameSync(f, aside); } catch { return { ok: false, pid: null } }
+    const moved = readFileSync(aside, 'utf8');
+    if (moved !== held) { try { linkSync(aside, f); } catch { /* a third holder exists */ } unlinkSync(aside); return { ok: false, pid: null }; }
+    unlinkSync(aside);
+  }
+  beforeCreate?.();
+  return create() ? won : { ok: false, pid: null };
+}
 
 export function api(appUrl, token) {
   return async (action, body = {}) => {
@@ -70,8 +121,8 @@ export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'h
   return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
 }
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(ROOT, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }), saveState = (f, s) => writeFile(f, JSON.stringify(s)) } = {}) {
-  await mkdir(home, { recursive: true });
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(ROOT, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }), saveState = (f, s) => writeAtomic(f, JSON.stringify(s)), check = secondCheck } = {}) {
+  if (!dryRun) await mkdir(home, { recursive: true }); // dry-run never writes the state dir
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
   const events = [];
@@ -108,8 +159,8 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   for (const r of retries(obs.runs, now).filter((x) => fundsOk || x.fallback === 'budget')) {
     const key = `retry:${r.id}:${new Date(now).toISOString().slice(0, 10)}`;
     if (state.acted[key]) continue;
-    state.acted[key] = 'tried';
     if (dryRun) { events.push(ev('Producer', 'decide', `[dry-run] would retry ${r.id.slice(-6)}`, r.projectId, r.id)); continue; }
+    state.acted[key] = 'tried';
     const out = await call('retry', { runId: r.id, why: `brain: transient failure: ${String(r.error).slice(0, 80)}` });
     events.push(ev('Producer', 'call', out.ok ? `retried failed run ${r.id.slice(-6)} → ${out.status}` : `retry refused ${r.id.slice(-6)}: ${out.error}`, r.projectId, r.id));
   }
@@ -118,17 +169,26 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   // VERIFY — second check of finished videos (a few per tick, newest first)
   const toCheck = obs.runs.filter((r) => r.status === 'completed' && (r.finalMp4Url || r.finalPath) && !state.checks[r.id]).slice(0, CHECKS_PER_TICK);
   const tickStart = Date.now();
+  state.lufsTries = state.lufsTries || {};
+  if (!dryRun) { const seen = new Set(obs.runs.map((r) => r.id)); for (const id of Object.keys(state.lufsTries)) if (!seen.has(id)) delete state.lufsTries[id]; }
   for (const r of toCheck) {
     if (Date.now() - tickStart > CHECK_BUDGET_MS) { events.push(ev('QA Critic', 'wait', `second checks paused for this tick (time budget ${CHECK_BUDGET_MS / 1000}s); rest next tick`)); break; }
     try {
-      let c = await secondCheck(r);
+      let c = await check(r);
+      if (c.loudnessMissing) {
+        // audio present but not measured: retry next tick; after LUFS_TRIES store it with loudness 'not measured' failing
+        const n = (state.lufsTries[r.id] || 0) + 1;
+        if (n < LUFS_TRIES) { state.lufsTries[r.id] = n; log(`check ${r.id}: loudness not measured (try ${n}/${LUFS_TRIES}), retry next tick`); continue; }
+        c = loudnessNotMeasured(c);
+      }
+      delete state.lufsTries[r.id];
       const day = new Date(now).toISOString().slice(0, 10);
       state.criticDay = state.criticDay?.day === day ? state.criticDay : { day, n: 0 };
       const dur = Number((c.fields.find((f) => f.field === 'duration')?.actual || '').replace(/[^0-9.]/g, ''));
-      if (critic && dur > 0 && state.criticDay.n < CRITIC_PER_DAY) {
+      if (critic && !dryRun && dur > 0 && state.criticDay.n < CRITIC_PER_DAY) {
         state.criticDay.n += 1;
         try { const cr = await critic(r.finalMp4Url || r.finalPath, dur); c = withCritic(c, cr); events.push(ev('QA Critic', 'check', `${cr.model} on ${r.id.slice(-6)}: avg ${cr.avg}${cr.scores.issues?.length ? ' — ' + cr.scores.issues[0] : ''}`, r.projectId, r.id)); }
-        catch (e) { log(`critic ${r.id}: ${e.message}`); }
+        catch (e) { state.criticDay.n -= 1; log(`critic ${r.id}: ${e.message} (quota refunded; check stored without the critic)`); }
       }
       state.checks[r.id] = c;
       const bad = c.fields.filter((f) => !f.pass).map((f) => `${f.field} ${f.actual}`);
@@ -139,7 +199,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   lap('checks');
   // INCIDENTS
   const before = Object.keys(state.incidents).length;
-  state.incidents = aggregate(state.incidents, obs.runs.filter((r) => r.status === 'failed'), now);
+  state.incidents = aggregate(state.incidents, obs.runs, now); // all runs: a listed run seen completed resolves as 'recovered'
   if (Object.keys(state.incidents).length > before) events.push(ev('Doctor', 'think', `${Object.keys(state.incidents).length - before} new incident signature(s)`));
 
   // PROBES + PATTERNS (slower cadence)
@@ -221,7 +281,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     for (const l of pick(t.loops, state.strategy, now)) {
       try {
         const out = await strategist(promptFor(l, obs, learnings));
-        state.strategy[l.projectId] = { at: new Date(now).toISOString(), day: new Date(now).toISOString().slice(0, 10), out };
+        state.strategy[l.projectId] = memoFor(l, out, now);
         events.push(ev('Strategist', 'think', `${l.name}: ${out.hypothesis} → ${out.nextAction} (check: ${out.verifyHow})`, l.projectId));
       } catch (e) { log(`strategist ${l.projectId}: ${e.message}`); state.strategy[l.projectId] = { at: new Date(now).toISOString(), day: new Date(now).toISOString().slice(0, 10), error: e.message }; }
     }
@@ -229,8 +289,8 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   // ACT 3 — push: a ready storyboard with nothing produced gets one Ad Studio variant (it stops at the spend gate)
   state.batched = state.batched || {};
   for (const l of batchCandidates(t.loops, state.batched, now)) {
-    state.batched[l.projectId] = new Date(now).toISOString();
     if (dryRun) { events.push(ev('Producer', 'decide', `[dry-run] would start an Ad Studio batch for ${l.name}`, l.projectId)); continue; }
+    state.batched[l.projectId] = new Date(now).toISOString();
     const r = await call('batch', { projectId: l.projectId, why: 'storyboard ready, nothing produced' });
     events.push(ev('Producer', 'call', r.ok ? `started an Ad Studio batch for ${l.name} (${budgetOut ? '$0 slides: model budget out' : '1 variant, Seedance 2.0 Fast; spend waits at the gate'}) · re-read: queued` : `batch not started for ${l.name}: ${r.reason || r.error || r.status}`, l.projectId, r.runs?.[0]?.id || null));
   }
@@ -267,8 +327,8 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   };
   // prune local state
   for (const k of Object.keys(state.acted)) if (/^retry:/.test(k) && !k.endsWith(new Date(now).toISOString().slice(0, 10))) delete state.acted[k];
-  await saveState(stateFile, state);
   if (dryRun) { lap('publish'); return { ok: true, dryRun: true, snapshot, approvedNow, phaseMs }; }
+  await saveState(stateFile, state);
   // actions of the last 24 h for the daily digest
   state.actions = [...(state.actions || []), ...events.filter((e) => ['decide', 'call', 'fix'].includes(e.kind)).map((e) => ({ at: e.at, kind: e.kind }))].filter((a) => now - Date.parse(a.at) < 86_400_000);
   // daily digest, AT MOST ONCE per Pacific day: the day and a pending entry are persisted BEFORE the send; a pending entry
@@ -325,10 +385,23 @@ async function main() {
       const r = await tick({ call, dryRun: flag('dry-run') });
       console.log(statusLine(r, started));
       return r.ok ? 0 : 1;
-    } catch (e) { log(e.stack || e.message); console.log(`__VIDEO_BRAIN__${JSON.stringify({ ok: false, error: e.message })}`); return 2; }
+    } catch (e) {
+      const cause = e.cause?.code || e.cause?.message;
+      log(`${e.stack || e.message}${cause ? `\n  cause: ${cause}` : ''}`);
+      console.log(`__VIDEO_BRAIN__${JSON.stringify({ ok: false, error: cause ? `${e.message} (${cause})` : e.message })}`);
+      return 2;
+    }
   };
-  if (!flag('loop')) return once();
-  for (;;) { await once(); await new Promise((r) => setTimeout(r, Number(process.env.VIDEO_BRAIN_TICK_MS || 300_000))); }
+  // one live tick per state dir (launchd StartInterval can overlap a slow tick); a dry-run reads only and needs no lock
+  const lock = flag('dry-run') ? null : acquireLock(HOME);
+  if (lock && !lock.ok) { log(lock.pid ? `another tick is running (pid ${lock.pid}); exiting` : 'another tick took the lock first; exiting'); return 0; }
+  // launchd stops jobs with SIGTERM: drop our pidfile synchronously so the next tick is not blocked by it
+  if (lock) for (const [sig, code] of [['SIGTERM', 143], ['SIGINT', 130]]) process.once(sig, () => { lock.release(); process.exit(code); });
+  const touch = () => { try { const t = new Date(); utimesSync(path.join(HOME, 'tick.pid'), t, t); } catch { /* released */ } };
+  try {
+    if (!flag('loop')) return await once();
+    for (;;) { if (lock) touch(); await once(); await new Promise((r) => setTimeout(r, Number(process.env.VIDEO_BRAIN_TICK_MS || 300_000))); }
+  } finally { lock?.release(); }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main().then((c) => process.exit(c));

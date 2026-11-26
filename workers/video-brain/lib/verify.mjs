@@ -33,7 +33,16 @@ export function compare(run, facts) {
   if (run.estUsd > 0 && run.actualUsd != null) add('cost', `≤ clip reservation + key frames $${cap.toFixed(2)}`, `$${Number(run.actualUsd).toFixed(2)}`, run.actualUsd <= cap + 0.01, 'db vs estimate');
   const rt = Number(run.metrics?.runtime ?? run.metrics?.duration ?? NaN);
   if (Number.isFinite(rt) && facts.probe) add('runtime matches report', `${rt.toFixed(2)} s (worker metrics)`, `${facts.probe.duration.toFixed(2)} s`, Math.abs(rt - facts.probe.duration) <= 0.5, 'metrics vs file');
-  return { runId: run.id, projectId: run.projectId, at: new Date().toISOString(), renderedAt: run.updatedAt ? new Date(run.updatedAt).toISOString() : null, pass: f.every((x) => x.pass), fields: f };
+  // audio present but ebur128 gave no reading: the caller retries next tick instead of storing a check without loudness
+  const loudnessMissing = !!facts.probe?.acodec && facts.lufs == null;
+  return { runId: run.id, projectId: run.projectId, at: new Date().toISOString(), renderedAt: run.updatedAt ? new Date(run.updatedAt).toISOString() : null, pass: f.every((x) => x.pass), fields: f, ...(loudnessMissing ? { loudnessMissing: true } : {}) };
+}
+
+export const LUFS_TRIES = 3;
+/** after LUFS_TRIES unmeasured tries the check is stored with a failing loudness field */
+export function loudnessNotMeasured(check) {
+  const c = { ...check }; delete c.loudnessMissing;
+  return { ...c, pass: false, fields: [...c.fields, { field: 'loudness', expected: `${TARGETS.lufs} LUFS ±${TARGETS.lufsTol}`, actual: 'not measured', pass: false, source: 'ffmpeg ebur128' }] };
 }
 
 export async function probeUrl(url, { timeoutMs = 60_000 } = {}) {
