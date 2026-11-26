@@ -3,7 +3,7 @@
 // in a throw-away worktree (never the main clone: the auto-sync hook would commit it straight to main), runs the
 // pipeline's rule tests there, and opens ONE PR per content hash. Barron merges or closes it (veto); nothing merges itself.
 import { execFile } from 'node:child_process';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { access, appendFile, mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -28,12 +28,16 @@ export const hashOf = (text) => createHash('sha1').update(text).digest('hex').sl
 const norm = (text) => { try { const j = JSON.parse(text); return JSON.stringify([j.rules.map((r) => [r.id, r.rule]), j.workstreams || null]); } catch { return null; } };
 
 /** decide (pure): nothing to do, already proposed, or open a PR */
-export function plan(current, desired, state = {}) {
+export const FAILED_RETRY_MS = 24 * 3_600_000; // a failing hash is retried after a day (a test fix on main may unblock it)
+export function plan(current, desired, state = {}, now = Date.now()) {
   if (norm(current) === norm(desired)) return { action: 'none' };
   const h = hashOf(desired);
   if (state.hash === h) return { action: 'pending', hash: h, url: state.url };
+  if (state.failedHash === h && now - Date.parse(state.failedAt) < FAILED_RETRY_MS) return { action: 'failed', hash: h };
   return { action: 'open', hash: h };
 }
+const tail = (e) => String(e.stderr || e.stdout || e.message || e).slice(-400);
+const exists = (p) => access(p).then(() => true, () => false);
 
 export async function proposeRules(adRoot, learnings, state = {}, { directives = null, sh = (cmd, args, opts) => pexec(cmd, args, { maxBuffer: 16 * 1024 * 1024, timeout: 300_000, ...opts }) } = {}) {
   await sh('git', ['-C', adRoot, 'fetch', '-q', 'origin', 'main']);
@@ -43,17 +47,44 @@ export async function proposeRules(adRoot, learnings, state = {}, { directives =
   if (p.action !== 'open') return p;
   const branch = `brain/rules-${p.hash}`;
   const wt = path.join(await mkdtemp(path.join(tmpdir(), 'vb-rules-')), 'wt');
-  await sh('git', ['-C', adRoot, 'worktree', 'add', '-q', '-b', branch, wt, 'origin/main']);
+  let step = 'worktree add'; let pushed = false;
+  // -B, not -b: a branch left by an earlier failed attempt is reset instead of blocking every later one
+  const run = (name, cmd, args, opts) => { step = name; return sh(cmd, args, opts); };
   try {
+    await run('worktree add', 'git', ['-C', adRoot, 'worktree', 'add', '-q', '-B', branch, wt, 'origin/main']);
+    step = 'link node_modules'; // the rule tests import the pipeline's deps; link the main clone's, never npm install
+    const links = [];
+    for (const rel of ['node_modules', path.join('renderer', 'node_modules')]) {
+      if (!(await exists(path.join(adRoot, rel)))) continue;
+      await symlink(path.join(adRoot, rel), path.join(wt, rel)).catch((e) => { if (e.code !== 'ENOENT' && e.code !== 'EEXIST') throw e; });
+      links.push('/' + rel.split(path.sep).join('/'));
+    }
+    if (links.length) {
+      const ex = await sh('git', ['-C', wt, 'rev-parse', '--git-path', 'info/exclude']).then((r) => path.resolve(wt, r.stdout.trim())).catch(() => null);
+      if (ex) await mkdir(path.dirname(ex), { recursive: true }).then(() => appendFile(ex, links.join('\n') + '\n')).catch(() => {});
+    }
+    step = 'write rules';
     await writeFile(path.join(wt, 'pipeline', 'brain-rules.json'), desired);
-    await sh('node', ['--test', 'pipeline/test_brain_rules.mjs'], { cwd: wt }); // CI: the rules file parses and reaches the prompt
-    await sh('git', ['-C', wt, 'add', 'pipeline/brain-rules.json']);
-    await sh('git', ['-C', wt, 'commit', '-q', '-m', `feat: Video Brain rules update ${p.hash} [video-brain]\n\nCo-Authored-By: WOZCODE <contact@withwoz.com>`]);
-    await sh('git', ['-C', wt, 'push', '-q', '-u', 'origin', branch]);
+    await run('node --test', 'node', ['--test', 'pipeline/test_brain_rules.mjs'], { cwd: wt }); // CI: the rules file parses and reaches the prompt
+    await run('git add', 'git', ['-C', wt, 'add', 'pipeline/brain-rules.json']);
+    await run('git commit', 'git', ['-C', wt, 'commit', '-q', '-m', `feat: Video Brain rules update ${p.hash} [video-brain]\n\nCo-Authored-By: WOZCODE <contact@withwoz.com>`]);
+    await run('git push', 'git', ['-C', wt, 'push', '-q', '-u', 'origin', branch]);
+    pushed = true;
     const body = `Confirmed learnings from the Video Brain that change the Ad Studio script prompt.\n\nMerge = the rules go live in the next script; close = veto (the brain will not re-propose this exact set).\n\n\`\`\`json\n${desired.slice(0, 6000)}\`\`\`\n\nTests: node --test pipeline/test_brain_rules.mjs passed in the PR worktree.\n\n🧙 Built with [WOZCODE](https://wozcode.com)`;
-    const { stdout } = await sh('gh', ['pr', 'create', '--repo', REPO, '--base', 'main', '--head', branch, '--title', `Video Brain rules update ${p.hash}`, '--body', body]);
-    return { action: 'opened', hash: p.hash, url: stdout.trim().split('\n').pop() };
+    const { stdout } = await run('gh pr create', 'gh', ['pr', 'create', '--repo', REPO, '--base', 'main', '--head', branch, '--title', `Video Brain rules update ${p.hash}`, '--body', body]);
+    const url = stdout.trim().split('\n').pop();
+    // second check: re-read the PR from GitHub; it counts as opened only if it is open, on our branch, and touches only the rules file
+    const v = await run('gh pr view', 'gh', ['pr', 'view', url, '--repo', REPO, '--json', 'state,headRefName,files']).then((r) => JSON.parse(r.stdout));
+    const files = (v.files || []).map((f) => f.path);
+    if (v.state !== 'OPEN' || v.headRefName !== branch || files.length !== 1 || files[0] !== 'pipeline/brain-rules.json') {
+      throw Object.assign(new Error(`rules PR second check failed: ${url} state=${v.state} head=${v.headRefName} files=${files.join(',')}`), { secondCheck: true });
+    }
+    return { action: 'opened', hash: p.hash, url };
+  } catch (e) {
+    const msg = e.secondCheck ? e.message : `${step} failed: ${tail(e)}`;
+    throw Object.assign(new Error(msg), { hash: p.hash, step });
   } finally {
     await sh('git', ['-C', adRoot, 'worktree', 'remove', '--force', wt]).catch(() => {});
+    if (!pushed) await sh('git', ['-C', adRoot, 'branch', '-D', branch]).catch(() => {});
   }
 }

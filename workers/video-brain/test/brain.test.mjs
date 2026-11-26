@@ -261,7 +261,7 @@ test('rules PR: only confirmed script-side learnings; one PR per content hash; n
   const cmds = [];
   const { mkdir, readFile } = await import('node:fs/promises');
   let wt;
-  const sh = async (cmd, args) => { cmds.push([cmd, ...args].join(' ')); if (args[2] === 'show') return { stdout: '{"rules":[]}' }; if (args[2] === 'worktree' && args[3] === 'add') { wt = args[7]; await mkdir(path.join(wt, 'pipeline'), { recursive: true }); } if (cmd === 'gh') return { stdout: 'https://github.com/x/pull/9\n' }; return { stdout: '' }; };
+  const sh = async (cmd, args) => { cmds.push([cmd, ...args].join(' ')); if (args[2] === 'show') return { stdout: '{"rules":[]}' }; if (args[2] === 'worktree' && args[3] === 'add') { wt = args[7]; await mkdir(path.join(wt, 'pipeline'), { recursive: true }); } if (cmd === 'gh' && args[1] === 'view') return { stdout: JSON.stringify({ state: 'OPEN', headRefName: cmds.find((c) => c.includes('worktree add')).split(' ')[7], files: [{ path: 'pipeline/brain-rules.json' }] }) }; if (cmd === 'gh') return { stdout: 'https://github.com/x/pull/9\n' }; return { stdout: '' }; };
   const r = await proposeRules('/repo', L, {}, { sh });
   assert.equal(r.action, 'opened'); assert.equal(r.url, 'https://github.com/x/pull/9');
   assert.deepEqual(JSON.parse(await readFile(path.join(wt, 'pipeline', 'brain-rules.json'), 'utf8')).rules.map((x) => x.id), ['L1', 'L2']);
