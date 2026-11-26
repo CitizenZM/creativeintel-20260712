@@ -56,8 +56,18 @@ export function blockingCheck(run, checks, now, baseline = PIPELINE_BASELINE) {
   if (!c || c.pass !== false) return null;
   const at = t(c.renderedAt || run.updatedAt);
   if (!at || at < t(baseline) || now - at >= 14 * 24 * H) return null;
-  const bad = (c.fields || []).filter((f) => !f.pass);
+  const bad = (c.fields || []).filter((f) => !f.pass && !f.advisory);
   return bad.length ? bad : null;
+}
+
+/** a batch's latest round: its finished videos rendered within BATCH_ROUND_H of the newest one (file mtimes cluster per
+ *  production session; an older round's videos cannot be re-rendered by the brain, so they never block the loop) */
+export const BATCH_ROUND_H = 24;
+const notMeasured = (f) => f.field === 'loudness' && f.actual === 'not measured';
+function batchFailures(project, done, newest, checks, now) {
+  const round = done.filter((r) => t(r.updatedAt) >= t(newest.updatedAt) - BATCH_ROUND_H * H);
+  const failing = round.map((r) => [r, (blockingCheck(r, checks, now) || []).filter((f) => !notMeasured(f))]).filter(([, b]) => b.length);
+  return { round, failing };
 }
 
 function task(run, kind, status, agent, gates = []) {
@@ -131,8 +141,15 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
     return { ...base, step: 'produce', stage: 'recover', status: c.retry && lastFailed.retries < 2 ? 'active' : 'blocked', agent: c.retry ? 'Producer' : 'Doctor', doing: `last run failed (${c.kind}): ${String(lastFailed.error || '').slice(0, 90)}`, nextAction: c.retry && lastFailed.retries < 2 ? 'retry from the failed step' : c.runbook, nextCheckpointAt: at(c.retry ? 15 * M : 6 * H), verifyHow: 'the retried run reaches completed; the incident does not recur within 72 h' };
   }
 
+  if (lastDone && /^batch:/.test(project.id)) {
+    const { round, failing } = batchFailures(project, done, lastDone, checks, now);
+    if (failing.length) {
+      const name = (r) => r.id.startsWith(`${project.id}:`) ? r.id.slice(project.id.length + 1) : r.id;
+      return { ...base, step: 'deliver', stage: 'verify', status: 'blocked', waitingOn: null, agent: 'Doctor', doing: `${failing.length}/${round.length} failed second check: ` + failing.slice(0, 3).map(([r, b]) => `${name(r)} ${b.map((f) => `${f.field} ${f.actual}`).join(', ')}`).join('; ') + (failing.length > 3 ? '; …' : ''), nextAction: [...new Set(failing.flatMap(([, b]) => b.map((f) => FIX_HINT(f.field))))].join('; '), nextCheckpointAt: at(6 * H), verifyHow: 'every video of the latest round passes the second check' };
+    }
+  }
   if (lastDone) {
-    const bad = blockingCheck(lastDone, checks, now);
+    const bad = /^batch:/.test(project.id) ? null : blockingCheck(lastDone, checks, now);
     if (bad) return { ...base, step: 'deliver', stage: 'verify', status: 'blocked', waitingOn: null, agent: 'Doctor', doing: 'second check failed: ' + bad.map((f) => `${f.field} ${f.actual} (want ${f.expected})`).join('; '), nextAction: [...new Set(bad.map((f) => FIX_HINT(f.field)))].join('; '), nextCheckpointAt: at(6 * H), verifyHow: 'a re-rendered run passes every field of the second check' };
     const unchecked = done.filter((r) => (r.finalMp4Url || r.finalPath) && !checks[r.id]);
     if (unchecked.length) return { ...base, step: 'deliver', stage: 'verify', status: 'active', agent: 'QA Critic', doing: `second check of ${unchecked.length} finished video(s)`, nextAction: 'ffprobe + loudness + URL + cost reconcile', nextCheckpointAt: at(10 * M), verifyHow: 'every field of the check passes; a failing field opens a fix task' };

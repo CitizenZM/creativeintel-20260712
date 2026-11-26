@@ -16,6 +16,7 @@ export function toRun(id, job, st, finalPath) {
     finalMp4Url: null, finalPath: status === 'completed' ? finalPath : null, error: st?.error ? String(st.error).slice(0, 400) : null,
     metrics: st?.result?.duration ? { runtime: st.result.duration } : null, retries: 0, hookType: job?.hookType || null, engine: job?.videoModel || job?.engine || null,
     updatedAt: updated, createdAt: job?.created || updated, visualMode: job?.visualMode || 'video', cancelRequested: false,
+    ...(st?.review?.scores ? { review: { scores: st.review.scores } } : {}),
   };
 }
 
