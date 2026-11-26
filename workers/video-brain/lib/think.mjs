@@ -123,7 +123,11 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
   if (lastFailed && (!lastDone || t(lastFailed.updatedAt) > t(lastDone.updatedAt)) && now - t(lastFailed.updatedAt) < 7 * 24 * H) {
     const c = classify(lastFailed.error);
     // a spent provider balance / key cap is not the Doctor's: the loop waits on funds (fundsRetries resumes it)
-    if (c.kind === 'human' && FUNDS_RE.test(String(lastFailed.error || ''))) return { ...base, step: 'produce', stage: 'recover', status: 'waiting', waitingOn: 'funds', agent: 'Producer', doing: `last run failed on provider funds: ${String(lastFailed.error || '').slice(0, 90)}`, nextAction: 'raise the OpenRouter key cap', nextCheckpointAt: at(6 * H), verifyHow: 'the funds probe passes and fundsRetries re-runs the failed run' };
+    // local/batch runs are never auto-retried (fundsRetries skips them): they stay blocked until the job is re-run
+    if (c.kind === 'human' && FUNDS_RE.test(String(lastFailed.error || ''))) {
+      const loc = /^(local|batch):/.test(project.id);
+      return { ...base, step: 'produce', stage: 'recover', status: loc ? 'blocked' : 'waiting', waitingOn: 'funds', agent: 'Producer', doing: `last run failed on provider funds: ${String(lastFailed.error || '').slice(0, 90)}`, nextAction: loc ? 'raise the OpenRouter key cap, then re-run the job' : 'raise the OpenRouter key cap', nextCheckpointAt: at(6 * H), verifyHow: loc ? 'a re-run of the job reaches completed' : 'the funds probe passes and fundsRetries re-runs the failed run' };
+    }
     return { ...base, step: 'produce', stage: 'recover', status: c.retry && lastFailed.retries < 2 ? 'active' : 'blocked', agent: c.retry ? 'Producer' : 'Doctor', doing: `last run failed (${c.kind}): ${String(lastFailed.error || '').slice(0, 90)}`, nextAction: c.retry && lastFailed.retries < 2 ? 'retry from the failed step' : c.runbook, nextCheckpointAt: at(c.retry ? 15 * M : 6 * H), verifyHow: 'the retried run reaches completed; the incident does not recur within 72 h' };
   }
 

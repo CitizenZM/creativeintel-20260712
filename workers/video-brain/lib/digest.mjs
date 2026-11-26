@@ -19,10 +19,11 @@ export function buildDigest(snap, events24h = []) {
   const stalled = loops.filter((l) => l.status === 'idle-defect' && !needBarron.includes(l));
   const failedProbes = (snap.probes || []).filter((p) => !p.ok);
   const human = (snap.incidents || []).filter((i) => i.kind === 'human' && i.status !== 'resolved');
-  const badChecks = (snap.checks || []).filter((c) => !c.pass && c.renderedAt && Date.now() - Date.parse(c.renderedAt) < 7 * 86_400_000);
+  // stale local mirrors of Xark runs (the server copy is authoritative) are not reported
+  const badChecks = (snap.checks || []).filter((c) => !c.pass && !/^local:(xk-|xark-lab$)/.test(c.projectId || '') && c.renderedAt && Date.now() - Date.parse(c.renderedAt) < 7 * 86_400_000);
   const nameOf = (id) => loops.find((l) => l.projectId === id)?.name || id;
-  // server projects link to their deliver page; local/batch jobs have no web page
-  const linkOf = (id) => (id && !/^(local|batch):/.test(id) ? ` → https://creative.xark.io/projects/${id}/deliver` : '');
+  // only server projects (cuid ids) link to their deliver page; local/batch jobs have no web page
+  const linkOf = (id) => (/^c[a-z0-9]{20,30}$/.test(id || '') ? ` → https://creative.xark.io/projects/${id}/deliver` : '');
   const did = events24h.filter((e) => ['decide', 'call', 'fix'].includes(e.kind));
   const lines = [`【Video Brain 日报】${new Date(snap.at).toISOString().slice(0, 16).replace('T', ' ')} UTC · ${loops.length} 个项目 · 今日花费 $${snap.spend?.todayUsd ?? 0}/$${snap.spend?.capUsd ?? 0}`];
   const asks = needBarron.length + (funds.length ? 1 : 0);
@@ -42,7 +43,8 @@ export function buildDigest(snap, events24h = []) {
   const deliverable = (snap.checks || []).filter((c) => c.pass && c.at && nowMs - Date.parse(c.at) < 86_400_000);
   if (deliverable.length) {
     lines.push('', `可交付（复查通过，24 h 内）${deliverable.length} 条`);
-    for (const c of deliverable.filter((x) => linkOf(x.projectId)).slice(0, 3)) lines.push(`- ${nameOf(c.projectId)}${linkOf(c.projectId)}`);
+    const per = new Map(); for (const c of deliverable) per.set(c.projectId, (per.get(c.projectId) || 0) + 1);
+    for (const [id, n] of [...per].filter(([id]) => linkOf(id)).slice(0, 3)) lines.push(`- ${nameOf(id)}（${n} 条）${linkOf(id)}`);
   }
   if (snap.budget?.out) lines.push('', `模型预算用尽：新任务自动做成 $0 幻灯片视频（${snap.budget.detail || ''}）`);
   if (!snap.budget?.out && snap.upgradable?.length) lines.push('', `可升级为纯视频（需你在 Studio 批准）: ${snap.upgradable.length} 条预算期间的幻灯片视频`);
