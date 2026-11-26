@@ -162,10 +162,10 @@ test('tick wiring: approves within caps, retries transient, checks, syncs skills
 test('strategist: picks stalled/measuring projects once a day, capped; applies output for 24 h', async () => {
   const { pick, apply, promptFor } = await import('../lib/strategist.mjs');
   const loops = [{ projectId: 'a', status: 'idle-defect', step: 'insights' }, { projectId: 'b', status: 'active', step: 'measure' }, { projectId: 'c', status: 'active', step: 'produce' }];
-  assert.deepEqual(pick(loops, {}, NOW).map((l) => l.projectId), ['a', 'b']);
+  assert.deepEqual(pick(loops, {}, NOW).map((l) => l.projectId), ['b', 'a']); // SP16: measure first
   const memo = { a: { at: new Date(NOW - H).toISOString(), day: new Date(NOW).toISOString().slice(0, 10), out: { hypothesis: 'h', nextAction: 'n', verifyHow: 'v', checkpointHours: 6, owner: 'Director' } } };
   assert.deepEqual(pick(loops, memo, NOW).map((l) => l.projectId), ['b']);
-  assert.deepEqual(pick(loops, {}, NOW, 1).map((l) => l.projectId), ['a']);
+  assert.deepEqual(pick(loops, {}, NOW, 1).map((l) => l.projectId), ['b']);
   const out = apply([{ projectId: 'a', doing: 'd', nextAction: 'x', agent: 'Researcher' }], memo, NOW)[0];
   assert.equal(out.nextAction, 'n'); assert.equal(out.agent, 'Director'); assert.equal(Date.parse(out.nextCheckpointAt), NOW + 5 * H);
   assert.equal(apply([{ projectId: 'a', nextAction: 'x' }], memo, NOW + 30 * H)[0].nextAction, 'x');

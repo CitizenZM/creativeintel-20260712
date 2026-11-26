@@ -8,6 +8,7 @@ import { LOOP_STAGES, PROJECT_STEPS, type BrainEvent, type BrainTask, type Brain
 import {
   EVENT_TONE, LOOP_STATUS_LABEL, STAGE_LABEL, STEP_LABEL, TONE_CLASS, ageLabel, groupPatterns, learningTone, loopTone, pct,
   relTime, sortEvents, sortLoops, staleMessage, taskTone, usd, type Tone,
+  projectHref,
 } from "./brain-format";
 import { brainFixture } from "./fixture";
 
@@ -168,9 +169,7 @@ export function BrainBoard() {
                 {sortLoops(snap.loops).map((l) => (
                   <li key={l.projectId} className="space-y-2 p-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Link href={`/projects/${l.projectId}`} className="min-w-0 break-words font-medium hover:underline">
-                        {l.name}
-                      </Link>
+                      <ProjectName id={l.projectId} name={l.name} />
                       {l.brand && <span className="text-xs text-muted-foreground">{l.brand}</span>}
                       <Chip tone="muted" title={`step ${PROJECT_STEPS.indexOf(l.step) + 1}/${PROJECT_STEPS.length}`}>
                         {STEP_LABEL[l.step] ?? l.step}
@@ -469,5 +468,16 @@ function Bar({ value, label, budget }: { value: number; label?: string; budget?:
       </div>
       {label && <span className="text-[11px] tabular-nums text-muted-foreground">{label}</span>}
     </div>
+  );
+}
+
+/** a loop's name: a link to the project page for server projects, plain text for local/batch jobs (no page) */
+function ProjectName({ id, name }: { id: string; name: string }) {
+  const href = projectHref(id);
+  if (!href) return <span className="min-w-0 break-words font-medium">{name}</span>;
+  return (
+    <Link href={href} className="min-w-0 break-words font-medium hover:underline">
+      {name}
+    </Link>
   );
 }

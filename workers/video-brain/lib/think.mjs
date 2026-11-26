@@ -15,6 +15,7 @@ export const APP_BASE = 'https://creative.xark.io';
 /** a same-site path only: starts with one '/', no '@', no backslash, no scheme */
 export const safeHref = (h) => typeof h === 'string' && /^\/(?!\/)/.test(h) && !/[@\\]/.test(h) && !/^\/*[a-z][a-z0-9+.-]*:/i.test(h);
 export const STEP_AGENT = { setup: 'Researcher', research: 'Researcher', insights: 'Strategist', creative: 'Director', studio: 'Director', produce: 'Producer', deliver: 'Performance Analyst', measure: 'Strategist' };
+const FUNDS_RE = /\b402\b|balance|credit/i;
 const iso = (ms) => new Date(ms).toISOString();
 const t = (d) => (d ? Date.parse(d) : 0);
 
@@ -121,6 +122,8 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
   const lastDone = done.sort((a, b) => t(b.updatedAt) - t(a.updatedAt))[0];
   if (lastFailed && (!lastDone || t(lastFailed.updatedAt) > t(lastDone.updatedAt)) && now - t(lastFailed.updatedAt) < 7 * 24 * H) {
     const c = classify(lastFailed.error);
+    // a spent provider balance / key cap is not the Doctor's: the loop waits on funds (fundsRetries resumes it)
+    if (c.kind === 'human' && FUNDS_RE.test(String(lastFailed.error || ''))) return { ...base, step: 'produce', stage: 'recover', status: 'waiting', waitingOn: 'funds', agent: 'Producer', doing: `last run failed on provider funds: ${String(lastFailed.error || '').slice(0, 90)}`, nextAction: 'raise the OpenRouter key cap', nextCheckpointAt: at(6 * H), verifyHow: 'the funds probe passes and fundsRetries re-runs the failed run' };
     return { ...base, step: 'produce', stage: 'recover', status: c.retry && lastFailed.retries < 2 ? 'active' : 'blocked', agent: c.retry ? 'Producer' : 'Doctor', doing: `last run failed (${c.kind}): ${String(lastFailed.error || '').slice(0, 90)}`, nextAction: c.retry && lastFailed.retries < 2 ? 'retry from the failed step' : c.runbook, nextCheckpointAt: at(c.retry ? 15 * M : 6 * H), verifyHow: 'the retried run reaches completed; the incident does not recur within 72 h' };
   }
 
@@ -132,9 +135,9 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
     const p = perf.find((x) => x.projectId === project.id);
     const doneAt = t(lastDone.updatedAt);
     if (p && p.rows > 0 && t(p.lastUpdatedAt) >= doneAt) return { ...base, step: 'measure', stage: 'learn', status: 'active', agent: 'Strategist', doing: `${p.rows} performance rows: hook rate ${p.impressions ? Math.round((p.views3s / p.impressions) * 100) : 0}%, CTR ${p.impressions ? ((p.clicks / p.impressions) * 100).toFixed(2) : 0}%`, nextAction: 'score elements (hook/end card/voice) and plan the next round', nextCheckpointAt: at(24 * H), verifyHow: 'next round plan has a hypothesis and a success metric; new runs created from it' };
-    if (now - doneAt < AD_DATA_WAIT_H * H) return { ...base, step: 'deliver', stage: 'recover', status: 'waiting', waitingOn: 'ad-data', agent: 'Performance Analyst', doing: `video delivered ${Math.round((now - doneAt) / H)} h ago; ad data matures at 72 h`, nextAction: 'import Meta/TikTok results (AdPerformance) at 72 h', nextCheckpointAt: iso(doneAt + AD_DATA_WAIT_H * H), verifyHow: 'AdPerformance rows exist for the run ad names; hook rate and CTR computed' };
-    // local/batch jobs have no ad-results import: delivered is the end of their loop
+    // local/batch jobs have no ad-results import: delivered is the end of their loop (before the 72 h ad-data wait)
     if (/^(local|batch):/.test(project.id)) return { ...base, step: 'deliver', stage: 'learn', status: 'done', waitingOn: null, agent: 'Performance Analyst', doing: `delivered ${done.length} videos; results not tracked for local/batch jobs`, nextAction: 'none until a new job starts', nextCheckpointAt: at(7 * 24 * H), verifyHow: 'a new run appears for this project' };
+    if (now - doneAt < AD_DATA_WAIT_H * H) return { ...base, step: 'deliver', stage: 'recover', status: 'waiting', waitingOn: 'ad-data', agent: 'Performance Analyst', doing: `video delivered ${Math.round((now - doneAt) / H)} h ago; ad data matures at 72 h`, nextAction: 'import Meta/TikTok results (AdPerformance) at 72 h', nextCheckpointAt: iso(doneAt + AD_DATA_WAIT_H * H), verifyHow: 'AdPerformance rows exist for the run ad names; hook rate and CTR computed' };
     return { ...base, step: 'deliver', stage: 'recover', status: 'waiting', waitingOn: 'client', agent: 'Performance Analyst', doing: 'no performance data after 72 h', nextAction: 'ask the client for the ad results (CSV import) or confirm the ads are live', nextCheckpointAt: at(48 * H), verifyHow: 'AdPerformance rows appear; otherwise remind again' };
   }
 
@@ -150,7 +153,7 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
 
 /** runs that failed only because the provider balance/key cap was spent: retried once funds are back */
 export function fundsRetries(runs, now = Date.now()) {
-  return runs.filter((r) => !r.local && r.status === 'failed' && r.retries < 2 && now - t(r.updatedAt) < 72 * H && /\b402\b|balance|credit/i.test(String(r.error || '')));
+  return runs.filter((r) => !r.local && r.status === 'failed' && r.retries < 2 && now - t(r.updatedAt) < 72 * H && FUNDS_RE.test(String(r.error || '')));
 }
 
 /** server projects whose storyboard is ready but nothing was ever produced: the brain starts one variant (≤ 1 per tick) */

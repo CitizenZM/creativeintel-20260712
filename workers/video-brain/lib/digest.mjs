@@ -20,6 +20,9 @@ export function buildDigest(snap, events24h = []) {
   const failedProbes = (snap.probes || []).filter((p) => !p.ok);
   const human = (snap.incidents || []).filter((i) => i.kind === 'human' && i.status !== 'resolved');
   const badChecks = (snap.checks || []).filter((c) => !c.pass && c.renderedAt && Date.now() - Date.parse(c.renderedAt) < 7 * 86_400_000);
+  const nameOf = (id) => loops.find((l) => l.projectId === id)?.name || id;
+  // server projects link to their deliver page; local/batch jobs have no web page
+  const linkOf = (id) => (id && !/^(local|batch):/.test(id) ? ` → https://creative.xark.io/projects/${id}/deliver` : '');
   const did = events24h.filter((e) => ['decide', 'call', 'fix'].includes(e.kind));
   const lines = [`【Video Brain 日报】${new Date(snap.at).toISOString().slice(0, 16).replace('T', ' ')} UTC · ${loops.length} 个项目 · 今日花费 $${snap.spend?.todayUsd ?? 0}/$${snap.spend?.capUsd ?? 0}`];
   const asks = needBarron.length + (funds.length ? 1 : 0);
@@ -31,7 +34,16 @@ export function buildDigest(snap, events24h = []) {
   if (human.length) { lines.push('', '需要你处理的故障:'); for (const i of human.slice(0, 4)) lines.push(`- ${i.runbook}（${i.count} 次）`); }
   if (failedProbes.length) { lines.push('', '能力体检失败:'); for (const p of failedProbes) lines.push(`- ${p.name}: ${p.detail}`); }
   if (stalled.length) { lines.push('', `大脑在推进的停滞项目（${stalled.length}）:`); for (const l of stalled.slice(0, 6)) lines.push(`- ${l.name} @${l.step}: ${l.nextAction}`); }
-  if (badChecks.length) lines.push('', `近 7 天成片二次复查未通过 ${badChecks.length} 条`);
+  if (badChecks.length) {
+    lines.push('', `近 7 天成片二次复查未通过 ${badChecks.length} 条`);
+    for (const c of badChecks.slice(0, 3)) lines.push(`- ${nameOf(c.projectId)}: ${(c.fields || []).filter((f) => !f.pass).map((f) => f.field).join(', ') || '?'}${linkOf(c.projectId)}`);
+  }
+  const nowMs = Date.parse(snap.at) || Date.now();
+  const deliverable = (snap.checks || []).filter((c) => c.pass && c.at && nowMs - Date.parse(c.at) < 86_400_000);
+  if (deliverable.length) {
+    lines.push('', `可交付（复查通过，24 h 内）${deliverable.length} 条`);
+    for (const c of deliverable.filter((x) => linkOf(x.projectId)).slice(0, 3)) lines.push(`- ${nameOf(c.projectId)}${linkOf(c.projectId)}`);
+  }
   if (snap.budget?.out) lines.push('', `模型预算用尽：新任务自动做成 $0 幻灯片视频（${snap.budget.detail || ''}）`);
   if (!snap.budget?.out && snap.upgradable?.length) lines.push('', `可升级为纯视频（需你在 Studio 批准）: ${snap.upgradable.length} 条预算期间的幻灯片视频`);
   if (snap.rulesPr?.url) lines.push('', `待你审的规则 PR（合并=生效，关闭=否决）: ${snap.rulesPr.url}`);

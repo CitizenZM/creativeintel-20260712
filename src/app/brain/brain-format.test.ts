@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BrainLoop, PatternHit } from "@/services/brain/contract";
-import { ageLabel, groupPatterns, pct, relTime, sortEvents, sortLoops, staleMessage, usd } from "./brain-format";
+import { ageLabel, groupPatterns, pct, projectHref, relTime, sortEvents, sortLoops, staleMessage, usd } from "./brain-format";
 import { brainFixture } from "./fixture";
 
 const NOW = Date.parse("2026-11-18T12:00:00Z");
@@ -77,5 +77,13 @@ describe("sortEvents", () => {
     const events = brainFixture(NOW).snapshot!.events;
     const sorted = sortEvents(events);
     for (let i = 1; i < sorted.length; i++) expect(Date.parse(sorted[i - 1].at)).toBeGreaterThanOrEqual(Date.parse(sorted[i].at));
+  });
+});
+
+describe("projectHref", () => {
+  it("links server projects and returns null for local/batch ids", () => {
+    expect(projectHref("cmabc123")).toBe("/projects/cmabc123");
+    expect(projectHref("local:p1")).toBeNull();
+    expect(projectHref("batch:b1")).toBeNull();
   });
 });
