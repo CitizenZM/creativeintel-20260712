@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { brainDirs } from './helpers/brain-dirs.mjs';
 
 test('tick wiring: a probed finished video gets the second-family critic, capped per day', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'vb-critic-'));
@@ -21,7 +22,7 @@ test('tick wiring: a probed finished video gets the second-family critic, capped
   const critic = async (v, d) => { seen.push(d); return { model: 'google/x', scores: { first_frame: 8, product_clear: 8, consistency: 8, no_garbled_text: 9, sells: 7, issues: [] }, avg: 8, pass: true }; };
   let pub;
   const call = async (a, b = {}) => a === 'observe' ? { status: 200, policy: { autoApprove: false, maxRunUsd: 3, maxDayUsd: 20, maxRunAgeH: 24 }, learnings: [], spend: { autoApprovedTodayUsd: 0, byProject7d: {} }, perf: [], heartbeats: [], projects: [], stages: [], runs: [] } : a === 'publish' ? ((pub = b.snapshot), { status: 200, ok: true, verified: true }) : { status: 200 };
-  await tick({ call, now, home, local: async () => ({ projects: [{ id: 'local:p', name: 'P', updatedAt: t }], stages: [], runs }), critic });
+  await tick({ call, now, home, ...brainDirs(home), local: async () => ({ projects: [{ id: 'local:p', name: 'P', updatedAt: t }], stages: [], runs }), critic });
   assert.equal(seen.length, 1, 'day cap 10: one call left');
   assert.ok(Math.abs(seen[0] - 6) < 0.2);
   const withC = pub.checks.filter((c) => c.fields.some((f) => /^critic/.test(f.field)));

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { lstat, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { brainDirs } from './helpers/brain-dirs.mjs';
 import { plan, hashOf, rulesFile, proposeRules } from '../lib/rules-pr.mjs';
 
 const L = [{ id: 'L1', status: 'confirmed', scope: 'global', rule: 'a' }];
@@ -104,7 +105,7 @@ test('tick wiring: a rules PR failure is stored with its hash and reported once,
   const seen = [];
   const rulesPr = async (l, s) => { seen.push(s); throw Object.assign(new Error('node --test failed: not ok 1'), { hash: 'abcd1234', step: 'node --test' }); };
   const empty = async () => ({ projects: [], stages: [], runs: [] });
-  for (const t of [now, now + 2 * 3_600_000]) await tick({ call, now: t, home, strategist: null, harvestDirs: null, local: empty, rulesPr });
+  for (const t of [now, now + 2 * 3_600_000]) await tick({ call, now: t, home, ...brainDirs(home), strategist: null, harvestDirs: null, local: empty, rulesPr });
   const st = JSON.parse(await readFile(path.join(home, 'state.json'), 'utf8'));
   assert.equal(st.rulesPr.failedHash, 'abcd1234'); assert.match(st.rulesPr.error, /not ok 1/); assert.ok(Date.parse(st.rulesPr.failedAt) > 0);
   assert.equal(seen[1].failedHash, 'abcd1234', 'the stored failure reaches the next attempt (plan skips it for 24 h)');

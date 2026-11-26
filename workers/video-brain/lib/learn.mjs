@@ -2,6 +2,7 @@
 // into the Ad Studio pipeline. candidate -> confirmed (seen twice / data) -> promoted (lives in code) -> retired.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { renderDirectives, rulesByWorkstream } from './knowledge.mjs';
 
@@ -71,12 +72,32 @@ export async function writeBlock(file, block) {
 
 export const POINTER = '> Before acting, read `LEARNINGS.md` in this skill folder (Video Brain shared learnings, synced from creative.xark.io /brain).';
 
-/** sync to skills (LEARNINGS.md + a one-line pointer in SKILL.md), agents and the Ad Studio pipeline file */
+/** tests must never reach the live skills or Ad Studio clone (2026-11-26: a test fixture leaked into ~/.claude/skills and 38 auto-sync commits flip-flopped) */
+export function assertNotLive({ skillsDir, adStudioRoot }) {
+  if (process.env.NODE_ENV !== 'test' && !process.env.NODE_TEST_CONTEXT) return;
+  const live = [path.join(homedir(), '.claude', 'skills'), path.join(homedir(), 'Projects', 'ad-studio-20261104')];
+  for (const p of [skillsDir, adStudioRoot].filter(Boolean).map((x) => path.resolve(x)))
+    if (live.some((l) => p === l || p.startsWith(l + path.sep))) throw new Error(`video-brain: refusing to sync learnings into live ${p} from a test; pass tick({ skillsDir, adStudioRoot }) temp dirs`);
+}
+
+async function writeIfChanged(file, text) {
+  let old = null; try { old = await readFile(file, 'utf8'); } catch { /* new */ }
+  if (old === text) return false;
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, text);
+  return true;
+}
+
+/** sync to skills (LEARNINGS.md + a one-line pointer in SKILL.md), agents and the Ad Studio pipeline file.
+ *  Writes only files whose content differs, so re-running with the same `at` repairs drift and is otherwise a no-op.
+ *  Returns { synced: targets, changed: files rewritten }. */
 export async function syncAll(learnings, { skillsDir, skills, adStudioRoot, at, directives = null }) {
+  assertNotLive({ skillsDir, adStudioRoot });
   const block = renderBlock(learnings, at, directives ? renderDirectives(directives.config, directives.harvested) : '');
-  const synced = [];
+  const synced = [], changed = [];
+  const put = async (file, ok) => { if (await ok) changed.push(file); };
   // one shared file every video skill/agent can read (P2 single source until the Neon tables land)
-  await writeBlock(path.join(skillsDir, '_shared', 'VIDEO-KNOWLEDGE.md'), block);
+  await put(path.join(skillsDir, '_shared', 'VIDEO-KNOWLEDGE.md'), writeBlock(path.join(skillsDir, '_shared', 'VIDEO-KNOWLEDGE.md'), block));
   synced.push('skills:_shared/VIDEO-KNOWLEDGE.md');
   for (const s of skills) {
     const dir = path.join(skillsDir, s);
@@ -84,17 +105,18 @@ export async function syncAll(learnings, { skillsDir, skills, adStudioRoot, at, 
     if (!skill.includes(POINTER)) {
       const m = skill.match(/^---\n[\s\S]*?\n---\n/);
       await writeFile(path.join(dir, 'SKILL.md'), m ? skill.slice(0, m[0].length) + '\n' + POINTER + '\n' + skill.slice(m[0].length) : POINTER + '\n\n' + skill);
+      changed.push(path.join(dir, 'SKILL.md'));
     }
-    await writeBlock(path.join(dir, 'LEARNINGS.md'), block);
+    await put(path.join(dir, 'LEARNINGS.md'), writeBlock(path.join(dir, 'LEARNINGS.md'), block));
     synced.push(`skill:${s}`);
   }
   if (adStudioRoot) {
     const rules = learnings.filter((l) => l.status === 'confirmed').map((l) => ({ id: l.id, scope: l.scope, rule: l.rule }));
-    await mkdir(path.join(adStudioRoot, 'data'), { recursive: true });
     const workstreams = directives ? rulesByWorkstream(directives.config, directives.harvested) : {};
-    await writeFile(path.join(adStudioRoot, 'data', 'brain-learnings.json'), JSON.stringify({ at, rules, workstreams }, null, 2) + '\n');
-    await writeBlock(path.join(adStudioRoot, 'docs', 'LEARNINGS.md'), block);
+    const json = path.join(adStudioRoot, 'data', 'brain-learnings.json');
+    await put(json, writeIfChanged(json, JSON.stringify({ at, rules, workstreams }, null, 2) + '\n'));
+    await put(path.join(adStudioRoot, 'docs', 'LEARNINGS.md'), writeBlock(path.join(adStudioRoot, 'docs', 'LEARNINGS.md'), block));
     synced.push('ad-studio:data/brain-learnings.json', 'ad-studio:docs/LEARNINGS.md');
   }
-  return synced;
+  return { synced, changed };
 }
