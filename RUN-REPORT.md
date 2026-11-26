@@ -78,3 +78,8 @@ product (`auto:<k>`), learning-loop weights, run id in ad names, worker updates.
 - 19 candidates from 3 lenses → 2 critics (2 rounds) → 6 jobs. Merged after independent verification: creativeintel #197 (worker signal), #198 (loops/strategist/digest/board; 2nd pass), #199 (incidents; wiring gap accepted, closed by #200), #200 (atomic state, read-only dry-run, tick lock, logs, batch freshness, critic refund, loudness retry; passed on 3rd verification); ad-studio #8, #9, #10.
 - Dropped this round: BL12 blank-frame gate (false-fail risk), P5 pipeline double-run (deferred; paid video off).
 - Verify: brain 136/136 on main eb35621; worker 18/18; AS pipeline 161/161; Vercel prod success for #198.
+
+## 2026-11-26 overnight swarm round 4 (Video Brain)
+- 19 candidates (3 lenses) → 2 critics → 6 jobs. Merged after independent verification: creativeintel #201 (tests never write live learnings; brain repairs drifted blocks — live files repaired 06:14), #202 (worker adopts live pipeline after restart; server reportProgress cancelled-first + sameWorker; passed 3rd verification; worker restarted), #203 (first-frame check, batch round blocking, advisory review, signatures; 2nd pass), #204 (Ad Studio videos in export zip with escaping/https-only; board project names; 2nd pass), #205 (digest truth: all checks, one OpenRouter line, idle collapse, action count; retired 1.75× seed; pruning; rules-PR root); ad-studio #11 (auto-fix on retried runs, fallback-priced regen, people_count).
+- Dropped: T8 info-only flat runs. Queued for round 5: scratchpad r5-queue.md.
+- Verify: brain 167/167 on main c9a5884; worker 29/29; AS 167/167; Vercel prod success for #202/#204.

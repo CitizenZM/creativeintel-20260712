@@ -115,3 +115,8 @@
 - 完成: Directives wired to Ad Studio script prompt: ad-studio PR #2 (directivesBlock per workstream/brand), creativeintel PR #188 (rules PR carries global+workstreams)
 - 验证: ad-studio test_brain_rules 9/9; video-brain 40/40; sabotage fails wiring test
 - 下一步: Barron merges ad-studio#2 then creativeintel#188; then merge the Brain's brain/rules-* PR
+
+### 2026-11-26 07:37 · claude-opus-5-5
+- 完成: Overnight Video Brain swarm rounds 2-4: merged creativeintel #194-#205 and ad-studio #5-#11 after independent verification (brain 167/167, worker 29/29, AS 167/167); live learnings repaired; worker restarted on adopt code
+- 验证: node --test workers/video-brain/test/*.test.mjs (temp HOME) 167/167; adstudio-worker 29/29; ad-studio pipeline 167/167; Vercel prod success
+- 下一步: Round 5 queue in scratchpad r5-queue.md; Barron: OpenRouter key cap, rules PR ad-studio#4, reminders doc
