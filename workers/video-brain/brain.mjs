@@ -28,7 +28,7 @@ import { readBatches } from './lib/batch.mjs';
 import { loadWorkstreams } from './lib/jobs.mjs';
 import { harvestDirectives, loadDirectives } from './lib/knowledge.mjs';
 import { proposeRules } from './lib/rules-pr.mjs';
-import { buildDigest, digestDue, sendDigest } from './lib/digest.mjs';
+import { buildDigest, digestDue, sendDigest, verifyDigest } from './lib/digest.mjs';
 import { critique, withCritic, MAX_PER_DAY as CRITIC_PER_DAY } from './lib/critic.mjs';
 import { envKey } from './lib/probes.mjs';
 
@@ -41,6 +41,7 @@ const SKILLS_DIR = process.env.VIDEO_BRAIN_SKILLS_DIR || path.join(homedir(), '.
 export const SKILLS = ['ad-studio', 'video-shotcraft', 'hypit', 'video-use', 'video-ads-playbook', 'proposal-content-video'];
 const PATTERN_ROOTS = [path.join(ROOT, 'pipeline'), path.join(ROOT, 'renderer', 'src'), path.join(homedir(), 'Projects', 'acw-bf-videos-20261116'), path.join(homedir(), 'Projects', 'motion-video-editing-repos-20261101'), path.join(homedir(), 'Projects', 'video short craft'), ...SKILLS.map((s) => path.join(SKILLS_DIR, s))];
 const PROBE_EVERY_MS = 30 * 60_000, PATTERN_EVERY_MS = 6 * 3_600_000, CHECKS_PER_TICK = 3;
+export const DIGEST_VERIFY_TRIES = 3, STALLED_REMIND_MS = 24 * 3_600_000;
 export const CHECK_BUDGET_MS = Number(process.env.VIDEO_BRAIN_CHECK_BUDGET_MS || 120_000);
 const log = (m) => console.error(`[video-brain ${new Date().toISOString().slice(11, 19)}] ${m}`);
 
@@ -69,11 +70,14 @@ export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'h
   return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
 }
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(ROOT, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }) } = {}) {
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(ROOT, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }) } = {}) {
   await mkdir(home, { recursive: true });
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
   const events = [];
+  // per-phase wall time (integer ms) for the __VIDEO_BRAIN__ line
+  const phaseMs = {}; let mark = Date.now();
+  const lap = (k) => { const t = Date.now(); phaseMs[k] = (phaseMs[k] || 0) + (t - mark); mark = t; };
   const obs = await call('observe');
   if (obs.status !== 200 || !Array.isArray(obs.projects)) throw new Error(`observe: HTTP ${obs.status} ${obs.error || ''}`);
   // local Ad Studio jobs join the observation (Xark-managed xk-* jobs are grouped as the lab project)
@@ -82,6 +86,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   const today = new Date(now).toISOString().slice(0, 10);
   state.localApproved = state.localApproved?.day === today ? state.localApproved : { day: today, usd: 0 };
   obs.spend.autoApprovedTodayUsd = (obs.spend.autoApprovedTodayUsd || 0) + state.localApproved.usd;
+  lap('observe');
 
   // ACT 1 — gate: approve within the autonomy caps (server re-checks); never wait silently on our own gate
   let approvedNow = 0;
@@ -109,6 +114,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     events.push(ev('Producer', 'call', out.ok ? `retried failed run ${r.id.slice(-6)} → ${out.status}` : `retry refused ${r.id.slice(-6)}: ${out.error}`, r.projectId, r.id));
   }
 
+  lap('act');
   // VERIFY — second check of finished videos (a few per tick, newest first)
   const toCheck = obs.runs.filter((r) => r.status === 'completed' && (r.finalMp4Url || r.finalPath) && !state.checks[r.id]).slice(0, CHECKS_PER_TICK);
   const tickStart = Date.now();
@@ -130,6 +136,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     } catch (e) { log(`check ${r.id}: ${e.message}`); }
   }
 
+  lap('checks');
   // INCIDENTS
   const before = Object.keys(state.incidents).length;
   state.incidents = aggregate(state.incidents, obs.runs.filter((r) => r.status === 'failed'), now);
@@ -163,6 +170,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     events.push(ev('Doctor', 'fix', `fix-pattern scan: ${state.patterns.length} open hit(s) across ${PATTERN_ROOTS.length} roots`));
   }
 
+  lap('probes');
   // LEARN — seed + harvest, merged with the server store; sync projections when anything changed
   const fresh = harvest({ incidents: state.incidents, checks: state.checks });
   const byId = new Map([...SEED, ...(obs.learnings || []), ...fresh].map((l) => [l.id, l]));
@@ -205,8 +213,9 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     }
   }
 
+  lap('learn');
   // THINK (rules first; the strategist model only for stalled or measuring projects, once a day each)
-  const t = think(obs, state.checks, now);
+  const t = think(obs, state.checks, now, { budgetOut });
   state.strategy = state.strategy || {};
   if (strategist && !dryRun) {
     for (const l of pick(t.loops, state.strategy, now)) {
@@ -234,7 +243,15 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
     if (state.loopStatus[l.projectId] !== k) { events.push(ev(l.agent, 'think', `${l.name}: ${l.doing} → next: ${l.nextAction}`, l.projectId)); state.loopStatus[l.projectId] = k; }
   }
   const idle = t.loops.filter((l) => l.status === 'idle-defect');
-  if (idle.length) events.push(ev('Brain', 'think', `${idle.length} project(s) stalled without a legal wait: ${idle.slice(0, 4).map((l) => `${l.name} @${l.step}`).join(', ')}`));
+  // one event when the stalled set changes, plus one reminder per 24 h (not every tick)
+  const stalledKey = idle.map((l) => l.projectId).sort().join(',');
+  const prevStalled = state.stalled || {};
+  if (!idle.length) state.stalled = { key: '', at: null };
+  else if (prevStalled.key !== stalledKey || !prevStalled.at || now - Date.parse(prevStalled.at) >= STALLED_REMIND_MS) {
+    events.push(ev('Brain', 'think', `${idle.length} project(s) stalled without a legal wait: ${idle.slice(0, 4).map((l) => `${l.name} @${l.step}`).join(', ')}`));
+    state.stalled = { key: stalledKey, at: new Date(now).toISOString() };
+  }
+  lap('think');
 
   const lastWorker = (obs.heartbeats || []).filter((h) => /adstudio/i.test(h.workerId)).map((h) => h.lastSeenAt).sort().pop() || null;
   const snapshot = {
@@ -251,19 +268,37 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   // prune local state
   for (const k of Object.keys(state.acted)) if (/^retry:/.test(k) && !k.endsWith(new Date(now).toISOString().slice(0, 10))) delete state.acted[k];
   await writeFile(stateFile, JSON.stringify(state));
-  if (dryRun) return { ok: true, dryRun: true, snapshot, approvedNow };
+  if (dryRun) { lap('publish'); return { ok: true, dryRun: true, snapshot, approvedNow, phaseMs }; }
   // actions of the last 24 h for the daily digest
   state.actions = [...(state.actions || []), ...events.filter((e) => ['decide', 'call', 'fix'].includes(e.kind)).map((e) => ({ at: e.at, kind: e.kind }))].filter((a) => now - Date.parse(a.at) < 86_400_000);
+  // a digest DM that went out (has a messageId) is never re-sent: later ticks only re-read it, at most DIGEST_VERIFY_TRIES times
+  const pend = state.digestPending;
+  if (pend) {
+    pend.tries = (pend.tries || 0) + 1;
+    const v = verifyNotify ? await verifyNotify(pend.messageId, pend.text).catch((e) => ({ ok: false, reasons: [e.message] })) : { ok: false, reasons: ['no read-back available'] };
+    if (v.ok) { events.push(ev('Brain', 'check', `daily digest read back: verified (${pend.day})`)); delete state.digestPending; }
+    else if (!verifyNotify || pend.tries >= DIGEST_VERIFY_TRIES) { events.push(ev('Brain', 'check', `daily digest sent, unverified (${pend.day}) after ${pend.tries} read-back(s): ${(v.reasons || []).join('; ') || 'not found'} (not re-sent)`)); delete state.digestPending; }
+    await writeFile(stateFile, JSON.stringify(state));
+  }
   const day = notify && digestDue(state.digestDay, now);
   if (day) {
     const text = buildDigest(snapshot, state.actions);
     const d = await notify(text).catch((e) => ({ ok: false, reason: e.message }));
-    events.push(ev('Brain', 'call', d.ok ? `daily digest sent to Barron (Feishu DM, read back: verified)` : `daily digest NOT delivered: ${d.reason || (d.reasons || []).join('; ')}`));
-    if (d.ok) state.digestDay = day;
+    // persist first: once a messageId exists the day is done, whatever happens later in this tick
+    if (d.ok || d.messageId) state.digestDay = day;
+    if (!d.ok && d.messageId) state.digestPending = { day, messageId: d.messageId, text, tries: 0 };
     await writeFile(stateFile, JSON.stringify(state));
+    events.push(ev('Brain', 'call', d.ok ? `daily digest sent to Barron (Feishu DM, read back: verified)` : d.messageId ? `daily digest sent to Barron (Feishu DM); read-back not verified yet: ${(d.reasons || []).join('; ') || 'no detail'} — re-checking, no re-send` : `daily digest NOT delivered: ${d.reason || (d.reasons || []).join('; ')}`));
   }
   const pub = await call('publish', { snapshot });
-  return { ok: !!pub.ok, verified: !!pub.verified, bytes: pub.bytes, error: pub.error, snapshot, approvedNow };
+  lap('publish');
+  return { ok: !!pub.ok, verified: !!pub.verified, bytes: pub.bytes, error: pub.error, snapshot, approvedNow, phaseMs };
+}
+
+/** the one-line tick summary launchd logs (keys are stable; phaseMs added 2026-11-26) */
+export function statusLine(r, started) {
+  const s = r.snapshot;
+  return `__VIDEO_BRAIN__${JSON.stringify({ ok: r.ok, verified: r.verified ?? null, dryRun: !!r.dryRun, ms: Date.now() - started, loops: s.loops.length, stages: s.stageCounts, queue: s.queue.length, executing: s.executing.length, recovery: s.recovery.length, checks: s.checks.length, incidents: s.incidents.length, probesFailing: s.probes.filter((p) => !p.ok).map((p) => p.name), patterns: s.patterns.length, learnings: s.learnings.length, events: s.events.length, approvedNow: r.approvedNow, bytes: r.bytes ?? null, error: r.error ?? null, phaseMs: r.phaseMs ?? null })}`;
 }
 
 async function main() {
@@ -279,8 +314,7 @@ async function main() {
     const started = Date.now();
     try {
       const r = await tick({ call, dryRun: flag('dry-run') });
-      const s = r.snapshot;
-      console.log(`__VIDEO_BRAIN__${JSON.stringify({ ok: r.ok, verified: r.verified ?? null, dryRun: !!r.dryRun, ms: Date.now() - started, loops: s.loops.length, stages: s.stageCounts, queue: s.queue.length, executing: s.executing.length, recovery: s.recovery.length, checks: s.checks.length, incidents: s.incidents.length, probesFailing: s.probes.filter((p) => !p.ok).map((p) => p.name), patterns: s.patterns.length, learnings: s.learnings.length, events: s.events.length, approvedNow: r.approvedNow, bytes: r.bytes ?? null, error: r.error ?? null })}`);
+      console.log(statusLine(r, started));
       return r.ok ? 0 : 1;
     } catch (e) { log(e.stack || e.message); console.log(`__VIDEO_BRAIN__${JSON.stringify({ ok: false, error: e.message })}`); return 2; }
   };
