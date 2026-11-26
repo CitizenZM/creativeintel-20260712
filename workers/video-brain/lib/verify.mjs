@@ -26,8 +26,9 @@ export function compare(run, facts) {
     add('video codec', 'h264', p.vcodec, p.vcodec === 'h264', 'ffprobe');
     add('audio track', 'present', p.acodec || 'none', !!p.acodec, 'ffprobe');
   } else add('probe', 'readable mp4', facts.probeError || 'not probed', false, 'ffprobe');
-  // frame 0 uniform (black/white/flat flash): narrow luma spread and no bright detail. Calibrated 0/256 false positives on
-  // finished videos; a title card with text passes (its text is far above p90). Probe error -> no field (never fails on it)
+  // frame 0 uniform (black fade-in, white flash, flat colour): narrow luma spread and no bright detail. Uniform openings are
+  // flagged on purpose (house rule: no fade from black/white flash on frame 0). Real scan: 21/203 fail, all truly uniform
+  // (20 bdsmpub fade-ins + 1 white flash 20261105-cze0o); a title card with text passes. Probe error -> no field (never fails on it)
   if (facts.firstFrame) {
     const { p10, p90, max } = facts.firstFrame;
     add('first frame', 'not a blank/uniform frame', `luma p10 ${p10} p90 ${p90} max ${max}`, !(p90 - p10 < 4 && max - p90 < 40), 'ffmpeg frame 0');

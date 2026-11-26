@@ -121,3 +121,20 @@ test('T17: the live 401 and 402 signatures are unchanged; a bare provider body s
   assert.equal(signatureOf('OpenRouter 402: {"error":{"message":"This request requires at least $1.00 in balance for image or video output","code":402,"metadata":{"limit_source":"openrouter_key_limit"}}}'), 'openrouter #: 402 this request requires at least $# in balance for image or video output');
   assert.equal(signatureOf('{"error":{"message":"Internal error. Try again","code":500}}'), '500 internal error');
 });
+
+// ---------- T9 follow-up: the critic and harvest also ignore advisory fields ----------
+import { withCritic } from '../lib/critic.mjs';
+import { harvest } from '../lib/learn.mjs';
+
+test('T9: a passing critic keeps pass true when only the advisory pipeline review is low', () => {
+  const c0 = compare({ id: 'r', projectId: 'p', review: { scores: { hook: 2, sell: 3 } } }, good);
+  const c = withCritic(c0, { model: 'google/x', avg: 8, pass: true, scores: { first_frame: 8, product_clear: 8, consistency: 8, no_garbled_text: 8, sells: 8, issues: [] } });
+  assert.equal(c.fields.find((f) => f.field === 'pipeline review').pass, false);
+  assert.equal(c.pass, true);
+});
+
+test('T9: 3 checks failing only the advisory pipeline review produce no learning', () => {
+  const at = '2026-11-25T10:00:00.000Z';
+  const checks = Object.fromEntries(['a', 'b', 'c'].map((id) => [id, { runId: id, renderedAt: at, pass: true, fields: [{ field: 'duration', pass: true }, { field: 'pipeline review', actual: 'hook 2', expected: 'hook & sell ≥ 5', pass: false, advisory: true }] }]));
+  assert.deepEqual(harvest({ incidents: {}, checks, now: '2026-11-25T12:00:00.000Z' }), []);
+});
