@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { buildZip, type ZipEntry } from "@/lib/zip";
 import { withAccess } from "@/lib/auth/route-guard";
+import { adStudioAdName } from "@/services/video-gen/adstudio-results";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +9,18 @@ function esc(s: unknown): string {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Ad Studio MP4 links: https only (an http:// or malformed URL is shown as text, never linked) */
+function isHttps(u: string | null | undefined): boolean {
+  try {
+    return !!u && new URL(u).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function asArray(v: unknown): string[] {
@@ -40,7 +52,7 @@ async function unguardedGET(
     });
   }
 
-  const [scripts, storyboards, libtvRuns] = await Promise.all([
+  const [scripts, storyboards, libtvRuns, adStudioRuns] = await Promise.all([
     prisma.script.findMany({
       where: { projectId, deletedAt: null },
       orderBy: { predictedScore: "desc" },
@@ -54,6 +66,13 @@ async function unguardedGET(
       // The run marked final for each script leads the package.
       orderBy: [{ isFinal: "desc" }, { completedAt: "desc" }],
       include: { jobs: { orderBy: [{ shotIndex: "asc" }, { nodeName: "asc" }] } },
+    }),
+    // Finished Ad Studio videos: the same query as the deliver page (deliver/page.tsx)
+    prisma.adStudioRun.findMany({
+      where: { projectId, status: "completed", finalMp4Url: { not: null } },
+      orderBy: { updatedAt: "desc" },
+      take: 30,
+      select: { id: true, hookType: true, engine: true, finalMp4Url: true, plan: true, input: true, updatedAt: true },
     }),
   ]);
 
@@ -158,6 +177,31 @@ async function unguardedGET(
     })
     .join("\n");
 
+  // ── Ad Studio videos: MP4 link + the ad name to upload it under (links only) ──
+  const adStudioExport = adStudioRuns.map((run) => {
+    const input = (run.input ?? {}) as { storyboard?: { title?: string } };
+    const plan = (run.plan ?? {}) as { durationS?: number };
+    return {
+      id: run.id,
+      adName: adStudioAdName({ brand: project.brandName, title: input.storyboard?.title, durationSec: plan.durationS, hookType: run.hookType, engine: run.engine, runId: run.id }),
+      hookType: run.hookType,
+      engine: run.engine,
+      finalMp4Url: run.finalMp4Url,
+      completedAt: run.updatedAt,
+    };
+  });
+
+  const adStudioHtml = adStudioExport
+    .map(
+      (run) => `
+      <section class="storyboard">
+        <h3>${esc(run.adName)}</h3>
+        <p class="meta">${esc(run.hookType)} · ${esc(run.engine)} · ${esc(new Date(run.completedAt).toISOString().slice(0, 10))}</p>
+        <p>${isHttps(run.finalMp4Url) ? `<a href="${esc(run.finalMp4Url)}">MP4</a>` : `<span class="sub">${esc(run.finalMp4Url)}</span>`}</p>
+      </section>`
+    )
+    .join("\n");
+
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -202,6 +246,10 @@ async function unguardedGET(
 
   <h2>Rendered ads (${libtvExport.length})</h2>
   ${libtvHtml || "<p class='sub'>No completed LibTV runs.</p>"}
+
+  <h2>Ad Studio videos (${adStudioExport.length})</h2>
+  <p class="sub">Upload each video under the ad name shown so imported ad results are matched to it.</p>
+  ${adStudioHtml || "<p class='sub'>No finished Ad Studio videos.</p>"}
 </body>
 </html>`;
 
@@ -220,6 +268,10 @@ async function unguardedGET(
       data: JSON.stringify(libtvExport, null, 2),
     },
     {
+      name: "adstudio-runs.json",
+      data: JSON.stringify(adStudioExport, null, 2),
+    },
+    {
       name: "README.txt",
       data:
         `${brandName} — Campaign Package\n` +
@@ -230,7 +282,8 @@ async function unguardedGET(
         `  scripts.json      ${scripts.length} script(s), structured.\n` +
         `  storyboards.json  ${storyboards.length} storyboard(s) with frame image URLs.\n` +
         `  libtv-runs.json   ${libtvExport.length} completed run(s): master + 720p preview +\n` +
-        `                    contact sheet, and the per-frame keyframe/clip URLs.\n\n` +
+        `                    contact sheet, and the per-frame keyframe/clip URLs.\n` +
+        `  adstudio-runs.json ${adStudioExport.length} finished Ad Studio video(s): MP4 URL + ad name.\n\n` +
         `Storyboard images and generated videos are hosted remotely and referenced\n` +
         `by URL inside campaign.html. A url beginning "file://" means the worker ran\n` +
         `without CLOUDINARY_URL or BLOB_READ_WRITE_TOKEN and the asset exists only on\n` +

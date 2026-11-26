@@ -157,3 +157,9 @@ export const EVENT_TONE: Record<BrainEvent["kind"], Tone> = {
 export function projectHref(projectId: string): string | null {
   return /^(local|batch):/.test(projectId) ? null : `/projects/${projectId}`;
 }
+
+/** a check row's project: its loop name (else the id) and a project link only for server cuids (same rule as the digest) */
+export function checkProject(projectId: string, loops: readonly Pick<BrainLoop, "projectId" | "name">[]): { name: string; href: string | null } {
+  const name = loops.find((l) => l.projectId === projectId)?.name || projectId || "—";
+  return { name, href: /^c[a-z0-9]{20,30}$/.test(projectId) ? projectHref(projectId) : null };
+}
