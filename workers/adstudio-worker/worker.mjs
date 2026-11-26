@@ -20,6 +20,7 @@
 //                         capped at what Xark reserved (estimate x 1.3), never more
 //   ADSTUDIO_CONCURRENCY  runs handled at once (default 3); a reference-video batch and a storyboard batch run side by side
 //   POLL_INTERVAL_MS      default 20000, doubles while idle up to MAX_IDLE_POLL_MS (default 300000)
+//   ADSTUDIO_API_TIMEOUT_MS  per-call timeout for /api/worker/adstudio (default 30000; the 'done' report gets 120000)
 // Flags: --once (handle at most one claim, then exit)
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -38,16 +39,19 @@ const POLL = Number(process.env.POLL_INTERVAL_MS || 20000);
 const MAX_IDLE = Number(process.env.MAX_IDLE_POLL_MS || 300000);
 const WORKER_ID = `${hostname()}-${process.pid}`;
 const TICK_MS = Number(process.env.ADSTUDIO_TICK_MS || 5000);
+const API_TIMEOUT = Number(process.env.ADSTUDIO_API_TIMEOUT_MS || 30000);
+const BIG_API_TIMEOUT = 120000; // the 'done' report carries the whole review + log and the server does more work
 
 export const jobIdOf = (runId) => `xk-${runId}`;
 const jobDir = (id) => path.join(ROOT, 'data', 'jobs', id);
 const STEPS = ['ingest', 'analyze', 'product', 'script', 'generate', 'voice', 'render', 'review'];
 const readJSON = async (f) => { try { return JSON.parse(await readFile(f, 'utf8')); } catch { return null; } };
 
-export async function api(action, body = {}) {
+/** a hung request is aborted after `timeoutMs` and throws like any other error, so a run never stalls on the network */
+export async function api(action, body = {}, opts = {}) {
   const headers = { 'content-type': 'application/json', 'x-worker-token': WORKER_TOKEN };
   if (BYPASS) headers['x-vercel-protection-bypass'] = BYPASS;
-  const res = await fetch(`${APP_URL}/api/worker/adstudio`, { method: 'POST', headers, body: JSON.stringify({ action, workerId: WORKER_ID, ...body }) });
+  const res = await fetch(`${APP_URL}/api/worker/adstudio`, { method: 'POST', headers, body: JSON.stringify({ action, workerId: WORKER_ID, ...body }), signal: AbortSignal.timeout(opts.timeoutMs ?? API_TIMEOUT) });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`${action}: ${res.status} ${j.error || ''}`);
   return j;
@@ -182,7 +186,7 @@ async function finish(run, id, st) {
   let finalMp4Url, posterUrl;
   try { finalMp4Url = await upload(id, 'final.mp4', 'video/mp4'); posterUrl = finalMp4Url ? await upload(id, 'poster.jpg', 'image/jpeg') : null; } finally { clearInterval(beat); }
   if (!finalMp4Url) return api('failed', { runId: run.runId, claim: run.claim, error: 'final.mp4 missing after render', actualUsd: st.cost });
-  return api('done', { runId: run.runId, claim: run.claim, finalMp4Url, posterUrl, review: st.review, metrics: st.review?.metrics, autofix: st.autofix, plan: planOf(spec), actualUsd: st.cost, log: st.log });
+  return api('done', { runId: run.runId, claim: run.claim, finalMp4Url, posterUrl, review: st.review, metrics: st.review?.metrics, autofix: st.autofix, plan: planOf(spec), actualUsd: st.cost, log: st.log }, { timeoutMs: BIG_API_TIMEOUT });
 }
 
 export async function handle(run) {
@@ -232,15 +236,22 @@ export async function handle(run) {
  *  Renders are capped separately by Ad Studio (2 Remotion renders at a time across jobs), so the extra runs wait there, not here. */
 const CONC = Math.max(1, Number(process.env.ADSTUDIO_CONCURRENCY || 3));
 
-/** claim and handle runs up to `conc` at a time. `claim` returns a run or null; `once` = handle at most one claim; `exitWhenIdle` = stop when nothing is left (tests) */
-export async function runLoop({ claim, handle: run1, conc = CONC, once = false, exitWhenIdle = false, poll = POLL, maxIdle = MAX_IDLE, sleep: nap = sleep, onError = async () => {} }) {
-  const active = new Set(); let wait = poll;
+/** claim and handle runs up to `conc` at a time. `claim` returns a run or null; `once` = handle at most one claim; `exitWhenIdle` = stop when nothing is left (tests).
+ *  Logs each run's outcome and duration, and a second claim of a run that is still running here. */
+export async function runLoop({ claim, handle: run1, conc = CONC, once = false, exitWhenIdle = false, poll = POLL, maxIdle = MAX_IDLE, sleep: nap = sleep, onError = async () => {}, log = console.log }) {
+  const active = new Set(); const activeIds = new Set(); let wait = poll;
   for (;;) {
     if (active.size >= conc) { await Promise.race(active); continue; }
     let run = null;
     try { run = await claim(); } catch (e) { console.warn('[adstudio] claim failed:', e.message); }
     if (run) {
-      const p = (async () => { try { await run1(run); } catch (e) { await onError(run, e); } })().finally(() => active.delete(p));
+      if (activeIds.has(run.runId)) log(`[adstudio] duplicate claim of ${run.runId} (already active here)`);
+      activeIds.add(run.runId); const t0 = Date.now();
+      const took = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
+      const p = (async () => {
+        try { const result = await run1(run); log(`[adstudio] ${run.phase} ${run.runId} -> ${result?.action ?? result?.cancel ?? 'done'} in ${took()}`); }
+        catch (e) { log(`[adstudio] ${run.phase} ${run.runId} -> error: ${e?.message || e} in ${took()}`); await onError(run, e); }
+      })().finally(() => { active.delete(p); activeIds.delete(run.runId); });
       active.add(p); wait = poll;
       if (once) { await p; return; }
       continue;
