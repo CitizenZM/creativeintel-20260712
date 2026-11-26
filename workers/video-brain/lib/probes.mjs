@@ -13,6 +13,16 @@ async function cmd(name, bin, args, re) {
   try { const { stdout, stderr } = await pexec(bin, args, { timeout: 20_000 }); const out = (stdout || stderr).split('\n')[0]; return re && !re.test(stdout + stderr) ? bad(name, out) : ok(name, out.slice(0, 80)); } catch (e) { return bad(name, e.message); }
 }
 
+/** pure: verdict on `launchctl list <label>` output - running iff it has a PID (a past exit like -15/SIGTERM is not a fault) */
+export function launchdVerdict(stdout) {
+  const pid = String(stdout || '').match(/"PID"\s*=\s*(-?\d+);/)?.[1];
+  const last = String(stdout || '').match(/"LastExitStatus"\s*=\s*(-?\d+);/)?.[1] ?? '?';
+  return pid ? { ok: true, detail: `PID ${pid}, last exit ${last}` } : { ok: false, detail: `not running, last exit ${last}` };
+}
+async function launchdProbe(name, label) {
+  try { const { stdout } = await pexec('launchctl', ['list', label], { timeout: 10_000 }); const v = launchdVerdict(stdout); return v.ok ? ok(name, v.detail) : bad(name, v.detail); } catch (e) { return bad(name, `not loaded: ${e.message}`); }
+}
+
 /** models the Ad Studio routes and engines use, parsed from pipeline/generate.mjs */
 export async function routedModels(adStudioRoot) {
   const src = await readFile(path.join(adStudioRoot, 'pipeline', 'generate.mjs'), 'utf8');
@@ -73,7 +83,7 @@ export async function runProbes({ adStudioRoot, obs }) {
     // the interpreter the pipeline itself resolves (pipeline/lib.mjs PYTHON) under this process's PATH = the worker's PATH
     pipelinePython(adStudioRoot).then((py) => cmd('whisper (word timing)', py, ['-c', 'import faster_whisper; print("faster-whisper ok")'], /ok/)),
     pipelinePython(adStudioRoot).then((py) => cmd('edge-tts (voice)', py, ['-c', 'import edge_tts; print("edge-tts ok")'], /ok/)),
-    cmd('adstudio worker (launchd)', 'launchctl', ['list', 'co.celldigital.adstudio-worker'], /"PID"/),
+    launchdProbe('adstudio worker (launchd)', 'co.celldigital.adstudio-worker'),
     cmd('ego lite (reference fetch)', 'zsh', ['-lc', 'command -v ego-browser && echo found'], /found/),
     openrouterVideo(adStudioRoot, key),
     openrouterCredits(key),
