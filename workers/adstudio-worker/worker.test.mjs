@@ -76,6 +76,26 @@ test('--once still handles exactly one claim', async () => {
   assert.deepEqual(done, ['a']);
 });
 
+test('runLoop logs each run outcome with its duration and flags a duplicate claim of a run already active here', async () => {
+  const queue = [{ runId: 'r1', phase: 'plan' }, { runId: 'r1', phase: 'plan' }]; const lines = [];
+  await runLoop({
+    claim: async () => queue.shift() ?? null,
+    handle: async () => { await new Promise((res) => setTimeout(res, 20)); return { action: 'gate' }; },
+    log: (...a) => lines.push(a.join(' ')), exitWhenIdle: true, poll: 5, sleep: (ms) => new Promise((res) => setTimeout(res, ms)),
+  });
+  const out = lines.join('\n');
+  assert.match(out, /\[adstudio\] plan r1 -> gate in \d+(\.\d+)?s/);
+  assert.match(out, /duplicate claim of r1 \(already active here\)/);
+});
+test('runLoop logs a thrown run as an error outcome and still calls onError', async () => {
+  const queue = [{ runId: 'x1', phase: 'generate' }]; const lines = []; const failed = [];
+  await runLoop({
+    claim: async () => queue.shift() ?? null, handle: async () => { throw new Error('boom'); },
+    onError: async (r) => { failed.push(r.runId); }, log: (...a) => lines.push(a.join(' ')), exitWhenIdle: true, poll: 5, sleep: (ms) => new Promise((res) => setTimeout(res, ms)),
+  });
+  assert.match(lines.join('\n'), /generate x1 -> error: boom in/); assert.deepEqual(failed, ['x1']);
+});
+
 test('wiring: every report carries the claim lease, uploads keep the heartbeat, the budget is held to the reservation, APP_URL has no production default', async () => {
   const src = await (await import('node:fs/promises')).readFile(new URL('./worker.mjs', import.meta.url), 'utf8');
   const reports = src.match(/api\('(failed|gate|done|progress)', \{[^}]*/g) || [];
