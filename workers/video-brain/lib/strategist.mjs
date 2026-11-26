@@ -9,6 +9,8 @@ import path from 'node:path';
 
 export const MAX_PER_DAY = 8;
 export const FRESH_MS = 24 * 3_600_000;
+/** an errored call is retried sooner than a good memo is refreshed (still counts against MAX_PER_DAY) */
+export const ERROR_RETRY_MS = 6 * 3_600_000;
 export const SCHEMA = {
   type: 'object', additionalProperties: false, required: ['hypothesis', 'nextAction', 'verifyHow', 'checkpointHours', 'owner'],
   properties: { hypothesis: { type: 'string' }, nextAction: { type: 'string' }, verifyHow: { type: 'string' }, checkpointHours: { type: 'integer' }, owner: { type: 'string' } },
@@ -22,7 +24,7 @@ checkpointHours: 1-72. owner: one of Researcher, Strategist, Director, Producer,
 export function pick(loops, memo, now = Date.now(), max = MAX_PER_DAY) {
   const day = new Date(now).toISOString().slice(0, 10);
   const used = Object.values(memo || {}).filter((m) => m.day === day).length;
-  const due = loops.filter((l) => (l.status === 'idle-defect' || l.step === 'measure') && !(memo?.[l.projectId] && now - Date.parse(memo[l.projectId].at) < FRESH_MS));
+  const due = loops.filter((l) => (l.status === 'idle-defect' || l.step === 'measure') && !(memo?.[l.projectId] && now - Date.parse(memo[l.projectId].at) < (memo[l.projectId].error ? ERROR_RETRY_MS : FRESH_MS)));
   return due.slice(0, Math.max(0, max - used));
 }
 
@@ -38,15 +40,26 @@ export function promptFor(loop, obs, learnings) {
     `Rule-based next action so far: ${loop.nextAction}`].join('\n');
 }
 
-export function runClaude(prompt, { model = 'sonnet', timeoutMs = 240_000 } = {}) {
-  return new Promise(async (resolve, reject) => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'vb-strat-'));
-    const sys = path.join(dir, 'system.txt'); await writeFile(sys, SYSTEM);
-    const env = { ...process.env }; delete env.ANTHROPIC_API_KEY; delete env.ANTHROPIC_AUTH_TOKEN;
-    execFile('claude', ['-p', prompt, '--output-format', 'json', '--model', model, '--effort', 'low', '--json-schema', JSON.stringify(SCHEMA), '--system-prompt-file', sys, '--tools', '', '--strict-mcp-config', '--disable-slash-commands', '--setting-sources', '', '--no-session-persistence', '--max-turns', '3'], { cwd: dir, env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
-      if (err) return reject(err);
-      try { const r = JSON.parse(stdout); if (r.is_error || !r.structured_output) return reject(new Error(`claude -p: ${r.subtype || 'no output'}`)); resolve(r.structured_output); } catch (e) { reject(e); }
+/** the real cause of a failed `claude -p`: its JSON result (stdout) and the stderr tail; the exec error only names the command line */
+export function failureReason(stdout, stderr, err) {
+  let r = null;
+  try { r = JSON.parse(stdout); } catch { /* no JSON */ }
+  const parsed = r && (r.is_error || err) ? [r.subtype, r.result].filter(Boolean).join(': ').slice(0, 200) : '';
+  const tail = String(stderr || '').trim().slice(-300);
+  return `claude -p: ${[parsed, tail].filter(Boolean).join(' | ') || String(err?.message || 'no output').slice(-300)}`;
+}
+
+export async function runClaude(prompt, { model = 'sonnet', timeoutMs = 240_000, exec = execFile } = {}) {
+  const dir = await mkdtemp(path.join(tmpdir(), 'vb-strat-'));
+  const sys = path.join(dir, 'system.txt'); await writeFile(sys, SYSTEM);
+  const env = { ...process.env }; delete env.ANTHROPIC_API_KEY; delete env.ANTHROPIC_AUTH_TOKEN;
+  return new Promise((resolve, reject) => {
+    const child = exec('claude', ['-p', prompt, '--output-format', 'json', '--model', model, '--effort', 'low', '--json-schema', JSON.stringify(SCHEMA), '--system-prompt-file', sys, '--tools', '', '--strict-mcp-config', '--disable-slash-commands', '--setting-sources', '', '--no-session-persistence', '--max-turns', '3'], { cwd: dir, env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(failureReason(stdout, stderr, err)));
+      try { const r = JSON.parse(stdout); if (r.is_error || !r.structured_output) return reject(new Error(r.is_error ? failureReason(stdout, stderr, null) : `claude -p: ${r.subtype || 'no output'}`)); resolve(r.structured_output); } catch (e) { reject(e); }
     });
+    // the prompt is an argument: close stdin so claude does not wait for piped input ("no stdin data received in 3s")
+    child?.stdin?.end();
   });
 }
 

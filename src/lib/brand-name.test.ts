@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { normalizeCompetitor } from "./brand-name";
+import { readFileSync } from "node:fs";
+import { normalizeCompetitor, normalizeProductInput } from "./brand-name";
 
 describe("normalizeCompetitor", () => {
   it("turns a pasted domain into a brand name and keeps it as the URL", () => {
@@ -33,5 +34,39 @@ describe("normalizeCompetitor", () => {
     expect(normalizeCompetitor("  Nature’s   Bounty ")).toEqual({ name: "Nature’s Bounty", url: null });
     expect(normalizeCompetitor("Dr. Squatch")).toEqual({ name: "Dr. Squatch", url: null });
     expect(normalizeCompetitor("Ritual", "ritual.com")).toEqual({ name: "Ritual", url: "https://ritual.com/" });
+  });
+});
+
+describe("normalizeProductInput", () => {
+  it("moves a product URL pasted into the name field into productUrl", () => {
+    const url = "https://im8health.com/products/the-beckham-stack-pro";
+    expect(normalizeProductInput({ productName: url, productUrl: "" })).toEqual({ productName: "", productUrl: url });
+    expect(normalizeProductInput({ productName: `  ${url}  ` })).toEqual({ productName: "", productUrl: url });
+  });
+
+  it("leaves a URL in the name alone when productUrl is already set", () => {
+    const input = { productName: "https://a.com/p/1", productUrl: "https://b.com/p/2" };
+    expect(normalizeProductInput(input)).toEqual(input);
+  });
+
+  it("keeps plain names that look like domains as names", () => {
+    expect(normalizeProductInput({ productName: "Notion.so Pro", productUrl: "" })).toEqual({
+      productName: "Notion.so Pro",
+      productUrl: "",
+    });
+    expect(normalizeProductInput({ productName: "shop.example.com" })).toEqual({ productName: "shop.example.com" });
+  });
+
+  it("does not treat non-http schemes as product URLs", () => {
+    expect(normalizeProductInput({ productName: "ftp://files.example.com/x", productUrl: "" })).toEqual({
+      productName: "ftp://files.example.com/x",
+      productUrl: "",
+    });
+  });
+
+  it("is applied by the create-project route before the body is parsed", () => {
+    expect(readFileSync("src/app/api/projects/route.ts", "utf8")).toMatch(
+      /createProjectSchema\.parse\(normalizeProductInput\(body\)\)/
+    );
   });
 });
