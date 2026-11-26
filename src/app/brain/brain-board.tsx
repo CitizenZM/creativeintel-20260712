@@ -8,7 +8,7 @@ import { LOOP_STAGES, PROJECT_STEPS, type BrainEvent, type BrainTask, type Brain
 import {
   EVENT_TONE, LOOP_STATUS_LABEL, STAGE_LABEL, STEP_LABEL, TONE_CLASS, ageLabel, groupPatterns, learningTone, loopTone, pct,
   relTime, sortEvents, sortLoops, staleMessage, taskTone, usd, type Tone,
-  projectHref,
+  checkProject, projectHref,
 } from "./brain-format";
 import { brainFixture } from "./fixture";
 
@@ -260,7 +260,8 @@ export function BrainBoard() {
                     <details>
                       <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm">
                         <Chip tone={c.pass ? "healthy" : "urgent"}>{c.pass ? "pass" : "fail"}</Chip>
-                        <span className="font-mono text-xs">{c.runId}</span>
+                        <CheckProject id={c.projectId} loops={snap.loops} />
+                        <span className="font-mono text-xs text-muted-foreground">{c.runId}</span>
                         <span className="text-xs text-muted-foreground">
                           {c.fields.filter((f) => f.pass).length}/{c.fields.length} fields · {relTime(c.at, now)}
                         </span>
@@ -468,6 +469,17 @@ function Bar({ value, label, budget }: { value: number; label?: string; budget?:
       </div>
       {label && <span className="text-[11px] tabular-nums text-muted-foreground">{label}</span>}
     </div>
+  );
+}
+
+/** a check row's project name; links only server projects (cuid ids) */
+function CheckProject({ id, loops }: { id: string; loops: Parameters<typeof checkProject>[1] }) {
+  const { name, href } = checkProject(id, loops);
+  if (!href) return <span className="min-w-0 break-words font-medium">{name}</span>;
+  return (
+    <Link href={href} className="min-w-0 break-words font-medium hover:underline" onClick={(e) => e.stopPropagation()}>
+      {name}
+    </Link>
   );
 }
 

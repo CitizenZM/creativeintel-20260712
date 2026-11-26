@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BrainLoop, PatternHit } from "@/services/brain/contract";
-import { ageLabel, groupPatterns, pct, projectHref, relTime, sortEvents, sortLoops, staleMessage, usd } from "./brain-format";
+import { ageLabel, checkProject, groupPatterns, pct, projectHref, relTime, sortEvents, sortLoops, staleMessage, usd } from "./brain-format";
 import { brainFixture } from "./fixture";
 
 const NOW = Date.parse("2026-11-18T12:00:00Z");
@@ -85,5 +85,24 @@ describe("projectHref", () => {
     expect(projectHref("cmabc123")).toBe("/projects/cmabc123");
     expect(projectHref("local:p1")).toBeNull();
     expect(projectHref("batch:b1")).toBeNull();
+  });
+});
+
+describe("checkProject", () => {
+  const loops = [
+    { projectId: "cmb1x2y3z4a5b6c7d8e9f0g1h", name: "Moneta spring" },
+    { projectId: "local:p1", name: "Local remake" },
+  ] as BrainLoop[];
+
+  it("names a check's project from the loops and links only server cuids", () => {
+    expect(checkProject("cmb1x2y3z4a5b6c7d8e9f0g1h", loops)).toEqual({ name: "Moneta spring", href: "/projects/cmb1x2y3z4a5b6c7d8e9f0g1h" });
+    expect(checkProject("local:p1", loops)).toEqual({ name: "Local remake", href: null });
+  });
+
+  it("falls back to the id and never links a non-cuid id", () => {
+    expect(checkProject("cmzzzzzzzzzzzzzzzzzzzzzzz", loops)).toEqual({ name: "cmzzzzzzzzzzzzzzzzzzzzzzz", href: "/projects/cmzzzzzzzzzzzzzzzzzzzzzzz" });
+    expect(checkProject("p1", loops)).toEqual({ name: "p1", href: null });
+    expect(checkProject("batch:b1", [])).toEqual({ name: "batch:b1", href: null });
+    expect(checkProject("", [])).toEqual({ name: "—", href: null });
   });
 });
