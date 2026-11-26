@@ -120,3 +120,8 @@
 - 完成: Overnight Video Brain swarm rounds 2-4: merged creativeintel #194-#205 and ad-studio #5-#11 after independent verification (brain 167/167, worker 29/29, AS 167/167); live learnings repaired; worker restarted on adopt code
 - 验证: node --test workers/video-brain/test/*.test.mjs (temp HOME) 167/167; adstudio-worker 29/29; ad-studio pipeline 167/167; Vercel prod success
 - 下一步: Round 5 queue in scratchpad r5-queue.md; Barron: OpenRouter key cap, rules PR ad-studio#4, reminders doc
+
+### 2026-11-26 15:05 · claude-opus-5-5
+- 完成: Swarm round 8: merged creativeintel #208 (batch mtime skew; video critic no longer scores half-written files); overnight total tonight incl. affiliate scope: CI #194-#208, AS #5-#13, AFF #242-#244 #246 #248
+- 验证: #208: brain 175/175, state-r3 10x 0 fail, real batch statuses identical main vs branch
+- 下一步: Barron: reminders doc; queue: impact-propose consecutivePrepareFailures after #235/#212

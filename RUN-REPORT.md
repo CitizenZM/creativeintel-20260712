@@ -83,3 +83,6 @@ product (`auto:<k>`), learning-loop weights, run id in ad names, worker updates.
 - 19 candidates (3 lenses) → 2 critics → 6 jobs. Merged after independent verification: creativeintel #201 (tests never write live learnings; brain repairs drifted blocks — live files repaired 06:14), #202 (worker adopts live pipeline after restart; server reportProgress cancelled-first + sameWorker; passed 3rd verification; worker restarted), #203 (first-frame check, batch round blocking, advisory review, signatures; 2nd pass), #204 (Ad Studio videos in export zip with escaping/https-only; board project names; 2nd pass), #205 (digest truth: all checks, one OpenRouter line, idle collapse, action count; retired 1.75× seed; pruning; rules-PR root); ad-studio #11 (auto-fix on retried runs, fallback-priced regen, people_count).
 - Dropped: T8 info-only flat runs. Queued for round 5: scratchpad r5-queue.md.
 - Verify: brain 167/167 on main c9a5884; worker 29/29; AS 167/167; Vercel prod success for #202/#204.
+
+## 2026-11-26 swarm rounds 7-8 (video side)
+- Merged after independent verification: #207 (readLocal skips xk-* dirs before reads; identical output on real data), #208 (batch freshness tolerates 2 s mtime skew; missing file → completed; flaky B9 fixed; 175/175, state-r3 10× green; identical statuses on 101 real batch files).
