@@ -46,6 +46,8 @@ export async function allBatches({ root, workstreamsFile } = {}) {
 
 /** an .mp4 modified less than this long ago may still be written: it is 'generating', not finished (no check yet) */
 export const FRESH_MS = 120_000;
+/** mtime this far ahead of now is clock jitter (sub-ms mtime vs integer Date.now, FS skew), not a future file */
+export const SKEW_MS = 2000;
 
 export async function readBatches(batches, { now = Date.now() } = {}) {
   batches = batches || await allBatches();
@@ -60,8 +62,8 @@ export async function readBatches(batches, { now = Date.now() } = {}) {
       let st; try { st = await stat(fp); } catch { st = null; }
       const at = st ? st.mtime.toISOString() : new Date(0).toISOString();
       if (at > latest) latest = at;
-      const age = st ? now - st.mtimeMs : -1; // a future mtime (clock skew, copied file) counts as finished
-      const status = age >= 0 && age < FRESH_MS ? 'generating' : 'completed';
+      const age = st ? now - st.mtimeMs : -Infinity; // missing file: completed; > SKEW_MS in the future (copied file, real skew): completed
+      const status = age > -SKEW_MS && age < FRESH_MS ? 'generating' : 'completed';
       runs.push({ id: `batch:${b.id}:${row.file}`, local: true, managedBy: 'batch', projectId: `batch:${b.id}`, status, step: null, progress: status === 'completed' ? 100 : 0, estUsd: 0, actualUsd: null, finalMp4Url: null, finalPath: st && st.size > 0 ? fp : null, error: null, metrics: null, retries: 0, hookType: row.product || null, engine: 'batch', updatedAt: at, createdAt: at, visualMode: 'video', cancelRequested: false });
     }
     projects.push({ id: `batch:${b.id}`, name: `${b.workstream ? `[${b.workstream}] ` : ''}${b.name}${b.jobStatus === 'running' ? ' (running)' : ''}`, brandName: b.brand, workstream: b.workstream || null, updatedAt: latest || new Date(0).toISOString() });

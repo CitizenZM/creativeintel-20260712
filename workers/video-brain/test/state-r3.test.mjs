@@ -13,7 +13,7 @@ import { brainDirs } from './helpers/brain-dirs.mjs';
 import { fileURLToPath } from 'node:url';
 import { tick, acquireLock } from '../brain.mjs';
 import { toRun } from '../lib/local.mjs';
-import { readBatches } from '../lib/batch.mjs';
+import { FRESH_MS, readBatches } from '../lib/batch.mjs';
 import { compare } from '../lib/verify.mjs';
 
 const BRAIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'brain.mjs');
@@ -67,8 +67,22 @@ test('B9 batch: an .mp4 written < 120 s ago is still generating; an older one is
   const dir = await mkdtemp(path.join(tmpdir(), 'vb-b9-'));
   await writeFile(path.join(dir, '01-new.mp4'), 'x'); await writeFile(path.join(dir, '02-old.mp4'), 'x');
   const old = new Date(Date.now() - 600_000); await utimes(path.join(dir, '02-old.mp4'), old, old);
-  const r = await readBatches([{ id: 'b', name: 'b', dir }]);
+  const r = await readBatches([{ id: 'b', name: 'b', dir }], { now: Date.now() + 1000 }); // explicit now: no dependence on sub-ms mtime rounding
   assert.deepEqual(r.runs.map((x) => [x.hookType, x.status]), [['new', 'generating'], ['old', 'completed']]);
+});
+
+test('B9c batch: mtime up to SKEW_MS ahead of now is jitter (generating) and exits to completed after FRESH_MS; a missing file is completed', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'vb-b9s-'));
+  const fp = path.join(dir, '01-jit.mp4'); await writeFile(fp, 'x');
+  const mt = Date.now(); await utimes(fp, new Date(mt), new Date(mt));
+  const mtimeMs = (await stat(fp)).mtimeMs;
+  const ahead = await readBatches([{ id: 'b', name: 'b', dir }], { now: mtimeMs - 500 }); // file mtime 500 ms in the future
+  assert.equal(ahead.runs[0].status, 'generating');
+  const later = await readBatches([{ id: 'b', name: 'b', dir }], { now: mtimeMs + FRESH_MS + 1 });
+  assert.equal(later.runs[0].status, 'completed');
+  await writeFile(path.join(dir, 'INDEX.csv'), 'file,product\n02-gone.mp4,gone\n');
+  const gone = await readBatches([{ id: 'b', name: 'b', dir, index: 'INDEX.csv' }], { now: mtimeMs });
+  assert.deepEqual(gone.runs.map((x) => [x.hookType, x.status, x.finalPath]), [['gone', 'completed', null]]);
 });
 
 test('B9 critic throws: the check is still stored and the critic quota is refunded', async () => {
