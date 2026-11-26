@@ -133,15 +133,19 @@ const progressOf = (st) => {
   return Math.round((done / STEPS.length) * 100);
 };
 
-/** run the pipeline as its own process group, report every tick, kill it when Xark says cancel */
-export async function runPipeline(runId, id, args, claim) {
+/** why a run that did not finish failed: a signal-killed pipeline (OOM, SIGKILL) wrote no error of its own */
+export const stopReason = (st, signal) => signal ? `pipeline killed by ${signal}` : st?.error || 'pipeline stopped';
+
+/** run the pipeline as its own process group, report every tick, kill it when Xark says cancel.
+ *  Returns the exit code, or the signal when the pipeline was killed (code null). */
+export async function runPipeline(runId, id, args, claim, { tick = TICK_MS } = {}) {
   // a host Claude Code session's variables (CLAUDECODE, CLAUDE_CODE_*) make the pipeline's `claude -p` return an empty session
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^CLAUDE/.test(k)));
   const child = spawn(process.execPath, args, { cwd: ROOT, detached: true, stdio: 'ignore', env });
-  let exited = null; child.on('exit', (code) => { exited = code ?? 0; });
+  let exited = null; child.on('exit', (code, signal) => { exited = { code, signal }; });
   let cancelled = false;
   while (exited === null) {
-    await sleep(TICK_MS);
+    await sleep(tick);
     const st = await readJSON(path.join(jobDir(id), 'status.json'));
     const spec = await readJSON(path.join(jobDir(id), 'spec.json'));
     try {
@@ -149,7 +153,7 @@ export async function runPipeline(runId, id, args, claim) {
       if (r.cancel && !cancelled) { cancelled = true; try { process.kill(-child.pid, 'SIGTERM'); } catch { /* gone */ } }
     } catch (e) { console.warn('[adstudio] progress failed:', e.message); }
   }
-  return { cancelled, code: exited };
+  return { cancelled, code: exited.code, signal: exited.signal };
 }
 
 async function upload(id, file, contentType) {
@@ -191,9 +195,9 @@ async function finish(run, id, st) {
 
 export async function handle(run) {
   const id = jobIdOf(run.runId); const dir = jobDir(id); const claim = run.claim;
-  const end = async (st, cancelled) => {
+  const end = async (st, cancelled, signal) => {
     if (cancelled) return api('failed', { runId: run.runId, claim, error: 'cancelled by the user', cancelled: true, actualUsd: st?.cost, log: st?.log });
-    return api('failed', { runId: run.runId, claim, error: st?.error || 'pipeline stopped', actualUsd: st?.cost, log: st?.log });
+    return api('failed', { runId: run.runId, claim, error: stopReason(st, signal), actualUsd: st?.cost, log: st?.log });
   };
   if (run.phase === 'plan' || run.phase === 'copy_plan') {
     await mkdir(dir, { recursive: true });
@@ -210,10 +214,10 @@ export async function handle(run) {
       if (c !== 0) return api('failed', { runId: run.runId, claim, error: `could not copy the plan of ${run.planFromRunId}` });
       from = 'generate';
     }
-    const { cancelled } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, from], claim);
+    const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, from], claim);
     const st = await readJSON(path.join(dir, 'status.json'));
     if (!cancelled && st?.state === 'done') return finish(run, id, st); // free run (stock remix): rendered without an approval stop
-    if (cancelled || st?.state !== 'approval') return end(st, cancelled);
+    if (cancelled || st?.state !== 'approval') return end(st, cancelled, signal);
     const spec = await readJSON(path.join(dir, 'spec.json'));
     const estimate = { ...st.estimate, keyframes: await keyframeThumbs(id, spec).catch(() => []), warnings: st.warnings || [] };
     return api('gate', { runId: run.runId, claim, estimate, plan: planOf(spec), storyboardAB: spec?.storyboard ? { winner: spec.storyboard.winner, scores: spec.storyboard.scores, why: spec.storyboard.why } : undefined, preUsd: st.cost || 0, log: st.log });
@@ -224,9 +228,9 @@ export async function handle(run) {
     // the frame-QA re-generation may spend up to max(budget, estimate x 1.3): hold it to what Xark reserved
     const budget = typeof run.reserveUsd === 'number' && run.reserveUsd > 0 ? Math.min(job.budget ?? BUDGET, run.reserveUsd) : job.budget;
     await writeFile(path.join(dir, 'job.json'), JSON.stringify({ ...job, approved: true, budget }, null, 1));
-    const { cancelled } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, 'generate'], claim);
+    const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, 'generate'], claim);
     const st = await readJSON(path.join(dir, 'status.json'));
-    if (cancelled || st?.state !== 'done') return end(st, cancelled);
+    if (cancelled || st?.state !== 'done') return end(st, cancelled, signal);
     return finish(run, id, st);
   }
   throw new Error(`unknown phase ${run.phase}`);

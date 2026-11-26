@@ -1,7 +1,7 @@
 // node --test workers/adstudio-worker - job.json mapping and plan extraction (no network, no pipeline)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { jobOf, planOf, jobIdOf, runLoop, resumeFrom, keyframeThumbs, alreadyDone } from './worker.mjs';
+import { jobOf, planOf, jobIdOf, runLoop, resumeFrom, keyframeThumbs, alreadyDone, runPipeline, stopReason } from './worker.mjs';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -145,4 +145,18 @@ test('a job finished on this Mac is uploaded, not re-run from ingest', () => {
   assert.equal(alreadyDone({ state: 'done' }, false), false);
   assert.equal(alreadyDone({ state: 'failed' }, true), false);
   assert.equal(resumeFrom({ state: 'done' }), 'ingest'); // why the shortcut is needed
+});
+
+test('a pipeline killed by a signal keeps the signal (not exit 0) and is reported as "pipeline killed by SIGx"', async () => {
+  const fake = (js) => runPipeline('sigtest', jobIdOf('sigtest'), ['-e', js], 'c1', { tick: 10 });
+  const killed = await fake("process.kill(process.pid, 'SIGKILL')");
+  assert.equal(killed.code, null); assert.equal(killed.signal, 'SIGKILL'); assert.equal(killed.cancelled, false);
+  const ok = await fake('process.exit(0)'); assert.equal(ok.code, 0); assert.equal(ok.signal, null);
+  const bad = await fake('process.exit(3)'); assert.equal(bad.code, 3); assert.equal(bad.signal, null);
+  assert.equal(stopReason({ state: 'running' }, 'SIGKILL'), 'pipeline killed by SIGKILL');
+  assert.equal(stopReason({ state: 'failed', error: 'render failed' }, null), 'render failed');
+  assert.equal(stopReason(null, null), 'pipeline stopped');
+  const src = await (await import('node:fs/promises')).readFile(new URL('./worker.mjs', import.meta.url), 'utf8');
+  assert.match(src, /error: stopReason\(st, signal\)/); // handle() reports it
+  assert.equal((src.match(/const \{ cancelled, signal \} = await runPipeline\(/g) || []).length, 2); // both phases pass the signal on
 });
