@@ -27,12 +27,13 @@ export async function readLocal(root) {
   const runs = [];
   let ids = []; try { ids = await readdir(path.join(root, 'data', 'jobs')); } catch { /* none */ }
   for (const id of ids) {
+    // Xark-managed mirrors (xk-<runId> and its -p0/-sld/-vid variants): the server AdStudioRun is authoritative and
+    // observe() returns every active server run, so a local copy would only duplicate it; skip by name before any read
+    if (/^xk-/.test(id)) continue;
     const dir = path.join(root, 'data', 'jobs', id);
     const [job, st] = await Promise.all([readJSON(path.join(dir, 'job.json')), readJSON(path.join(dir, 'status.json'))]);
     if (!job && !st) continue;
-    // Xark-managed mirrors (xk-<runId> and its -p0/-sld/-vid variants): the server AdStudioRun is authoritative and
-    // observe() returns every active server run, so a local copy would only duplicate it
-    if (/^xk-/.test(id) || toRun(id, job, st, null).managedBy === 'xark') continue;
+    if (toRun(id, job, st, null).managedBy === 'xark') continue;
     const fp = path.join(dir, 'final.mp4');
     let has = false; try { has = (await stat(fp)).size > 0; } catch { /* none */ }
     runs.push(toRun(id, job, st, has ? fp : null));

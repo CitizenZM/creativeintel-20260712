@@ -43,3 +43,24 @@ test('tick wiring: local Ad Studio jobs join the loops; own jobs approved via th
   // the critic only runs when the file probed (no duration for a missing file)
   assert.equal(critiqued.length, 0);
 });
+
+test('readLocal skips xk-* job dirs by name before reading any of their files', async () => {
+  const { createRequire, syncBuiltinESMExports } = await import('node:module');
+  const fsp = createRequire(import.meta.url)('node:fs/promises');
+  const root = await mkdtemp(path.join(tmpdir(), 'vb-xk-'));
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(path.join(root, 'data', 'jobs', 'xk-abc'), { recursive: true });
+  await writeFile(path.join(root, 'data', 'jobs', 'xk-abc', 'job.json'), '{not json');
+  await mkdir(path.join(root, 'data', 'jobs', 'own1'), { recursive: true });
+  await writeFile(path.join(root, 'data', 'jobs', 'own1', 'job.json'), JSON.stringify({ projectId: 'p1' }));
+  await writeFile(path.join(root, 'data', 'jobs', 'own1', 'status.json'), JSON.stringify({ state: 'done' }));
+  const orig = fsp.readFile; const xkReads = [];
+  fsp.readFile = (f, ...a) => { if (/[\\/]xk-/.test(String(f))) xkReads.push(String(f)); return orig(f, ...a); };
+  syncBuiltinESMExports();
+  try {
+    const { readLocal } = await import('../lib/local.mjs?xk-skip');
+    const r = await readLocal(root);
+    assert.deepEqual(xkReads, [], 'no file of an xk-* job is read');
+    assert.deepEqual(r.runs.map((x) => x.id), ['local:own1']);
+  } finally { fsp.readFile = orig; syncBuiltinESMExports(); }
+});
