@@ -41,7 +41,7 @@ export function compare(run, facts) {
 export const LUFS_TRIES = 3;
 /** after LUFS_TRIES unmeasured tries the check is stored with a failing loudness field */
 export function loudnessNotMeasured(check) {
-  const { loudnessMissing, ...c } = check; // eslint-disable-line no-unused-vars
+  const c = { ...check }; delete c.loudnessMissing;
   return { ...c, pass: false, fields: [...c.fields, { field: 'loudness', expected: `${TARGETS.lufs} LUFS ±${TARGETS.lufsTol}`, actual: 'not measured', pass: false, source: 'ffmpeg ebur128' }] };
 }
 
