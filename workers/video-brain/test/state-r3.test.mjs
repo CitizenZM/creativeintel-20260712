@@ -256,3 +256,35 @@ test('LU13b tick: lufsTries entries for runs no longer observed are dropped', as
   const s = JSON.parse(await readFile(path.join(home, 'state.json'), 'utf8'));
   assert.deepEqual(s.lufsTries || {}, {});
 });
+
+// ---- second verification: ps failure must not steal a live lock; an empty pidfile is a writer mid-create ----
+const spawnBrainEnv = (home, extra) => spawnSync(process.execPath, [BRAIN, '--once'], { encoding: 'utf8', timeout: 60_000, env: { PATH: process.env.PATH, HOME: process.env.HOME, APP_URL: `http://127.0.0.1:${closedPort}`, WORKER_TOKEN: 'test', VIDEO_BRAIN_HOME: home, VIDEO_BRAIN_DIGEST: '0', VIDEO_BRAIN_STRATEGIST: '0', VIDEO_BRAIN_CRITIC: '0', VIDEO_BRAIN_RULES_PR: '0', VIDEO_BRAIN_HARVEST: '0', ...extra } });
+async function fakePs(body) {
+  const bin = await mkdtemp(path.join(tmpdir(), 'vb-fakeps-'));
+  await writeFile(path.join(bin, 'ps'), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return `${bin}:${process.env.PATH}`;
+}
+for (const [name, body] of [['exits 1', 'exit 1'], ['hangs past the timeout', 'sleep 8']]) {
+  test(`LK18c lock: ps ${name} → a live holder with a recorded start time and fresh mtime still blocks (exit 0)`, async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'vb-lk18f-'));
+    const f = path.join(home, 'tick.pid');
+    await writeFile(f, `${process.pid}\nWed Nov 26 01:02:03 2026`);
+    const r = spawnBrainEnv(home, { PATH: await fakePs(body) });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /another tick is running/);
+    assert.equal(await readFile(f, 'utf8'), `${process.pid}\nWed Nov 26 01:02:03 2026`, 'holder keeps its lock');
+  });
+}
+
+test('LK18c lock: an empty pidfile < 10 s old is a writer between create and write → blocked; 20 s old → taken over', async () => {
+  const home = await mkdtemp(path.join(tmpdir(), 'vb-lk18g-'));
+  const f = path.join(home, 'tick.pid');
+  await writeFile(f, '');
+  const r = spawnBrainEnv(home, {});
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(await readFile(f, 'utf8'), '', 'left alone');
+  const old = new Date(Date.now() - 20_000); await utimes(f, old, old);
+  const t = spawnBrainEnv(home, {});
+  assert.equal(t.status, 2, `took over and ran the tick: ${t.stderr}`);
+  await assert.rejects(stat(f), /ENOENT/, 'released at exit');
+});

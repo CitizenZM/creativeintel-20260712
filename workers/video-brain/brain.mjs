@@ -78,8 +78,12 @@ export function acquireLock(home, { now = Date.now(), beforeCreate = null } = {}
   let held; let mtime;
   try { held = readFileSync(f, 'utf8'); mtime = statSync(f).mtimeMs; } catch { held = null; }
   if (held != null) {
+    // empty and < 10 s old: the holder is between open('wx') and its write
+    if (!held.trim() && now - mtime < 10_000) return { ok: false, pid: null };
     const [p, start = ''] = held.split('\n'); const pid = Number(p.trim());
-    const live = pid > 0 && alive(pid) && now - mtime < LOCK_MAX_AGE_MS && (!start.trim() || startOf(pid) === start.trim());
+    // stale by start time only when both are known and differ (ps failing or timing out must not steal a live lock)
+    const s = pid > 0 && start.trim() ? startOf(pid) : '';
+    const live = pid > 0 && alive(pid) && now - mtime < LOCK_MAX_AGE_MS && (!start.trim() || !s || s === start.trim());
     if (live) return { ok: false, pid };
     // stale: move it aside and check we moved the stale file, not a lock someone else just created
     const aside = `${f}.stale.${process.pid}`;
