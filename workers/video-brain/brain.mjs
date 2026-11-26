@@ -121,7 +121,7 @@ export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'h
   return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
 }
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(ROOT, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }), saveState = (f, s) => writeAtomic(f, JSON.stringify(s)), check = secondCheck } = {}) {
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, skillsDir = SKILLS_DIR, adStudioRoot = ROOT, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(ROOT, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }), saveState = (f, s) => writeAtomic(f, JSON.stringify(s)), check = secondCheck } = {}) {
   if (!dryRun) await mkdir(home, { recursive: true }); // dry-run never writes the state dir
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
@@ -249,10 +249,15 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   } catch (e) { log(`directives: ${e.message}`); }
   const hash = createHash('sha1').update(JSON.stringify([learnings.map((l) => [l.id, l.status, l.rule]), directives])).digest('hex');
   let synced = state.synced || [];
-  if (hash !== state.syncHash && !dryRun) {
-    synced = await syncAll(learnings, { skillsDir: SKILLS_DIR, skills: SKILLS, adStudioRoot: ROOT, at: new Date(now).toISOString(), directives });
-    state.syncHash = hash; state.synced = synced;
-    events.push(ev('Librarian', 'learn', `learnings synced (${learnings.length}) → ${synced.length} targets`));
+  if (!dryRun) {
+    // same hash: re-render with the last sync time so on-disk blocks that drifted (hand edits, a stray writer) are repaired;
+    // matching files are not rewritten. No syncAt yet (older state): full sync.
+    const newHash = hash !== state.syncHash || !state.syncAt;
+    const at = newHash ? new Date(now).toISOString() : state.syncAt;
+    const r = await syncAll(learnings, { skillsDir, skills: SKILLS, adStudioRoot, at, directives });
+    synced = r.synced; state.syncHash = hash; state.syncAt = at; state.synced = synced;
+    if (newHash) events.push(ev('Librarian', 'learn', `learnings synced (${learnings.length}) → ${synced.length} targets`));
+    else if (r.changed.length) events.push(ev('Librarian', 'learn', `learnings repaired: ${r.changed.length} file(s) drifted from the brain's block and were re-synced (${r.changed.map((f) => path.basename(path.dirname(f)) + '/' + path.basename(f)).join(', ')})`));
   }
   for (const l of learnings) l.syncedTo = synced;
   // rules that change the script prompt go through a PR on the Ad Studio repo (Barron merges or vetoes)
