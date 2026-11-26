@@ -2,6 +2,7 @@
 // Design: ad-studio-20261104/docs/VIDEO-BRAIN-ARCHITECTURE-20261117.md §2 (7 stages) and §3 (only 3 legal waits).
 import { canAutoApprove, reserveUsd } from './policy.mjs';
 import { classify } from './incidents.mjs';
+import { PIPELINE_BASELINE } from './learn.mjs';
 
 const M = 60_000, H = 60 * M;
 export const LOOP_STAGES = ['strategy', 'project', 'gate', 'execute', 'verify', 'recover', 'learn'];
@@ -42,6 +43,19 @@ export function gatesOf(run, policy, approvedTodayUsd, now) {
   return g;
 }
 
+const FIX_HINT = (field) => field === 'duration' ? 're-render with fitLength' : field === 'loudness' ? 're-run audio master' : /^critic/.test(field) ? 'review weak criteria and re-run from script' : 're-run from the failing step';
+
+/** failing fields of a run's second check when it blocks the loop: rendered after the pipeline baseline and < 14 days ago
+ *  (older failed checks are only reported, so the pre-baseline backlog never floods the loops); null otherwise */
+export function blockingCheck(run, checks, now, baseline = PIPELINE_BASELINE) {
+  const c = run && checks[run.id];
+  if (!c || c.pass !== false) return null;
+  const at = t(c.renderedAt || run.updatedAt);
+  if (!at || at < t(baseline) || now - at >= 14 * 24 * H) return null;
+  const bad = (c.fields || []).filter((f) => !f.pass);
+  return bad.length ? bad : null;
+}
+
 function task(run, kind, status, agent, gates = []) {
   return { id: run.id, projectId: run.projectId, kind, title: `${run.hookType || 'run'} · ${run.engine || ''}`.trim(), status, step: run.step || null, progress: run.progress || 0, estUsd: run.estUsd || 0, actualUsd: run.actualUsd ?? null, gates, agent, updatedAt: iso(t(run.updatedAt)) };
 }
@@ -50,6 +64,8 @@ export function tasksOf(obs, checks, now) {
   const policy = obs.policy; const used = obs.spend.autoApprovedTodayUsd || 0;
   const queue = []; const executing = []; const recovery = [];
   const retrySet = new Set(retries(obs.runs, now).map((r) => r.id));
+  const newestDone = {};
+  for (const r of obs.runs) if (r.status === 'completed' && (!newestDone[r.projectId] || t(r.updatedAt) > t(newestDone[r.projectId].updatedAt))) newestDone[r.projectId] = r;
   for (const r of obs.runs) {
     if (r.status === 'queued' || r.status === 'awaiting_approval') queue.push(task(r, r.status === 'queued' ? 'plan' : 'generate', r.status === 'queued' ? 'queued' : 'gated', 'Producer', gatesOf(r, policy, used, now)));
     else if (['planning', 'approved', 'generating'].includes(r.status)) executing.push(task(r, r.status === 'planning' ? 'plan' : 'generate', 'running', r.status === 'planning' ? 'Director' : 'Editor'));
@@ -57,6 +73,11 @@ export function tasksOf(obs, checks, now) {
       const c = classify(r.error);
       recovery.push(task(r, 'fix', retrySet.has(r.id) ? 'retrying' : 'failed', c.retry ? 'Producer' : 'Doctor', [{ gate: 'cause', pass: c.retry, detail: `${c.kind}: ${c.runbook}` }, { gate: 'error', pass: false, detail: String(r.error || '').slice(0, 200) }]));
     } else if (r.status === 'completed' && (r.finalMp4Url || r.finalPath) && !checks[r.id] && now - t(r.updatedAt) < 14 * 24 * H) recovery.push(task(r, 'verify', 'verifying', 'QA Critic'));
+    else if (r.status === 'completed' && newestDone[r.projectId] === r) {
+      // shown only: brain.mjs never acts on recovery entries (retries come from retries()/fundsRetries() over failed runs)
+      const bad = blockingCheck(r, checks, now);
+      if (bad) recovery.push(task(r, 'fix', 'failed', 'QA Critic', bad.map((f) => ({ gate: f.field, pass: false, detail: `${f.actual} vs ${f.expected}` }))));
+    }
   }
   return { queue, executing, recovery };
 }
@@ -92,6 +113,8 @@ export function loopOf(project, stages, runs, perf, spend7d, checks, policy, app
   }
 
   if (lastDone) {
+    const bad = blockingCheck(lastDone, checks, now);
+    if (bad) return { ...base, step: 'deliver', stage: 'verify', status: 'blocked', waitingOn: null, agent: 'Doctor', doing: 'second check failed: ' + bad.map((f) => `${f.field} ${f.actual} (want ${f.expected})`).join('; '), nextAction: [...new Set(bad.map((f) => FIX_HINT(f.field)))].join('; '), nextCheckpointAt: at(6 * H), verifyHow: 'a re-rendered run passes every field of the second check' };
     const unchecked = done.filter((r) => (r.finalMp4Url || r.finalPath) && !checks[r.id]);
     if (unchecked.length) return { ...base, step: 'deliver', stage: 'verify', status: 'active', agent: 'QA Critic', doing: `second check of ${unchecked.length} finished video(s)`, nextAction: 'ffprobe + loudness + URL + cost reconcile', nextCheckpointAt: at(10 * M), verifyHow: 'every field of the check passes; a failing field opens a fix task' };
     const p = perf.find((x) => x.projectId === project.id);
