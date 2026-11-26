@@ -24,7 +24,7 @@ import { aggregate } from './lib/incidents.mjs';
 import { secondCheck, LUFS_TRIES, loudnessNotMeasured } from './lib/verify.mjs';
 import { runProbes } from './lib/probes.mjs';
 import { scanRoots } from './lib/patterns.mjs';
-import { SEED, harvest, idOf, syncAll } from './lib/learn.mjs';
+import { SEED, RETIRED_SEEDS, harvest, idOf, syncAll } from './lib/learn.mjs';
 import { pick, promptFor, runClaude, apply as applyStrategy, memoFor } from './lib/strategist.mjs';
 import { readLocal } from './lib/local.mjs';
 import { readBatches } from './lib/batch.mjs';
@@ -121,7 +121,24 @@ export async function localApprove(jobId, base = process.env.AD_STUDIO_URL || 'h
   return { ok: r.ok && back?.status?.state !== 'approval', status: r.status, state: back?.status?.state ?? null };
 }
 
-export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, skillsDir = SKILLS_DIR, adStudioRoot = ROOT, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(ROOT, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }), saveState = (f, s) => writeAtomic(f, JSON.stringify(s)), check = secondCheck } = {}) {
+export const PRUNE_AFTER_MS = 30 * 86_400_000;
+/** drop checks and acted entries older than 30 d whose run is no longer observed (age AND absence: a run that leaves a
+ *  windowed list and comes back is not re-checked within 30 d). acted entries carry no time: stamped in state.actedAt when
+ *  first seen. Local entries are kept when the local read failed this tick (its runs are missing, not gone). */
+export function pruneState(state, runs, now, { localOk = true } = {}) {
+  const seen = new Set(runs.map((r) => r.id));
+  const gone = (id, at) => !seen.has(id) && (localOk || !id.startsWith('local:')) && now - Date.parse(at) > PRUNE_AFTER_MS;
+  for (const [id, c] of Object.entries(state.checks)) if (gone(id, c.at)) delete state.checks[id];
+  state.actedAt = state.actedAt || {};
+  for (const k of Object.keys(state.acted)) {
+    if (!state.actedAt[k]) { state.actedAt[k] = new Date(now).toISOString(); continue; }
+    const id = k.slice(k.indexOf(':') + 1).replace(/:\d{4}-\d{2}-\d{2}$/, '');
+    if (gone(id, state.actedAt[k])) { delete state.acted[k]; delete state.actedAt[k]; }
+  }
+  for (const k of Object.keys(state.actedAt)) if (!(k in state.acted)) delete state.actedAt[k];
+}
+
+export async function tick({ call, dryRun = false, now = Date.now(), home = HOME, skillsDir = SKILLS_DIR, adStudioRoot = ROOT, strategist = process.env.VIDEO_BRAIN_STRATEGIST === '0' ? null : runClaude, local = async () => { const [a, b] = await Promise.all([readLocal(ROOT), readBatches()]); return { projects: [...a.projects, ...b.projects], stages: [...a.stages, ...b.stages], runs: [...a.runs, ...b.runs] }; }, approveLocal = localApprove, notify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : sendDigest, verifyNotify = process.env.VIDEO_BRAIN_DIGEST === '0' ? null : verifyDigest, critic = process.env.VIDEO_BRAIN_CRITIC === '0' ? null : defaultCritic, rulesPr = process.env.VIDEO_BRAIN_RULES_PR === '0' ? null : (l, s, d) => proposeRules(adStudioRoot, l, s, { directives: d }), harvestDirs = process.env.VIDEO_BRAIN_HARVEST === '0' ? null : (ws) => harvestDirectives({ workstreams: ws }), saveState = (f, s) => writeAtomic(f, JSON.stringify(s)), check = secondCheck } = {}) {
   if (!dryRun) await mkdir(home, { recursive: true }); // dry-run never writes the state dir
   const stateFile = path.join(home, 'state.json');
   const state = await readJSON(stateFile, { checks: {}, incidents: {}, probes: [], patterns: [], loopStatus: {}, acted: {}, syncHash: null });
@@ -132,7 +149,8 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   const obs = await call('observe');
   if (obs.status !== 200 || !Array.isArray(obs.projects)) throw new Error(`observe: HTTP ${obs.status} ${obs.error || ''}`);
   // local Ad Studio jobs join the observation (Xark-managed xk-* jobs are grouped as the lab project)
-  const loc = await local().catch((e) => { log(`local jobs: ${e.message}`); return { projects: [], stages: [], runs: [] }; });
+  let locOk = true;
+  const loc = await local().catch((e) => { locOk = false; log(`local jobs: ${e.message}`); return { projects: [], stages: [], runs: [] }; });
   obs.projects = [...obs.projects, ...loc.projects]; obs.stages = [...obs.stages, ...loc.stages]; obs.runs = [...obs.runs, ...loc.runs];
   const today = new Date(now).toISOString().slice(0, 10);
   state.localApproved = state.localApproved?.day === today ? state.localApproved : { day: today, usd: 0 };
@@ -167,7 +185,9 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
 
   lap('act');
   // VERIFY — second check of finished videos (a few per tick, newest first)
-  const toCheck = obs.runs.filter((r) => r.status === 'completed' && (r.finalMp4Url || r.finalPath) && !state.checks[r.id]).slice(0, CHECKS_PER_TICK);
+  // server runs are checked once (their updatedAt moves on any DB write); a local run again when re-rendered after its check
+  const rerendered = (r) => r.local && Date.parse(r.updatedAt) > Date.parse(state.checks[r.id].renderedAt);
+  const toCheck = obs.runs.filter((r) => r.status === 'completed' && (r.finalMp4Url || r.finalPath) && (!state.checks[r.id] || rerendered(r))).slice(0, CHECKS_PER_TICK);
   const tickStart = Date.now();
   state.lufsTries = state.lufsTries || {};
   if (!dryRun) { const seen = new Set(obs.runs.map((r) => r.id)); for (const id of Object.keys(state.lufsTries)) if (!seen.has(id)) delete state.lufsTries[id]; }
@@ -185,13 +205,14 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
       const day = new Date(now).toISOString().slice(0, 10);
       state.criticDay = state.criticDay?.day === day ? state.criticDay : { day, n: 0 };
       const dur = Number((c.fields.find((f) => f.field === 'duration')?.actual || '').replace(/[^0-9.]/g, ''));
-      if (critic && !dryRun && dur > 0 && state.criticDay.n < CRITIC_PER_DAY) {
+      const critiqued = !!state.checks[r.id]?.critic && state.checks[r.id].renderedAt === c.renderedAt;
+      if (critic && !dryRun && !critiqued && dur > 0 && state.criticDay.n < CRITIC_PER_DAY) {
         state.criticDay.n += 1;
         try { const cr = await critic(r.finalMp4Url || r.finalPath, dur); c = withCritic(c, cr); events.push(ev('QA Critic', 'check', `${cr.model} on ${r.id.slice(-6)}: avg ${cr.avg}${cr.scores.issues?.length ? ' — ' + cr.scores.issues[0] : ''}`, r.projectId, r.id)); }
         catch (e) { state.criticDay.n -= 1; log(`critic ${r.id}: ${e.message} (quota refunded; check stored without the critic)`); }
       }
       state.checks[r.id] = c;
-      const bad = c.fields.filter((f) => !f.pass).map((f) => `${f.field} ${f.actual}`);
+      const bad = c.fields.filter((f) => !f.pass && !f.advisory).map((f) => `${f.field} ${f.actual}`);
       events.push(ev('QA Critic', 'check', c.pass ? `second check passed: run ${r.id.slice(-6)} (${c.fields.length} fields)` : `second check FAILED run ${r.id.slice(-6)}: ${bad.join('; ')}`, r.projectId, r.id));
     } catch (e) { log(`check ${r.id}: ${e.message}`); }
   }
@@ -227,7 +248,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   if (!state.patternsAt || now - Date.parse(state.patternsAt) > PATTERN_EVERY_MS) {
     state.patterns = await scanRoots(PATTERN_ROOTS);
     state.patternsAt = new Date(now).toISOString();
-    events.push(ev('Doctor', 'fix', `fix-pattern scan: ${state.patterns.length} open hit(s) across ${PATTERN_ROOTS.length} roots`));
+    events.push(ev('Doctor', 'check', `fix-pattern scan: ${state.patterns.length} open hit(s) across ${PATTERN_ROOTS.length} roots`));
   }
 
   lap('probes');
@@ -235,6 +256,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   const fresh = harvest({ incidents: state.incidents, checks: state.checks });
   const byId = new Map([...SEED, ...(obs.learnings || []), ...fresh].map((l) => [l.id, l]));
   for (const l of obs.learnings || []) byId.set(l.id, { ...byId.get(l.id), ...l }); // server edits win (status changes)
+  for (const id of RETIRED_SEEDS) if (byId.has(id)) byId.set(id, { ...byId.get(id), status: 'retired' }); // except seeds code retired
   const learnings = [...byId.values()];
   // workstream directives: config + Barron's instructions harvested once a day from session transcripts (candidates until confirmed)
   let directives = null;
@@ -333,9 +355,10 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   // prune local state
   for (const k of Object.keys(state.acted)) if (/^retry:/.test(k) && !k.endsWith(new Date(now).toISOString().slice(0, 10))) delete state.acted[k];
   if (dryRun) { lap('publish'); return { ok: true, dryRun: true, snapshot, approvedNow, phaseMs }; }
-  await saveState(stateFile, state);
-  // actions of the last 24 h for the daily digest
+  pruneState(state, obs.runs, now, { localOk: locOk });
+  // actions of the last 24 h for the daily digest (before the save: a tick without a digest keeps them too)
   state.actions = [...(state.actions || []), ...events.filter((e) => ['decide', 'call', 'fix'].includes(e.kind)).map((e) => ({ at: e.at, kind: e.kind }))].filter((a) => now - Date.parse(a.at) < 86_400_000);
+  await saveState(stateFile, state);
   // daily digest, AT MOST ONCE per Pacific day: the day and a pending entry are persisted BEFORE the send; a pending entry
   // with a messageId is only read back (<= DIGEST_VERIFY_TRIES); one without (send threw, no message_id, crash) is never resent
   const pend = state.digestPending;
@@ -352,7 +375,7 @@ export async function tick({ call, dryRun = false, now = Date.now(), home = HOME
   }
   const day = notify && digestDue(state.digestDay, now);
   if (day) {
-    const text = buildDigest(snapshot, state.actions);
+    const text = buildDigest(snapshot, state.actions, Object.values(state.checks));
     const before = { digestDay: state.digestDay, digestPending: state.digestPending };
     state.digestDay = day; state.digestPending = { day, messageId: null, text, tries: 0, sending: true };
     // if this write fails nothing is sent (the error propagates; the tick reports it)
