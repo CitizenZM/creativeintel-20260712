@@ -152,3 +152,8 @@ export const EVENT_TONE: Record<BrainEvent["kind"], Tone> = {
   fix: "attention",
   wait: "attention",
 };
+
+/** the project page of a loop; local/batch loops have none (render them as plain text) */
+export function projectHref(projectId: string): string | null {
+  return /^(local|batch):/.test(projectId) ? null : `/projects/${projectId}`;
+}

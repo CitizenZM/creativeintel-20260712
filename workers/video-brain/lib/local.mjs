@@ -1,6 +1,6 @@
 // Local Ad Studio jobs (~/Projects/ad-studio-20261104/data/jobs) as brain projects/runs (design §9 decision 4 = A:
-// Xark projects + Ad Studio local jobs). Xark-managed jobs (xk-*) are mirrored by AdStudioRun in production and are
-// grouped under one lab project here; a job's local state maps onto the AdStudioRun status words.
+// Xark projects + Ad Studio local jobs). Xark-managed jobs (xk-*) are mirrored by AdStudioRun in production, so
+// readLocal skips them (toRun still maps them to the lab project for callers that pass them in); a job's local state maps onto the AdStudioRun status words.
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -29,6 +29,9 @@ export async function readLocal(root) {
     const dir = path.join(root, 'data', 'jobs', id);
     const [job, st] = await Promise.all([readJSON(path.join(dir, 'job.json')), readJSON(path.join(dir, 'status.json'))]);
     if (!job && !st) continue;
+    // Xark-managed mirrors (xk-<runId> and its -p0/-sld/-vid variants): the server AdStudioRun is authoritative and
+    // observe() returns every active server run, so a local copy would only duplicate it
+    if (/^xk-/.test(id) || toRun(id, job, st, null).managedBy === 'xark') continue;
     const fp = path.join(dir, 'final.mp4');
     let has = false; try { has = (await stat(fp)).size > 0; } catch { /* none */ }
     runs.push(toRun(id, job, st, has ? fp : null));

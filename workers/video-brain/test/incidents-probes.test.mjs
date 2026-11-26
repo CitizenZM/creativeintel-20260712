@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { aggregate, classify, IDS_CAP } from '../lib/incidents.mjs';
+import { aggregate, classify, IDS_CAP, signatureOf } from '../lib/incidents.mjs';
 import { buildDigest } from '../lib/digest.mjs';
 import { launchdVerdict } from '../lib/probes.mjs';
 
@@ -85,10 +85,12 @@ test('wiring: the adstudio worker (launchd) probe uses launchdVerdict on launchc
 test('aggregate: a stored open incident is re-classified from its sample (401 stored as code -> human); counts and ids kept', () => {
   const sig = '# {"type":"error"...}';
   const prev = { [sig]: { signature: sig, kind: 'code', runbook: 'unknown cause: Doctor diagnoses it and opens a fix PR with a failing test', sample: AUTH, count: 7, firstSeen: at(30), lastSeen: at(2), status: 'open', runs: ['r1', 'r2'], ids: ['r1', 'r2'] } };
-  const inc = aggregate(prev, [], NOW)[sig];
+  const out = aggregate(prev, [], NOW);
+  assert.equal(Object.keys(out).length, 1);
+  const [inc] = Object.values(out); // S4: re-keyed from its sample (request_id no longer part of the signature)
   assert.equal(inc.kind, 'human');
   assert.match(inc.runbook, /credential rejected \(401\)/);
-  assert.equal(inc.signature, sig);
+  assert.equal(inc.signature, signatureOf(AUTH));
   assert.equal(inc.count, 7);
   assert.deepEqual(inc.ids, ['r1', 'r2']);
   assert.match(buildDigest({ at: new Date(NOW).toISOString(), incidents: [inc] }), /credential rejected/);
@@ -96,7 +98,7 @@ test('aggregate: a stored open incident is re-classified from its sample (401 st
 
 test('aggregate: a resolved incident is not re-classified', () => {
   const prev = { s: { signature: 's', kind: 'code', runbook: 'old', sample: AUTH, count: 1, firstSeen: at(100), lastSeen: at(90), status: 'resolved', runs: [], ids: [] } };
-  assert.equal(aggregate(prev, [], NOW).s.kind, 'code');
+  assert.equal(Object.values(aggregate(prev, [], NOW))[0].kind, 'code');
 });
 
 test('classify: ENOSPC / no space left is a human disk-full incident, no retry (not transient)', () => {
