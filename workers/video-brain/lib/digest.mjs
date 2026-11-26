@@ -2,6 +2,7 @@
 // and re-reads the message as its second check). Lists only what waits on Barron and what the brain did; ≤ 1 per day.
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { FUNDS_INCIDENT } from './incidents.mjs';
 
 export const DIGEST_HOUR_PT = 7.5; // 07:30 Pacific
 export const NOTIFY_MODULE = process.env.VIDEO_BRAIN_NOTIFY_MODULE || path.join(homedir(), 'Projects', 'affiliate-os-dashboard-20260907', 'tools', 'lib', 'notify.mjs');
@@ -14,8 +15,6 @@ export function digestDue(lastDay, now = Date.now()) { const p = ptParts(now); r
 const DAY = 86_400_000;
 // stale local mirrors of Xark runs (the server copy is authoritative) are not reported or learned from
 export const STALE_MIRROR = /^local:(xk-|xark-lab$)/;
-// the OpenRouter funds cause: the balance probe, the 402/balance human incident and the budget-out line say the same thing
-const FUNDS_INCIDENT = /\b402\b|balance|credit|budget/i;
 export const SETUP_ARCHIVE_DAYS = 14;
 /** failing fields that count: advisory fields (e.g. 'pipeline review') are information, never a failure */
 export const hardFails = (c) => (c.fields || []).filter((f) => !f.pass && !f.advisory);

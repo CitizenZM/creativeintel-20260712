@@ -74,7 +74,8 @@ export interface BrainCheck {
   projectId: string;
   at: string;
   pass: boolean;
-  fields: { field: string; expected: string; actual: string; pass: boolean; source: string }[];
+  /** advisory: information only (e.g. the pipeline's own review) - never fails the check */
+  fields: { field: string; expected: string; actual: string; pass: boolean; source: string; advisory?: boolean }[];
 }
 
 export interface BrainIncident {

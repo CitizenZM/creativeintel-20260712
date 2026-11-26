@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BrainLoop, PatternHit } from "@/services/brain/contract";
-import { ageLabel, checkProject, groupPatterns, pct, projectHref, relTime, sortEvents, sortLoops, staleMessage, usd } from "./brain-format";
+import { ageLabel, checkProject, fieldChip, fieldsOk, groupPatterns, pct, projectHref, relTime, sortEvents, sortLoops, staleMessage, usd } from "./brain-format";
 import { brainFixture } from "./fixture";
 
 const NOW = Date.parse("2026-11-18T12:00:00Z");
@@ -104,5 +104,21 @@ describe("checkProject", () => {
     expect(checkProject("p1", loops)).toEqual({ name: "p1", href: null });
     expect(checkProject("batch:b1", [])).toEqual({ name: "batch:b1", href: null });
     expect(checkProject("", [])).toEqual({ name: "—", href: null });
+  });
+});
+
+describe("check fields: advisory", () => {
+  const fields = [
+    { field: "duration", expected: "15-60 s", actual: "30 s", pass: true, source: "ffprobe" },
+    { field: "pipeline review", expected: "hook & sell ≥ 5", actual: "hook 3", pass: false, source: "pipeline review", advisory: true },
+    { field: "loudness", expected: "-16 LUFS", actual: "-30", pass: false, source: "ffmpeg" },
+  ];
+  it("counts a failed advisory field as OK", () => {
+    expect(fieldsOk(fields)).toBe(2);
+  });
+  it("draws a neutral 'i' chip for a failed advisory field, ✗ only for a real failure", () => {
+    expect(fields.map((f) => fieldChip(f).label)).toEqual(["✓", "i", "✗"]);
+    expect(fieldChip(fields[1]).tone).toBe("muted");
+    expect(fieldChip(fields[2]).tone).toBe("urgent");
   });
 });

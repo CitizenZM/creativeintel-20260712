@@ -250,7 +250,10 @@ export async function handle(run, opts = {}) {
   }
   const watch = { pid: null, claim: run.claim, reclaimed: false, done: null };
   watching.set(id, watch);
-  const p = handleOnce(run, watch, opts).finally(() => { if (watching.get(id) === watch) watching.delete(id); });
+  const p = handleOnce(run, watch, opts)
+    // a throw carries the claim this watcher holds now: the watcher is gone when runLoop's onError reports it
+    .catch((e) => { if (e && typeof e === 'object' && !('claim' in e)) Object.defineProperty(e, 'claim', { value: watch.claim }); throw e; })
+    .finally(() => { if (watching.get(id) === watch) watching.delete(id); });
   watch.done = p.then(() => {}, () => {});
   return p;
 }
@@ -349,6 +352,15 @@ export async function runLoop({ claim, handle: run1, conc = CONC, once = false, 
   }
 }
 
+/** runLoop onError: report the thrown run as failed under the CURRENT claim (a reclaim by this process may have handed the
+ *  run a newer claim than the one runLoop saw; the old one is refused with 409) */
+export async function reportError(run, e) {
+  console.error('[adstudio] run failed:', e);
+  const claim = e?.claim ?? watching.get(jobIdOf(run.runId))?.claim ?? run.claim;
+  const st = await readJSON(path.join(jobDir(jobIdOf(run.runId)), 'status.json')); // what was already spent is still booked
+  await api('failed', { runId: run.runId, claim, error: String(e?.message || e), actualUsd: st?.cost, log: st?.log }).catch(() => {});
+}
+
 async function main() {
   if (!WORKER_TOKEN) { console.error('WORKER_TOKEN is required'); process.exit(1); }
   if (!APP_URL) { console.error('APP_URL is required (e.g. http://localhost:3200 for the lab, https://creative.account.xark.io for production)'); process.exit(1); }
@@ -356,11 +368,7 @@ async function main() {
     claim: async () => { const run = (await api('claim')).run; if (run) console.log(`[adstudio] ${run.phase} ${run.runId} (${run.hookType} / ${run.engine})`); return run; },
     handle,
     once: process.argv.includes('--once'),
-    onError: async (run, e) => {
-      console.error('[adstudio] run failed:', e);
-      const st = await readJSON(path.join(jobDir(jobIdOf(run.runId)), 'status.json')); // what was already spent is still booked
-      await api('failed', { runId: run.runId, claim: run.claim, error: String(e.message || e), actualUsd: st?.cost, log: st?.log }).catch(() => {});
-    },
+    onError: reportError,
   });
 }
 
