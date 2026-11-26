@@ -24,10 +24,15 @@ export const SEED = [
   L('pipeline:prompts', 'Do not ask video models for "label clearly readable": they invent text. Say "no text except the product label".', ['prompts.mjs lintScene'], 'promoted', 'pipeline/prompts.mjs'),
   L('pipeline:generate', 'Generate an empty location plate first and reuse it for every shot in that place, or people/products leak between shots (6 times in 4 jobs).', ['CAPABILITIES-20261117 §2'], 'promoted', 'pipeline/prompts.mjs location plates'),
   L('model:bytedance/seedance-1-5-pro', 'seedance-1-5-pro was retired from OpenRouter: route b-roll to seedance-2.0; probe /videos/models daily.', ['generate.mjs ROUTES 2026-11-17'], 'promoted', 'pipeline/generate.mjs ROUTES + brain probe'),
-  L('pipeline:estimate', 'Estimates covered clips only (actual 1.7-1.8x): include key frames, cast stills and re-generations in the estimate.', ['PLAN-20261117 design'], 'confirmed'),
+  L('pipeline:estimate', 'Estimates covered clips only (actual 1.7-1.8x): include key frames, cast stills and re-generations in the estimate.', ['PLAN-20261117 design'], 'retired'),
+  L('pipeline:estimate', 'The spend gate reserves the clip estimate x 1.3 (RESERVE_FACTOR); key frames ($0.04 each) are generated before the gate and booked apart, so a run may cost up to reservation + key frames.', ['lib/policy.mjs RESERVE_FACTOR', 'lib/verify.mjs cost field'], 'promoted', 'policy.ts/policy.mjs RESERVE_FACTOR + verify.mjs cost', '2026-11-26T00:00:00.000Z'),
   L('brain:patterns', 'Fix-pattern fingerprints must match the final output only: per-stem -16 LUFS normalising and 30 ms anti-pop fades were all false positives on the first scan.', ['2026-11-18 first scan: 6 of 6 hits false'], 'confirmed', null, '2026-11-18T08:50:00.000Z'),
   L('global', 'Never claim audio quality was checked by ear: the model cannot listen; report measured numbers (LUFS, LU, ms).', ['OPERATOR-SKILL rule 6'], 'promoted', 'measure.mjs'),
 ];
+
+/** seeds retired in code: they stay retired even when the server store still holds an older confirmed copy (applied after
+ *  the server merge in brain.mjs). 2026-11-26: the 1.7-1.8x estimate note steered the strategist to 1.75x budgets; policy is 1.3x. */
+export const RETIRED_SEEDS = new Set([idOf('pipeline:estimate', 'Estimates covered clips only (actual 1.7-1.8x): include key frames, cast stills and re-generations in the estimate.')]);
 
 /** videos rendered before this pipeline baseline (2026-11-17 sync/loudness/hook fixes) are reported but not learned from */
 export const PIPELINE_BASELINE = process.env.VIDEO_BRAIN_BASELINE || '2026-11-17T20:00:00.000Z';
@@ -35,6 +40,8 @@ export const PIPELINE_BASELINE = process.env.VIDEO_BRAIN_BASELINE || '2026-11-17
 /** new candidate/confirmed learnings from what the brain saw this tick */
 export function harvest({ incidents, checks, now = new Date().toISOString(), baseline = PIPELINE_BASELINE }) {
   const out = [];
+  // stale local mirrors of Xark runs (local:xk-*, local:xark-lab) are not learned from (the server copy is checked)
+  checks = Object.fromEntries(Object.entries(checks || {}).filter(([, c]) => !/^local:(xk-|xark-lab$)/.test(c.projectId || '')));
   for (const i of Object.values(incidents || {})) {
     if (i.count < 2 || i.status === 'resolved' || Date.parse(now) - Date.parse(i.lastSeen) > 7 * 86_400_000) continue;
     const rule = `Recurring failure (${i.kind}) "${i.signature}": ${i.runbook}`;

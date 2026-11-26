@@ -3,7 +3,7 @@
 // in a throw-away worktree (never the main clone: the auto-sync hook would commit it straight to main), runs the
 // pipeline's rule tests there, and opens ONE PR per content hash. Barron merges or closes it (veto); nothing merges itself.
 import { execFile } from 'node:child_process';
-import { access, appendFile, mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
+import { access, appendFile, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -61,7 +61,12 @@ export async function proposeRules(adRoot, learnings, state = {}, { directives =
     }
     if (links.length) {
       const ex = await sh('git', ['-C', wt, 'rev-parse', '--git-path', 'info/exclude']).then((r) => path.resolve(wt, r.stdout.trim())).catch(() => null);
-      if (ex) await mkdir(path.dirname(ex), { recursive: true }).then(() => appendFile(ex, links.join('\n') + '\n')).catch(() => {});
+      // the exclude file is shared by every worktree of the clone: append only the lines it does not have yet
+      if (ex) {
+        const have = new Set((await readFile(ex, 'utf8').catch(() => '')).split('\n').map((l) => l.trim()));
+        const add = links.filter((l) => !have.has(l));
+        if (add.length) await mkdir(path.dirname(ex), { recursive: true }).then(() => appendFile(ex, add.join('\n') + '\n')).catch(() => {});
+      }
     }
     step = 'write rules';
     await writeFile(path.join(wt, 'pipeline', 'brain-rules.json'), desired);

@@ -72,7 +72,7 @@ test('SP16 pick: measure loops before stalled ones', () => {
 });
 
 const C1 = 'cmw7achmt0002vritoqg6xh4d', C3 = 'cmw6n5bnn000btkitkc73qxy4', C4 = 'cmw6n6agh000ctkit3byjpn7o';
-test('DG15 digest names up to 3 failed checks with links and lists deliverables of the last 24 h', () => {
+test('DG15 digest names failed checks per project with links and lists deliverables of the last 24 h', () => {
   const at = iso(Date.now());
   const loops = [{ projectId: C1, name: 'Nike' }, { projectId: 'local:p2', name: 'Moneta (Ad Studio local)' }, { projectId: C3, name: 'TCL' }, { projectId: C4, name: 'Oufer' }];
   const bad = (projectId, field) => ({ runId: `r-${projectId}-${field}`, projectId, at, renderedAt: at, pass: false, fields: [{ field: 'url', pass: true }, { field, pass: false, actual: '1', expected: '2' }] });
@@ -80,12 +80,13 @@ test('DG15 digest names up to 3 failed checks with links and lists deliverables 
   const checks = [bad(C1, 'duration'), bad('local:p2', 'loudness'), bad(C3, 'duration'), bad(C4, 'url'), ok(C1), ok('local:p2'), ok(C3), ok(C4), ok(C4, 30)];
   const text = buildDigest({ at, loops, checks });
   assert.match(text, /近 7 天成片二次复查未通过 4 条/);
-  assert.match(text, new RegExp(`- Nike: duration → https://creative\\.xark\\.io/projects/${C1}/deliver`));
-  assert.match(text, /- Moneta \(Ad Studio local\): loudness\n/);
+  // round 4: one line per project with a count and the first failing value
+  assert.match(text, new RegExp(`- Nike（1 条）: duration 1 → https://creative\\.xark\\.io/projects/${C1}/deliver`));
+  assert.match(text, /- Moneta \(Ad Studio local\)（1 条）: loudness 1\n/);
   assert.ok(!/projects\/local:p2/.test(text));
-  assert.ok(!/- Oufer: url/.test(text), 'at most 3 named');
+  assert.match(text, /- Oufer（1 条）: url 1/, 'up to 6 projects named');
   assert.match(text, /可交付（复查通过，24 h 内）4 条/);
-  assert.equal((text.match(/\/deliver/g) || []).length, 5, '2 failed-check links + 3 deliverable links');
+  assert.equal((text.match(/\/deliver/g) || []).length, 6, '3 failed-check links + 3 deliverable links');
   const plain = buildDigest({ at, loops: [], checks: [] });
   assert.ok(!/可交付/.test(plain), 'no line when nothing to deliver');
 });
