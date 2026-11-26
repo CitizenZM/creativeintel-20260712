@@ -357,9 +357,12 @@ export interface ProgressPatch {
 }
 
 /** heartbeat + progress; the answer tells the worker to stop when the user cancelled */
-export async function reportProgress(runId: string, p: ProgressPatch & { claim?: string }) {
+export async function reportProgress(runId: string, p: ProgressPatch & { claim?: string; workerId?: string }) {
   const r = await owned(runId);
-  if (p.claim && r.workerId !== p.claim) return { cancel: true, status: "reclaimed" };
+  // a user cancel wins over a lapsed claim: a run cancelled while it sat requeued must still stop the old attempt
+  if (r.status === "cancelled") return { cancel: true, status: "cancelled" };
+  // sameWorker: this worker process already holds the newer claim (it hands the run to its running watcher, no kill)
+  if (p.claim && r.workerId !== p.claim) return { cancel: true, status: "reclaimed", sameWorker: !!p.workerId && !!r.workerId?.startsWith(`${p.workerId.slice(0, 80)}#`) };
   if (!WORKER_STATES.includes(r.status)) return { cancel: true, status: r.status };
   await prisma.adStudioRun.update({
     where: { id: runId },

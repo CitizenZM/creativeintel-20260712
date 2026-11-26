@@ -183,15 +183,22 @@ export async function runPipeline(runId, id, args, claim, { tick = TICK_MS, adop
     const sent = claimNow();
     try {
       const r = await api('progress', { runId, claim: sent, step: st?.step, progress: progressOf(st), log: st?.log?.slice(-60), plan: planOf(spec) });
-      // 'reclaimed' is not a user cancel: never kill. Handed to this watcher meanwhile (claim switched) = keep going; else stop watching
-      if (r.status === 'reclaimed') { if (sent === claimNow()) { reclaimed = true; break; } continue; }
-      if (r.cancel && !cancelled) { cancelled = true; try { kill(-pid, 'SIGTERM'); } catch { /* gone */ } }
+      // reclaimed: kept alive only when this process holds the newer claim (handed to this watcher, or about to be: sameWorker);
+      // reclaimed by another worker or not yet by anyone: stop it like a cancel, so a run is never paid for twice
+      if (r.status === 'reclaimed') { if (sent !== claimNow() || r.sameWorker) continue; reclaimed = true; }
+      else if (r.cancel && !cancelled) { cancelled = true; try { kill(-pid, 'SIGTERM'); } catch { /* gone */ } }
     } catch (e) {
-      if (/^progress: 409\b/.test(e.message) && sent === claimNow()) { reclaimed = true; break; } // a stale claim, same rule
-      console.warn('[adstudio] progress failed:', e.message);
+      if (/^progress: 409\b/.test(e.message) && sent === claimNow()) reclaimed = true; // a stale claim, same rule
+      else console.warn('[adstudio] progress failed:', e.message);
+    }
+    if (reclaimed) {
+      if (watch) watch.reclaimed = true; // a new claim of this job now waits for this pipeline to stop, then starts over
+      console.warn(`[adstudio] ${runId}: claimed elsewhere, stopping pipeline pid ${pid}`);
+      try { kill(-pid, 'SIGTERM'); } catch { /* gone */ }
+      while (running()) await sleep(tick);
+      break;
     }
   }
-  if (watch) watch.reclaimed = reclaimed;
   return { cancelled, reclaimed, code: exited?.code ?? null, signal: exited?.signal ?? null };
 }
 
@@ -235,14 +242,17 @@ async function finish(run, id, st) {
 export async function handle(run, opts = {}) {
   const id = jobIdOf(run.runId);
   const mine = watching.get(id);
+  if (mine?.reclaimed) { await mine.done; return handle(run, opts); } // its pipeline is being stopped: wait, then run it afresh
   if (mine) { // this process already runs or watches it: the new claim goes to that watcher, no second watcher
     console.log(`[adstudio] ${run.phase} ${run.runId}: reclaimed by this worker, handed to the running watcher (pid ${mine.pid ?? 'starting'})`);
     mine.claim = run.claim;
     return { action: 'handed-off' };
   }
-  const watch = { pid: null, claim: run.claim };
+  const watch = { pid: null, claim: run.claim, reclaimed: false, done: null };
   watching.set(id, watch);
-  try { return await handleOnce(run, watch, opts); } finally { if (watching.get(id) === watch) watching.delete(id); }
+  const p = handleOnce(run, watch, opts).finally(() => { if (watching.get(id) === watch) watching.delete(id); });
+  watch.done = p.then(() => {}, () => {});
+  return p;
 }
 
 async function handleOnce(run0, watch, { kill = killPid, ps = psCommand } = {}) {
@@ -283,7 +293,7 @@ async function handleOnce(run0, watch, { kill = killPid, ps = psCommand } = {}) 
       }
     }
     const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, from], run.claim, { adopt, kill, ps, watch });
-    if (watch.reclaimed) return { action: 'reclaimed' }; // claimed elsewhere: stop watching, the pipeline is left running
+    if (watch.reclaimed) return { action: 'reclaimed' }; // claimed elsewhere: pipeline stopped, the new claim reports
     const st = await readJSON(path.join(dir, 'status.json'));
     if (!cancelled && st?.state === 'done') return finish(run, id, st); // free run (stock remix): rendered without an approval stop
     if (cancelled || st?.state !== 'approval') return end(st, cancelled, signal);
@@ -300,7 +310,7 @@ async function handleOnce(run0, watch, { kill = killPid, ps = psCommand } = {}) 
       await writeFile(path.join(dir, 'job.json'), JSON.stringify({ ...job, approved: true, budget }, null, 1));
     }
     const { cancelled, signal } = await runPipeline(run.runId, id, ['pipeline/run.mjs', id, 'generate'], run.claim, { adopt, kill, ps, watch });
-    if (watch.reclaimed) return { action: 'reclaimed' }; // claimed elsewhere: stop watching, the pipeline is left running
+    if (watch.reclaimed) return { action: 'reclaimed' }; // claimed elsewhere: pipeline stopped, the new claim reports
     const st = await readJSON(path.join(dir, 'status.json'));
     if (cancelled || st?.state !== 'done') return end(st, cancelled, signal);
     return finish(run, id, st);

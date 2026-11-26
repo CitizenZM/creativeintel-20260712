@@ -318,14 +318,53 @@ test('pid reuse while adopted: when the pid stops being this job\'s run.mjs the 
   } finally { try { process.kill(-p.pid, 'SIGKILL'); } catch { /* gone */ } await done(); }
 });
 
-test('reclaimed by another worker: this watcher stops watching without killing the pipeline and sends no report', { timeout: 20000 }, async () => {
-  const server = (b) => (b.action === 'progress' ? [200, { cancel: true, status: 'reclaimed' }] : [409, { error: 'stale' }]);
+test('E: reclaimed by another worker: this watcher SIGTERMs its pipeline (no double paid run) and sends no report', { timeout: 20000 }, async () => {
+  const server = (b) => (b.action === 'progress' ? [200, { cancel: true, status: 'reclaimed', sameWorker: false }] : [409, { error: 'stale' }]);
   const { w, root, calls, done } = await adoptRig({ server });
   const id = w.jobIdOf('reclaim2'); let p;
   try {
-    p = await orphan(root, id, 8000);
+    p = await orphan(root, id, 8000); const exited = new Promise((r) => p.on('exit', (code, signal) => r(signal)));
     const r = await w.handle({ runId: 'reclaim2', phase: 'generate', claim: 'c1' });
-    assert.equal(r.action, 'reclaimed'); assert.equal(p.exitCode, null); assert.equal(p.signalCode, null);
+    assert.equal(r.action, 'reclaimed'); assert.equal(await exited, 'SIGTERM');
     assert.deepEqual(calls.map((c) => c.action).filter((a) => a !== 'progress'), []);
   } finally { try { process.kill(-p.pid, 'SIGKILL'); } catch { /* gone */ } await done(); }
+});
+
+test('F: the user cancels while the run sits requeued (server answers cancelled, not reclaimed): the pipeline is SIGTERMed', { timeout: 20000 }, async () => {
+  let S = 'generating';
+  const server = (b) => (b.action === 'progress' ? [200, S === 'cancelled' ? { cancel: true, status: 'cancelled' } : { cancel: false }] : [409, { error: 'stale' }]);
+  const { w, root, done } = await adoptRig({ server });
+  const id = w.jobIdOf('cancelq'); let p;
+  try {
+    p = await orphan(root, id, 8000); const exited = new Promise((r) => p.on('exit', (code, signal) => r(signal)));
+    const h = w.handle({ runId: 'cancelq', phase: 'generate', claim: 'c1' }).catch((e) => ({ error: e.message }));
+    await new Promise((r) => setTimeout(r, 100)); S = 'cancelled';
+    assert.equal(await exited, 'SIGTERM'); await h;
+  } finally { try { process.kill(-p.pid, 'SIGKILL'); } catch { /* gone */ } await done(); }
+});
+
+test('B: a progress tick sees "reclaimed" (nobody holds the run yet) before this worker gets it again: killed, then the new claim runs it once more and reports done once', { timeout: 20000 }, async () => {
+  let serverClaim = 'c1';
+  const server = (b) => {
+    if (b.action === 'progress') return [200, b.claim !== serverClaim ? { cancel: true, status: 'reclaimed', sameWorker: false } : { cancel: false }];
+    if (b.claim !== serverClaim) return [409, { error: 'stale' }];
+    return [200, { action: b.action }];
+  };
+  const { w, calls, spawns, dir, done } = await adoptRig({ server });
+  const id = w.jobIdOf('reclaimB');
+  try {
+    await mkdir(dir(id), { recursive: true }); await writeFile(path.join(dir(id), 'job.json'), JSON.stringify({ id, budget: 6 }));
+    process.env.FAKE_MS = '3000';
+    const first = w.handle({ runId: 'reclaimB', phase: 'generate', claim: 'c1' });
+    for (let i = 0; i < 100 && (await spawns()).length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    process.env.FAKE_MS = '300';
+    serverClaim = null; // requeued
+    const n0 = calls.length; for (let i = 0; i < 200 && !calls.slice(n0).some((c) => c.action === 'progress'); i++) await new Promise((r) => setTimeout(r, 5));
+    serverClaim = 'c2';
+    const second = await w.handle({ runId: 'reclaimB', phase: 'generate', claim: 'c2' });
+    const r1 = await first;
+    assert.equal(r1.action, 'reclaimed'); assert.equal(second.action, 'done');
+    assert.equal((await spawns()).length, 2, 'the killed run and the re-run');
+    assert.deepEqual(calls.filter((c) => c.action !== 'progress').map((c) => `${c.action}:${c.claim}`), ['done:c2']);
+  } finally { delete process.env.FAKE_MS; await done(); }
 });
