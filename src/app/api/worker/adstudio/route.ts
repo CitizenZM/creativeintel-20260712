@@ -5,7 +5,7 @@
  * POST body (one of):
  *   { action: "claim",    workerId }                                   -> { run: {runId, phase, hookType, engine, planFromRunId, input, claim, estUsd, reserveUsd} | null }
  *   Every later report carries `claim` (the lease id from the claim); a report from an older claim of the same run is refused.
- *   { action: "progress", workerId, runId, step?, progress?, log?, plan?, storyboardAB? }   -> { cancel }
+ *   { action: "progress", workerId, runId, step?, progress?, log?, plan?, storyboardAB? }   -> { cancel, status?, sameWorker? }
  *   { action: "gate",     workerId, runId, estimate, plan?, storyboardAB?, preUsd?, log? } -> { cancel }
  *   { action: "done",     workerId, runId, finalMp4Url, posterUrl?, review?, metrics?, autofix?, plan?, actualUsd?, log? }
  *   { action: "failed",   workerId, runId, error, cancelled?, actualUsd?, log? }

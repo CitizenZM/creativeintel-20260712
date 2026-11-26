@@ -89,9 +89,29 @@ describe("claim lease", () => {
     db.runs.get("r1")!.heartbeatAt = new Date(Date.now() - STALE_MS - 1000); // upload took too long
     const second = await claimNext("mac-1");
     expect(second?.claim).not.toBe(first?.claim);
-    expect(await reportProgress("r1", { claim: first!.claim! })).toEqual({ cancel: true, status: "reclaimed" });
+    expect(await reportProgress("r1", { claim: first!.claim!, workerId: "mac-1" })).toEqual({ cancel: true, status: "reclaimed", sameWorker: true });
+    expect(await reportProgress("r1", { claim: first!.claim!, workerId: "mac-2" })).toEqual({ cancel: true, status: "reclaimed", sameWorker: false });
     await expect(reportDone("r1", { claim: first!.claim!, finalMp4Url: "u" })).rejects.toThrow(/no longer/);
     await expect(reportDone("r1", { claim: second!.claim!, finalMp4Url: "u", actualUsd: 1.1 })).resolves.toMatchObject({ status: "completed" });
+  });
+});
+
+describe("cancel while requeued", () => {
+  it("a run the user cancelled while it sat requeued (no claim) tells the old attempt to stop as a cancel, not a reclaim", async () => {
+    put({ id: "r1", status: "approved", approvedAt: new Date(), projectId: "p1" });
+    const first = await claimNext("mac-1");
+    db.runs.get("r1")!.heartbeatAt = new Date(Date.now() - STALE_MS - 1000); // Mac asleep
+    await requeueStale();
+    expect(db.runs.get("r1")).toMatchObject({ status: "approved", workerId: null });
+    await cancelRun("p1", "r1");
+    expect(await reportProgress("r1", { claim: first!.claim!, workerId: "mac-1" })).toEqual({ cancel: true, status: "cancelled" });
+  });
+  it("a requeued run nobody holds yet is reclaimed, not the same worker's", async () => {
+    put({ id: "r1", status: "approved", approvedAt: new Date() });
+    const first = await claimNext("mac-1");
+    db.runs.get("r1")!.heartbeatAt = new Date(Date.now() - STALE_MS - 1000);
+    await requeueStale();
+    expect(await reportProgress("r1", { claim: first!.claim!, workerId: "mac-1" })).toEqual({ cancel: true, status: "reclaimed", sameWorker: false });
   });
 });
 
