@@ -25,7 +25,8 @@ export function pick(loops, memo, now = Date.now(), max = MAX_PER_DAY) {
   const day = new Date(now).toISOString().slice(0, 10);
   const used = Object.values(memo || {}).filter((m) => m.day === day).length;
   const due = loops.filter((l) => (l.status === 'idle-defect' || l.step === 'measure') && !(memo?.[l.projectId] && now - Date.parse(memo[l.projectId].at) < (memo[l.projectId].error ? ERROR_RETRY_MS : FRESH_MS)));
-  return due.slice(0, Math.max(0, max - used));
+  // measure loops first: learning from real ad data beats nudging a stalled project when calls are capped
+  return due.sort((a, b) => (b.step === 'measure') - (a.step === 'measure')).slice(0, Math.max(0, max - used));
 }
 
 export function promptFor(loop, obs, learnings) {
@@ -63,11 +64,23 @@ export async function runClaude(prompt, { model = 'sonnet', timeoutMs = 240_000,
   });
 }
 
-/** apply fresh strategist memos to loops (pure) */
+const LINK_RE = / → https:\/\/creative\.xark\.io\/\S*$/;
+
+/** the memo to store for a strategist answer: brain.mjs keeps the loop step so a memo dies once the project moves on
+ *  (usage: state.strategy[l.projectId] = memoFor(l, out, now)) */
+export function memoFor(loop, out, now = Date.now()) {
+  return { at: new Date(now).toISOString(), day: new Date(now).toISOString().slice(0, 10), step: loop.step ?? null, out };
+}
+
+/** apply fresh strategist memos to loops (pure); a memo with a step applies only while the loop is still at that step
+ *  (memos without a step keep the old behaviour); the loop's creative.xark.io deep link survives the override */
 export function apply(loops, memo, now = Date.now()) {
   return loops.map((l) => {
     const m = memo?.[l.projectId];
-    if (!m || now - Date.parse(m.at) >= FRESH_MS) return l;
-    return { ...l, agent: m.out.owner || l.agent, nextAction: m.out.nextAction, verifyHow: m.out.verifyHow, nextCheckpointAt: new Date(Date.parse(m.at) + Math.min(72, Math.max(1, m.out.checkpointHours)) * 3_600_000).toISOString(), doing: `${l.doing} · strategist: ${m.out.hypothesis}` };
+    if (!m || !m.out || now - Date.parse(m.at) >= FRESH_MS) return l;
+    if (m.step != null && m.step !== l.step) return l;
+    const link = String(l.nextAction || '').match(LINK_RE)?.[0];
+    const nextAction = link && !String(m.out.nextAction).includes('https://creative.xark.io') ? `${m.out.nextAction}${link}` : m.out.nextAction;
+    return { ...l, agent: m.out.owner || l.agent, nextAction, verifyHow: m.out.verifyHow, nextCheckpointAt: new Date(Date.parse(m.at) + Math.min(72, Math.max(1, m.out.checkpointHours)) * 3_600_000).toISOString(), doing: `${l.doing} · strategist: ${m.out.hypothesis}` };
   });
 }
