@@ -22,7 +22,9 @@ export function budgetOut(state: BudgetState | null | undefined, now = Date.now(
 
 /** pure: the run input with the budget fallback applied (or unchanged). Stock remix is already $0 and is left alone. */
 export function applyBudgetMode<T extends BudgetInput>(input: T, out: boolean, enabled: boolean, engine: string): { input: T; changed: boolean } {
-  if (!enabled || !out || engine === "remix" || input.visualMode === "slides") return { input, changed: false };
+  if (!enabled || !out || engine === "remix" || (input.visualMode === "slides" && input.zeroCost)) return { input, changed: false };
+  // a paid slides run (AI key frames) is made $0 too; requestedVisualMode keeps the upgrade path (an existing one wins)
+  if (input.visualMode === "slides") return { input: { ...input, zeroCost: true, fallback: "budget", requestedVisualMode: input.requestedVisualMode ?? "slides" }, changed: true };
   return { input: { ...input, visualMode: "slides", fallback: "budget", zeroCost: true, requestedVisualMode: input.visualMode ?? "video" }, changed: true };
 }
 

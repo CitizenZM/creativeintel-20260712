@@ -176,6 +176,23 @@ describe("budget fallback (Barron 2026-11-18: no model budget -> slides; budget 
     put({ id: "q3", status: "queued", engine: "kling3", input: { visualMode: "video" } });
     expect((await claimNext("mac-1"))?.input).toMatchObject({ visualMode: "video" });
   });
+  it("a slides run without zeroCost is made $0 while the budget is out; an already-$0 slides run is left alone", async () => {
+    const { applyBudgetMode } = await import("./adstudio-budget");
+    const a = applyBudgetMode({ visualMode: "slides" }, true, true, "kling3");
+    expect(a.changed).toBe(true);
+    expect(a.input).toMatchObject({ visualMode: "slides", zeroCost: true, fallback: "budget", requestedVisualMode: "slides" });
+    expect(applyBudgetMode({ visualMode: "slides", zeroCost: true }, true, true, "kling3").changed).toBe(false);
+    expect(applyBudgetMode({ visualMode: "slides", requestedVisualMode: "video" }, true, true, "kling3").input.requestedVisualMode).toBe("video");
+    expect(applyBudgetMode({ visualMode: "slides" }, false, true, "kling3").changed).toBe(false);
+    expect(applyBudgetMode({ visualMode: "slides" }, true, true, "remix").changed).toBe(false);
+  });
+  it("claim: a queued paid slides run while the budget is out is claimed and stored as $0 slides", async () => {
+    db.settings.set("brain:budget", { out: true, at: new Date().toISOString() });
+    put({ id: "s1", status: "queued", engine: "kling3", input: { visualMode: "slides" } });
+    const c = await claimNext("mac-1");
+    expect(c?.input).toMatchObject({ visualMode: "slides", zeroCost: true, fallback: "budget" });
+    expect(db.runs.get("s1")!.input).toMatchObject({ zeroCost: true, fallback: "budget" });
+  });
 });
 
 describe("retry cap for $0 budget-fallback runs", () => {
