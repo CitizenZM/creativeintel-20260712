@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type AsRow = { id: string; projectId: string; status: string; finalMp4Url: string | null; hookType: string; engine: string; plan: unknown; input: unknown; updatedAt: Date };
 
-const h = vi.hoisted(() => ({ adStudio: [] as AsRow[] }));
+const h = vi.hoisted(() => ({ adStudio: [] as AsRow[], libtv: [] as unknown[] }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     project: { findUnique: async ({ where }: { where: { id: string } }) => (where.id === "p1" ? { id: "p1", name: "Spring", brandName: "Moneta", brand: null, campaignGoal: null } : null) },
     script: { findMany: async () => [] },
     storyboard: { findMany: async () => [] },
-    libtvRun: { findMany: async () => [] },
+    libtvRun: { findMany: async () => h.libtv },
     adStudioRun: {
       // honours the same filters the deliver page uses: project, completed, has a final MP4
       findMany: async ({ where }: { where: { projectId: string; status: string; finalMp4Url: { not: null } } }) =>
@@ -37,6 +37,7 @@ const run = (o: Partial<AsRow>): AsRow => ({
 
 beforeEach(() => {
   h.adStudio = [];
+  h.libtv = [];
 });
 
 describe("GET /api/projects/[projectId]/export — Ad Studio videos", () => {
@@ -86,6 +87,25 @@ describe("GET /api/projects/[projectId]/export — Ad Studio videos", () => {
     h.adStudio = [run({ finalMp4Url: "https://cdn.example.com/as/ok.mp4?v=1&sig=a" })];
     const zip = await unzipText(await get());
     expect(zip).toContain('<a href="https://cdn.example.com/as/ok.mp4?v=1&amp;sig=a">MP4</a>');
+  });
+
+  const libtvRun = (canvasUrl: string | null) => ({
+    id: "lr1", scriptId: "s1", storyboardId: "sb1", canvasUuid: "u1", canvasUrl, imageModel: "img", videoModel: "vid",
+    aspectRatio: "9:16", clipDurationSec: 5, creditsSpent: 0, completedAt: null,
+    masterMp4Url: null, previewMp4Url: null, contactSheetUrl: null, jobs: [],
+  });
+
+  it("does not link a non-http LibTV canvasUrl (javascript: is never clickable)", async () => {
+    h.libtv = [libtvRun("javascript:alert(1)")];
+    const zip = await unzipText(await get());
+    expect(zip).not.toContain('href="javascript:');
+    expect(zip).not.toContain("Open in LibTV");
+  });
+
+  it("keeps an https LibTV canvasUrl link", async () => {
+    h.libtv = [libtvRun("https://www.liblib.tv/canvas?projectId=u1")];
+    const zip = await unzipText(await get());
+    expect(zip).toContain('<a href="https://www.liblib.tv/canvas?projectId=u1">Open in LibTV</a>');
   });
 
   it("still 404s for an unknown project", async () => {

@@ -163,7 +163,7 @@ async function unguardedGET(
         run.masterMp4Url && hosted(run.masterMp4Url) ? `<a href="${esc(run.masterMp4Url)}">Master MP4</a>` : "",
         run.previewMp4Url && hosted(run.previewMp4Url) ? `<a href="${esc(run.previewMp4Url)}">720p preview</a>` : "",
         run.contactSheetUrl && hosted(run.contactSheetUrl) ? `<a href="${esc(run.contactSheetUrl)}">Contact sheet</a>` : "",
-        run.canvasUrl ? `<a href="${esc(run.canvasUrl)}">Open in LibTV</a>` : "",
+        hosted(run.canvasUrl) ? `<a href="${esc(run.canvasUrl)}">Open in LibTV</a>` : "",
       ]
         .filter(Boolean)
         .join(" · ");
